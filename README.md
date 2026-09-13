@@ -318,6 +318,7 @@ and a second sync writes nothing. Pass `--no-sync-config` to skip it.
 | **Antigravity CLI** | OAuth: `~/.gemini/antigravity-cli/antigravity-oauth-token` (+ `~/.gemini/google_accounts.json`) | `agy` interactive (Google OAuth) |
 | **Gemini CLI** (legacy) | OAuth: `~/.gemini/settings.json` (+ `oauth_creds.json`) • API key: `~/.gemini/.env` | `gemini` interactive |
 | **Grok Build** (xAI) | OAuth/OIDC: `~/.grok/auth.json` (+ `~/.grok/config.toml`); respects `GROK_HOME` | `grok login` (browser OIDC) |
+| **Kimi Code** (Moonshot AI) | OAuth: `~/.kimi-code/credentials/kimi-code.json`; respects `KIMI_CODE_HOME` | `/login` inside `kimi` (device flow) |
 
 ### Claude Code (Claude Max)
 
@@ -366,6 +367,25 @@ and a second sync writes nothing. Pass `--no-sync-config` to skip it.
 **Login Command:** Start `gemini`, select "Login with Google" or use `/auth` to switch modes
 
 **Notes:** For CAAM, Gemini Ultra behaves like Claude Max and GPT Pro: OAuth tokens are stored locally and can be swapped instantly.
+
+### Antigravity CLI (Google)
+
+**Auth:** on a Mac, `agy` keeps its Google OAuth token in the login keychain (service `gemini`, account `antigravity`, written through go-keyring) and never creates `~/.gemini/antigravity-cli/antigravity-oauth-token`; on Linux that file is the credential. caam bridges the keychain item onto the file exactly as it does for Claude Code: `backup` mirrors it out, `activate` writes the restored token back into the item, `logout` removes it. The `gemini` provider (the legacy Gemini CLI) is a different tool and is untouched.
+
+**Identity:** no agy file records the signed-in Google account (`~/.gemini/google_accounts.json` is the Gemini CLI's and may name none), so `caam backup agy` asks Google's userinfo endpoint once and records the email in the profile's `meta.json`; `ls` and `status` read it from there. Profile detection hashes the refresh token, so Google's hourly access-token rotation does not lose the active profile.
+
+**Limits:** `caam limits agy` queries `cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota` and reports one window per model (pro → primary, flash → secondary). The token expires hourly and agy renews it when it runs; caam does not refresh it. Google's own error status travels with any 401/403 so a stale token (`UNAUTHENTICATED`) is distinguishable from a licensing or endpoint problem (`PERMISSION_DENIED`). `CAAM_AGY_QUOTA_URL` overrides the endpoint.
+
+### Kimi Code (Moonshot AI)
+
+**Auth Files:**
+- `~/.kimi-code/credentials/kimi-code.json` — plain OAuth token (`access_token`, `refresh_token`, `expires_at`); respects `KIMI_CODE_HOME`
+
+**Login Command:** start `kimi` and type `/login` (device flow). After `/logout` the CLI leaves the file behind with empty tokens; caam treats that as logged out, never as a profile.
+
+**Identity:** `caam backup kimi` asks Kimi's `/me` once and records the account in the profile's `meta.json`. Profile detection hashes the token's subject (or the refresh token), so the CLI's in-place refresh does not lose the active profile.
+
+**Limits:** `caam limits kimi` calls `GET https://api.kimi.com/coding/v1/usages` with the same device-identity headers the CLI sends (the device id is read from `~/.kimi-code/device_id`, never created) and reports the five-hour rate limit as the primary window, the weekly request allowance as the secondary, and the membership tier as the plan.
 
 ### Grok Build (xAI)
 

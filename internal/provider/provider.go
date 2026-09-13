@@ -242,6 +242,12 @@ var providerMetaRegistry = map[string]ProviderMeta{
 		AccountURL:  "https://cursor.com/settings",
 		Description: "Cursor account settings",
 	},
+	"kimi": {
+		ID:          "kimi",
+		DisplayName: "Kimi Code (Moonshot AI)",
+		AccountURL:  "https://www.kimi.com/code/console",
+		Description: "Kimi Code console",
+	},
 }
 
 // GetProviderMeta returns metadata for a provider by ID.

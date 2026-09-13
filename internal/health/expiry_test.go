@@ -1191,3 +1191,35 @@ func TestParseAgyExpiry(t *testing.T) {
 		t.Errorf("flat layout parsed as %+v", info)
 	}
 }
+
+func TestParseKimiExpiry(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", home)
+	if _, err := ParseKimiExpiry(""); !errors.Is(err, ErrNoAuthFile) {
+		t.Fatalf("no file = %v, want ErrNoAuthFile", err)
+	}
+	path := filepath.Join(home, "credentials", "kimi-code.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// The CLI's logged-out file is not a credential.
+	if err := os.WriteFile(path, []byte(`{"access_token":"","refresh_token":"","expires_at":0}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseKimiExpiry(""); !errors.Is(err, ErrNoAuthFile) {
+		t.Fatalf("logged-out file = %v, want ErrNoAuthFile", err)
+	}
+	if err := os.WriteFile(path, []byte(`{"access_token":"SYNTHETIC","refresh_token":"SYNTHETIC-RT","expires_at":1893456000,"expires_in":3600}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := ParseKimiExpiry("")
+	if err != nil {
+		t.Fatalf("ParseKimiExpiry: %v", err)
+	}
+	if info.ExpiresAt.Unix() != 1893456000 || !info.HasRefreshToken || !info.Renewable || !info.SelfRefreshing || info.Source != path {
+		t.Errorf("info = %+v", info)
+	}
+	if info2, err := ParseKimiExpiry(path); err != nil || info2.ExpiresAt != info.ExpiresAt {
+		t.Errorf("explicit path = %+v, %v", info2, err)
+	}
+}

@@ -294,6 +294,31 @@ func OpenCodeAuthFiles() AuthFileSet {
 	}
 }
 
+// KimiAuthFiles returns the auth files for Kimi Code (Moonshot AI's coding
+// CLI). The CLI keeps one plain OAuth token file at
+// $KIMI_CODE_HOME/credentials/kimi-code.json (default ~/.kimi-code/...):
+// {"access_token","refresh_token","expires_at",...}. It renews the access
+// token itself from the refresh token. A logged-out install leaves the file
+// behind with empty tokens, which HasAuthFiles and Backup treat as no login.
+func KimiAuthFiles() AuthFileSet {
+	home := strings.TrimSpace(os.Getenv("KIMI_CODE_HOME"))
+	if home == "" {
+		homeDir, _ := os.UserHomeDir()
+		home = filepath.Join(homeDir, ".kimi-code")
+	}
+	return AuthFileSet{
+		Tool: "kimi",
+		Files: []AuthFileSpec{
+			{
+				Tool:        "kimi",
+				Path:        filepath.Join(home, "credentials", "kimi-code.json"),
+				Description: "Kimi Code OAuth token (Kimi For Coding subscription)",
+				Required:    true,
+			},
+		},
+	}
+}
+
 // CursorAuthFiles returns the auth files for Cursor CLI.
 // Cursor stores config in ~/.cursor/ directory.
 func CursorAuthFiles() AuthFileSet {
@@ -342,6 +367,8 @@ func GetAuthFileSet(provider string) (AuthFileSet, bool) {
 		return OpenCodeAuthFiles(), true
 	case "cursor", "cur":
 		return CursorAuthFiles(), true
+	case "kimi", "kimi-code":
+		return KimiAuthFiles(), true
 	default:
 		return AuthFileSet{}, false
 	}
@@ -467,7 +494,7 @@ func (v *Vault) Backup(fileSet AuthFileSet, profile string) error {
 			continue
 		}
 
-		if _, err := os.Stat(spec.Path); os.IsNotExist(err) {
+		if _, err := os.Stat(spec.Path); os.IsNotExist(err) || !fileCarriesLogin(fileSet.Tool, spec.Path) {
 			if spec.Required {
 				missingRequired = append(missingRequired, spec.Path)
 			}
@@ -491,6 +518,13 @@ func (v *Vault) Backup(fileSet AuthFileSet, profile string) error {
 	}
 
 	if backedUp == 0 {
+		// A required file that exists but holds no login (Kimi's logged-out
+		// kimi-code.json, a session-less zcode record) is named as such.
+		for _, path := range missingRequired {
+			if fileExists(path) {
+				return missingRequiredBackupError(fileSet, path)
+			}
+		}
 		return fmt.Errorf("no auth files found to backup for %s; ensure you're logged in first with '%s' or 'caam add %s'", tool, tool, tool)
 	}
 	if len(missingRequired) > 0 {
@@ -696,6 +730,9 @@ func missingRequiredBackupError(fileSet AuthFileSet, path string) error {
 	if fileSet.Tool == "agy" && agyKeychainPath(fileSet) == path {
 		return fmt.Errorf("no Antigravity credential to back up: %s is absent and the login keychain holds no %q item for account %q; log in with agy, then back up again (CAAM_DEBUG=1 prints every keychain lookup)",
 			path, keychain.AgyService, keychain.AgyAccount)
+	}
+	if fileExists(path) && !fileCarriesLogin(fileSet.Tool, path) {
+		return fmt.Errorf("no %s credential to back up: %s exists but holds no login (logged out); log in with %s, then back up again", fileSet.Tool, path, fileSet.Tool)
 	}
 	return fmt.Errorf("required auth file not found: %s", path)
 }
@@ -1327,7 +1364,7 @@ func HasAuthFiles(fileSet AuthFileSet) bool {
 			}
 			continue
 		}
-		if _, err := os.Stat(spec.Path); err == nil {
+		if _, err := os.Stat(spec.Path); err == nil && fileCarriesLogin(fileSet.Tool, spec.Path) {
 			if spec.Required {
 				return true
 			}
@@ -1338,6 +1375,29 @@ func HasAuthFiles(fileSet AuthFileSet) bool {
 		return true
 	}
 	return false
+}
+
+// fileCarriesLogin reports whether an auth file that exists actually holds a
+// login. Most tools delete their file on logout; Kimi Code leaves
+// kimi-code.json behind with empty tokens, and a zcode record can hold no
+// session, so for those an existing file is checked rather than trusted.
+func fileCarriesLogin(tool, path string) bool {
+	switch tool {
+	case "kimi":
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return false
+		}
+		var creds struct {
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+		}
+		if err := json.Unmarshal(data, &creds); err != nil {
+			return true // not our shape; leave it to the caller as before
+		}
+		return strings.TrimSpace(creds.AccessToken) != "" || strings.TrimSpace(creds.RefreshToken) != ""
+	}
+	return true
 }
 
 // ClearAuthFiles removes all auth files for a tool (logout).
@@ -1687,9 +1747,67 @@ func stableFileHash(tool, path string) (string, error) {
 		return stableCodexHash(path)
 	case "agy":
 		return stableAgyHash(path)
+	case "kimi":
+		return stableKimiHash(path)
 	default:
 		return hashFile(path)
 	}
+}
+
+// stableKimiHash hashes a Kimi Code token file by the account it belongs
+// to rather than by the tokens, which the CLI rotates in place: the JWT
+// subject of the access token when it is a JWT, else the refresh token
+// (which outlives the access token), else the whole file.
+func stableKimiHash(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	var creds struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.Unmarshal(data, &creds); err != nil {
+		return hashBytes(data), nil
+	}
+	if sub := jwtSubject(creds.AccessToken); sub != "" {
+		return hashLabeled("kimi:subject:", sub), nil
+	}
+	if creds.RefreshToken != "" {
+		return hashLabeled("kimi:refresh-token:", creds.RefreshToken), nil
+	}
+	return hashBytes(data), nil
+}
+
+// hashLabeled hashes a stable identity value under a namespace label.
+func hashLabeled(label, value string) string {
+	h := sha256.New()
+	h.Write([]byte(label))
+	h.Write([]byte(value))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// jwtSubject returns the sub (or user_id) claim of a JWT, "" when the token
+// is not a JWT or carries neither.
+func jwtSubject(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	payload, err := decodeBase64Segment(parts[1])
+	if err != nil {
+		return ""
+	}
+	var claims map[string]interface{}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return ""
+	}
+	for _, key := range []string{"sub", "user_id", "uid"} {
+		if v := jsonString(claims, key); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // stableAgyHash hashes the Antigravity token file by its refresh token
@@ -2173,6 +2291,10 @@ func (v *Vault) ProfileIdentity(tool, profile string) string {
 		return v.geminiProfileIdentity(profileDir)
 	case "agy":
 		return v.agyProfileIdentity(profileDir)
+	case "kimi":
+		// The token may be opaque; `caam backup kimi` records what Kimi's
+		// /me reported.
+		return profileMetaIdentity(profileDir)
 	default:
 		return ""
 	}

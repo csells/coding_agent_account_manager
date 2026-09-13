@@ -62,6 +62,7 @@ type MultiProfileFetcher struct {
 	claudeFetcher *ClaudeFetcher
 	codexFetcher  *CodexFetcher
 	agyFetcher    *AgyFetcher
+	kimiFetcher   *KimiFetcher
 	logScanner    logs.Scanner // Optional scanner for burn rate calculation
 }
 
@@ -81,6 +82,7 @@ func NewMultiProfileFetcher(opts ...FetcherOption) *MultiProfileFetcher {
 		claudeFetcher: NewClaudeFetcher(),
 		codexFetcher:  NewCodexFetcher(),
 		agyFetcher:    NewAgyFetcher(),
+		kimiFetcher:   NewKimiFetcher(),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -137,6 +139,16 @@ func (m *MultiProfileFetcher) FetchAllProfiles(ctx context.Context, provider str
 					}
 				} else {
 					info, err = m.agyFetcher.Fetch(ctx, token)
+				}
+			case "kimi":
+				if m.kimiFetcher == nil {
+					info = &UsageInfo{
+						Provider:  provider,
+						FetchedAt: time.Now(),
+						Error:     "kimi fetcher unavailable",
+					}
+				} else {
+					info, err = m.kimiFetcher.Fetch(ctx, token)
 				}
 			default:
 				info = &UsageInfo{
@@ -380,6 +392,8 @@ func CredentialFiles(provider string) []string {
 		return []string{"auth.json"}
 	case "agy":
 		return []string{"antigravity-oauth-token"}
+	case "kimi":
+		return []string{"kimi-code.json"}
 	}
 	return nil
 }
@@ -394,6 +408,8 @@ func ReadCredentials(provider, path string) (accessToken string, accountID strin
 		return ReadCodexCredentials(path)
 	case "agy":
 		return ReadAgyCredentials(path)
+	case "kimi":
+		return ReadKimiCredentials(path)
 	}
 	return "", "", fmt.Errorf("no credential reader for provider %q", provider)
 }

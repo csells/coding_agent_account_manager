@@ -879,7 +879,49 @@ func parseAgyTokenJSON(data []byte) (*ExpiryInfo, error) {
 	return parseOAuthJSON(data)
 }
 
-// ParseAllExpiry attempts to parse expiry for all providers and returns combined results.
+// ParseKimiExpiry extracts token expiry from a Kimi Code token file —
+// authPath, or the live $KIMI_CODE_HOME/credentials/kimi-code.json when "".
+// The file is a flat OAuth token ({access_token, refresh_token, expires_at
+// in epoch seconds, ...}); the CLI renews the access token itself from the
+// refresh token, so a credential that carries one is renewable and
+// self-refreshing (caam does not refresh it). A file with empty tokens is
+// the CLI's logged-out state and reports ErrNoAuthFile.
+func ParseKimiExpiry(authPath string) (*ExpiryInfo, error) {
+	if authPath == "" {
+		home := strings.TrimSpace(os.Getenv("KIMI_CODE_HOME"))
+		if home == "" {
+			homeDir, _ := os.UserHomeDir()
+			home = filepath.Join(homeDir, ".kimi-code")
+		}
+		authPath = filepath.Join(home, "credentials", "kimi-code.json")
+	}
+	data, err := os.ReadFile(authPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrNoAuthFile
+		}
+		return nil, err
+	}
+	var probe struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, fmt.Errorf("parse JSON: %w", err)
+	}
+	if strings.TrimSpace(probe.AccessToken) == "" && strings.TrimSpace(probe.RefreshToken) == "" {
+		return nil, ErrNoAuthFile
+	}
+	info, err := parseOAuthJSON(data)
+	if err != nil {
+		return nil, err
+	}
+	info.SelfRefreshing = info.HasRefreshToken
+	info.Renewable = info.HasRefreshToken
+	info.Source = authPath
+	return info, nil
+}
+
 func ParseAllExpiry() map[string]*ExpiryInfo {
 	results := make(map[string]*ExpiryInfo)
 
@@ -894,6 +936,9 @@ func ParseAllExpiry() map[string]*ExpiryInfo {
 	}
 	if info, err := ParseAgyExpiry(""); err == nil {
 		results["agy"] = info
+	}
+	if info, err := ParseKimiExpiry(""); err == nil {
+		results["kimi"] = info
 	}
 
 	return results

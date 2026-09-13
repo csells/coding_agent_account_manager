@@ -35,6 +35,7 @@ import (
 	cursorprovider "github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider/cursor"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider/gemini"
 	grokprovider "github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider/grok"
+	kimiprovider "github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider/kimi"
 	opencodeprovider "github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider/opencode"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/tui"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
@@ -64,6 +65,7 @@ var tools = map[string]func() authfile.AuthFileSet{
 	"grok":     authfile.GrokAuthFiles,
 	"opencode": authfile.OpenCodeAuthFiles,
 	"cursor":   authfile.CursorAuthFiles,
+	"kimi":     authfile.KimiAuthFiles,
 }
 
 // supportedTools returns the auth-swap providers (the keys of the tools map),
@@ -126,6 +128,7 @@ Supported tools:
   - grok     (xAI Grok Build CLI)
   - opencode (OpenCode)
   - cursor   (Cursor CLI)
+  - kimi     (Kimi Code / Moonshot AI)
 
 Advanced: Profile isolation for simultaneous sessions:
   caam profile add codex work
@@ -163,6 +166,7 @@ Run 'caam' without arguments to launch the interactive TUI.`,
 		registry.Register(grokprovider.New())
 		registry.Register(opencodeprovider.New())
 		registry.Register(cursorprovider.New())
+		registry.Register(kimiprovider.New())
 
 		// Initialize runner
 		runner = exec.NewRunner(registry)
@@ -302,6 +306,8 @@ func buildProfileHealth(tool, profileName string) *health.ProfileHealth {
 		expInfo, err = health.ParseGeminiExpiry(vaultPath)
 	case "agy":
 		expInfo, err = health.ParseAgyExpiry(vaultPath)
+	case "kimi":
+		expInfo, err = health.ParseKimiExpiry(filepath.Join(vaultPath, "kimi-code.json"))
 	case "grok":
 		// Grok's auth.json is keyed by a dynamic "<issuer>::<client-id>" key,
 		// which the Codex parser cannot read; without its own case every Grok
@@ -355,6 +361,8 @@ func liveAuthExpiry(tool string) *health.ExpiryInfo {
 		info, err = health.ParseGeminiExpiry("")
 	case "agy":
 		info, err = health.ParseAgyExpiry("")
+	case "kimi":
+		info, err = health.ParseKimiExpiry("")
 	case "grok":
 		home, homeErr := os.UserHomeDir()
 		if homeErr != nil {
@@ -420,6 +428,8 @@ func parseLiveProfileExpiry(tool, profileName string) *health.ExpiryInfo {
 		info, err = health.ParseGeminiExpiry(filepath.Join(prof.HomePath(), ".gemini"))
 	case "agy":
 		info, err = health.ParseAgyExpiry(filepath.Join(prof.HomePath(), ".gemini", "antigravity-cli"))
+	case "kimi":
+		info, err = health.ParseKimiExpiry(filepath.Join(prof.HomePath(), ".kimi-code", "credentials", "kimi-code.json"))
 	case "grok":
 		info, err = health.ParseGrokExpiry(filepath.Join(prof.HomePath(), ".grok", "auth.json"))
 	default:
@@ -477,6 +487,13 @@ func getVaultIdentity(tool, profileName string) *identity.Identity {
 		}
 	case "agy":
 		id, err := identity.ExtractFromAgyProfile(vaultPath)
+		if err != nil {
+			return nil
+		}
+		normalizeIdentityPlan(id)
+		return id
+	case "kimi":
+		id, err := identity.ExtractFromKimiCredentials(filepath.Join(vaultPath, "kimi-code.json"))
 		if err != nil {
 			return nil
 		}
@@ -848,18 +865,19 @@ func runBackup(cmd *cobra.Command, args []string) error {
 	output.Success = true
 	output.Path = vault.ProfilePath(tool, profileName)
 
-	// The Antigravity token carries no identity and no agy file records the
-	// signed-in Google account, so ask Google once, now, and keep the answer
-	// with the snapshot. Best-effort: offline, the profile is still captured.
+	// Antigravity's token and Kimi's carry no identity and no file of
+	// theirs records the signed-in account, so ask the service once, now,
+	// and keep the answer with the snapshot. Best-effort: offline, the
+	// profile is still captured.
 	identityNote := ""
-	if tool == "agy" {
-		if email, err := resolveAgyIdentity(cmd.Context()); err == nil {
+	if tool == "agy" || tool == "kimi" {
+		if email, err := resolveProfileIdentity(cmd.Context(), tool); err == nil {
 			if err := vault.RecordProfileIdentity(tool, profileName, email); err == nil {
 				output.Identity = email
 				identityNote = email
 			}
 		} else if !jsonOutput {
-			fmt.Fprintf(os.Stderr, "Warning: could not resolve the Google account for this profile: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: could not resolve the account for this profile: %v\n", err)
 		}
 	}
 
@@ -877,23 +895,30 @@ func runBackup(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// resolveAgyIdentity asks Google which account the live Antigravity token
-// belongs to (userinfo, with the token in the Authorization header).
-func resolveAgyIdentity(ctx context.Context) (string, error) {
+// resolveProfileIdentity asks the tool's service which account the live
+// credential belongs to: Google's userinfo for Antigravity, Kimi's /me for
+// Kimi Code. The token travels in the Authorization header.
+func resolveProfileIdentity(ctx context.Context, tool string) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	path := liveCredentialPath("agy")
+	path := liveCredentialPath(tool)
 	if path == "" {
-		return "", fmt.Errorf("no live Antigravity credential path")
+		return "", fmt.Errorf("no live %s credential path", tool)
 	}
-	token, _, err := usage.ReadCredentials("agy", path)
+	token, _, err := usage.ReadCredentials(tool, path)
 	if err != nil {
 		return "", err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	return usage.NewAgyFetcher().AgyUserInfo(ctx, token)
+	switch tool {
+	case "agy":
+		return usage.NewAgyFetcher().AgyUserInfo(ctx, token)
+	case "kimi":
+		return usage.NewKimiFetcher().KimiUserInfo(ctx, token)
+	}
+	return "", fmt.Errorf("no identity lookup for %s", tool)
 }
 
 // statusOutput is the JSON output structure for status command.
@@ -933,7 +958,7 @@ type statusHealth struct {
 // so a logged-in tool is never silently missing from the active-account view;
 // a tool with no auth reads "(not logged in)".
 func statusTools() []string {
-	preferred := []string{"codex", "claude", "gemini", "agy", "grok", "opencode", "cursor"}
+	preferred := []string{"codex", "claude", "gemini", "agy", "grok", "opencode", "cursor", "kimi"}
 	seen := make(map[string]bool, len(preferred))
 	var out []string
 	for _, tool := range preferred {
