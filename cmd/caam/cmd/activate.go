@@ -283,19 +283,140 @@ func runActivate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	force, _ := cmd.Flags().GetBool("force")
+	backupFirst, _ := cmd.Flags().GetBool("backup-current")
+	reloadDaemon, _ := cmd.Flags().GetBool("reload-daemon")
+
+	res, err := performSwitch(cmd.Context(), fileSet, profileName, previousProfile, source, spmCfg, db, switchOptions{
+		Force:         force,
+		BackupCurrent: backupFirst,
+		ReloadDaemon:  reloadDaemon,
+		Quiet:         jsonOutput,
+	})
+	if err != nil {
+		return emitJSONError(err)
+	}
+	output.Refreshed = res.Refreshed
+	output.AutoBackup = res.AutoBackup
+	if res.CodexDaemon.Detected {
+		dw := res.CodexDaemon
+		output.CodexDaemon = &dw
+	}
+
+	output.Profile = profileName
+	output.Success = true
+
+	if jsonOutput {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(output)
+	}
+
+	fmt.Printf("Activated %s profile '%s'\n", tool, profileName)
+	fmt.Printf("  Run '%s' to start using this account\n", tool)
+	printCodexDaemonWarning(cmd.ErrOrStderr(), res.CodexDaemon)
+	return nil
+}
+
+// switchOptions tunes performSwitch. Quiet suppresses the progress lines
+// (JSON mode, or a caller that owns the terminal, such as the monitor
+// dashboard) and skips the interactive stealth delay.
+type switchOptions struct {
+	// Force proceeds past a cooldown and past a failed re-capture of the
+	// outgoing profile.
+	Force bool
+	// BackupCurrent always snapshots the live state before switching.
+	BackupCurrent bool
+	// ReloadDaemon SIGTERMs a running codex app-server/mcp-server so the
+	// switched auth takes effect for daemon-backed sessions.
+	ReloadDaemon bool
+	// Quiet suppresses progress output and the stealth delay.
+	Quiet bool
+}
+
+// switchResult reports what performSwitch did on the way to installing the
+// incoming profile.
+type switchResult struct {
+	PreviousProfile string
+	Refreshed       bool
+	AutoBackup      string
+	// Recaptured is true when the outgoing profile's vault copy was refreshed
+	// from the live credential before it was overwritten.
+	Recaptured bool
+	// RecaptureWarning holds the re-capture failure when Force carried the
+	// switch past it.
+	RecaptureWarning string
+	CodexDaemon      codexDaemonWarning
+}
+
+// switchProfile makes profileName the active profile for tool, from a cold
+// start: it resolves the file set, preserves the pre-caam state on first use,
+// loads config, refuses a profile in cooldown unless forced, and then runs
+// performSwitch. It is the non-interactive entry point the monitor dashboard
+// uses; `caam activate` does the same work inline because it also resolves
+// aliases, rotation and interactive cooldown prompts on the way.
+func switchProfile(ctx context.Context, tool, profileName string, opts switchOptions) (*switchResult, error) {
+	tool = strings.ToLower(strings.TrimSpace(tool))
+	getFileSet, ok := tools[tool]
+	if !ok {
+		return nil, fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList())
+	}
+	if vault == nil {
+		vault = authfile.NewVault(authfile.DefaultVaultPath())
+	}
+	fileSet := getFileSet()
+	previousProfile, _ := vault.ActiveProfile(fileSet)
+
+	if _, err := vault.BackupOriginal(fileSet); err != nil {
+		return nil, fmt.Errorf("backup original auth: %w", err)
+	}
+
+	spmCfg, err := config.LoadSPMConfig()
+	if err != nil {
+		spmCfg = config.DefaultSPMConfig()
+	}
+
+	var db *caamdb.DB
+	if spmCfg.Analytics.Enabled || spmCfg.Stealth.Cooldown.Enabled {
+		db, _ = getDB()
+	}
+
+	if spmCfg.Stealth.Cooldown.Enabled && db != nil && !opts.Force {
+		now := time.Now().UTC()
+		if ev, err := db.ActiveCooldown(tool, profileName, now); err == nil && ev != nil {
+			remaining := time.Until(ev.CooldownUntil)
+			if remaining < 0 {
+				remaining = 0
+			}
+			return nil, fmt.Errorf("%s/%s is in cooldown (%s remaining)", tool, profileName, formatDurationShort(remaining))
+		}
+	}
+
+	return performSwitch(ctx, fileSet, profileName, previousProfile, "", spmCfg, db, opts)
+}
+
+// performSwitch is the switch itself, shared by `caam activate` and the
+// monitor dashboard once the profile name is settled: refresh the incoming
+// token if it is about to expire, auto-backup unsaved live state, re-capture
+// the outgoing profile, wait out the stealth delay, restore, and reload the
+// codex daemon on request.
+func performSwitch(ctx context.Context, fileSet authfile.AuthFileSet, profileName, previousProfile, source string, spmCfg *config.SPMConfig, db *caamdb.DB, opts switchOptions) (*switchResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	tool := fileSet.Tool
+	quiet := opts.Quiet
+	res := &switchResult{PreviousProfile: previousProfile}
+
 	// Step 1: Refresh if needed
-	refreshed := refreshIfNeeded(cmd.Context(), tool, profileName, jsonOutput)
-	output.Refreshed = refreshed
+	res.Refreshed = refreshIfNeeded(ctx, tool, profileName, quiet)
 
 	// Smart auto-backup before switch (based on safety config)
 	backupMode := strings.TrimSpace(spmCfg.Safety.AutoBackupBeforeSwitch)
 	if backupMode == "" {
 		backupMode = "smart" // Default
 	}
-
-	// Check if --backup-current flag overrides config
-	backupFirst, _ := cmd.Flags().GetBool("backup-current")
-	if backupFirst {
+	if opts.BackupCurrent {
 		backupMode = "always"
 	}
 
@@ -315,19 +436,19 @@ func runActivate(cmd *cobra.Command, args []string) error {
 		if shouldBackup {
 			backupName, err := vault.BackupCurrent(fileSet)
 			if err != nil {
-				if !jsonOutput {
+				if !quiet {
 					fmt.Printf("Warning: could not auto-backup current state: %v\n", err)
 				}
 			} else if backupName != "" {
-				output.AutoBackup = backupName
-				if !jsonOutput {
+				res.AutoBackup = backupName
+				if !quiet {
 					fmt.Printf("Auto-backed up current state to %s\n", backupName)
 				}
 
 				// Rotate old backups if limit is set
 				if spmCfg.Safety.MaxAutoBackups > 0 {
 					if err := vault.RotateAutoBackups(tool, spmCfg.Safety.MaxAutoBackups); err != nil {
-						if !jsonOutput {
+						if !quiet {
 							fmt.Printf("Warning: could not rotate old backups: %v\n", err)
 						}
 					}
@@ -348,21 +469,24 @@ func runActivate(cmd *cobra.Command, args []string) error {
 	// --force proceeds regardless.
 	if outgoing, _ := vault.ActiveProfile(fileSet); outgoing != "" && outgoing != profileName {
 		if err := vault.ResnapshotOutgoing(fileSet, outgoing, profileName); err != nil {
-			force, _ := cmd.Flags().GetBool("force")
-			if !force {
-				return emitJSONError(fmt.Errorf("could not re-capture the outgoing profile %s before switching: %w (the vault would be left with a stale copy of its credential; fix the cause, or re-run with --force to switch anyway)", outgoing, err))
+			if !opts.Force {
+				return nil, fmt.Errorf("could not re-capture the outgoing profile %s before switching: %w (the vault would be left with a stale copy of its credential; fix the cause, or re-run with --force to switch anyway)", outgoing, err)
 			}
-			if !jsonOutput {
-				fmt.Printf("Warning: could not re-snapshot outgoing profile %s: %v (proceeding due to --force)\n", outgoing, err)
+			res.RecaptureWarning = fmt.Sprintf("could not re-snapshot outgoing profile %s: %v (proceeding due to --force)", outgoing, err)
+			if !quiet {
+				fmt.Printf("Warning: %s\n", res.RecaptureWarning)
 			}
-		} else if !jsonOutput {
-			fmt.Printf("Re-captured outgoing profile %s (token rotation safety)\n", outgoing)
+		} else {
+			res.Recaptured = true
+			if !quiet {
+				fmt.Printf("Re-captured outgoing profile %s (token rotation safety)\n", outgoing)
+			}
 		}
 	}
 
 	// Stealth: optional delay before the actual switch happens.
-	// Skip stealth delay in JSON mode as it's for interactive use
-	if spmCfg.Stealth.SwitchDelay.Enabled && !jsonOutput {
+	// Skip stealth delay in quiet mode as it's for interactive use
+	if spmCfg.Stealth.SwitchDelay.Enabled && !quiet {
 		delay, err := stealth.ComputeDelay(spmCfg.Stealth.SwitchDelay.MinSeconds, spmCfg.Stealth.SwitchDelay.MaxSeconds, nil)
 		if err != nil {
 			fmt.Printf("Warning: invalid stealth.switch_delay config: %v\n", err)
@@ -379,11 +503,11 @@ func runActivate(cmd *cobra.Command, args []string) error {
 				case <-sigCh:
 					close(skip)
 				case <-stop:
-				case <-cmd.Context().Done():
+				case <-ctx.Done():
 				}
 			}()
 
-			skipped, waitErr := stealth.Wait(cmd.Context(), delay, stealth.WaitOptions{
+			skipped, waitErr := stealth.Wait(ctx, delay, stealth.WaitOptions{
 				Output:        os.Stdout,
 				Skip:          skip,
 				ShowCountdown: spmCfg.Stealth.SwitchDelay.ShowCountdown,
@@ -393,7 +517,7 @@ func runActivate(cmd *cobra.Command, args []string) error {
 			signal.Stop(sigCh)
 
 			if waitErr != nil {
-				return fmt.Errorf("stealth delay: %w", waitErr)
+				return nil, fmt.Errorf("stealth delay: %w", waitErr)
 			}
 			if skipped {
 				fmt.Println("Skipping delay...")
@@ -403,19 +527,14 @@ func runActivate(cmd *cobra.Command, args []string) error {
 
 	// Restore from vault
 	if err := vault.Restore(fileSet, profileName); err != nil {
-		return emitJSONError(fmt.Errorf("activate failed: %w", err))
+		return nil, fmt.Errorf("activate failed: %w", err)
 	}
 
 	// Codex daemon check: swapping auth.json on disk does not affect a running
 	// `codex app-server`/`mcp-server`, which caches auth in-process. Detect it
 	// and warn (or, with --reload-daemon, restart it) so the switch isn't a
 	// silent no-op for daemon-backed sessions. See issue #21.
-	reloadDaemon, _ := cmd.Flags().GetBool("reload-daemon")
-	daemonWarn := checkCodexDaemon(tool, reloadDaemon)
-	if daemonWarn.Detected {
-		dw := daemonWarn
-		output.CodexDaemon = &dw
-	}
+	res.CodexDaemon = checkCodexDaemon(tool, opts.ReloadDaemon)
 
 	if spmCfg.Analytics.Enabled && db != nil {
 		logProfileSwitch(db, tool, previousProfile, profileName, map[string]any{
@@ -424,19 +543,7 @@ func runActivate(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	output.Profile = profileName
-	output.Success = true
-
-	if jsonOutput {
-		enc := json.NewEncoder(cmd.OutOrStdout())
-		enc.SetIndent("", "  ")
-		return enc.Encode(output)
-	}
-
-	fmt.Printf("Activated %s profile '%s'\n", tool, profileName)
-	fmt.Printf("  Run '%s' to start using this account\n", tool)
-	printCodexDaemonWarning(cmd.ErrOrStderr(), daemonWarn)
-	return nil
+	return res, nil
 }
 
 // logProfileSwitch records analytics events for a profile switch. When moving
