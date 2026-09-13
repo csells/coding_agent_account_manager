@@ -16,6 +16,7 @@ import (
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/monitor"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -25,23 +26,40 @@ var monitorCmd = &cobra.Command{
 	Short: "Live usage monitoring across profiles",
 	Long: `Monitor profile usage in real-time with multiple output formats.
 
+In a terminal, table mode is an interactive dashboard: one row per captured
+account, one column per rate-limit window (5-hour, weekly, per-model weekly,
+and whatever else the provider reports) showing the share LEFT and the local
+reset time, a * on each provider's active account, and a STATUS column. It
+refreshes on the interval and on demand. Refreshing only presents the access
+token caam already holds; it never refreshes or rewrites a credential, so
+leaving it running cannot disturb a rotating refresh-token family.
+
+Select a row and press Enter to switch that provider to that account. The
+switch goes through the same path as 'caam activate': the outgoing account is
+re-captured into the vault first, and a failed re-capture aborts the switch.
+Sessions already running keep their current login (codex until it restarts,
+or --reload-daemon; Claude Code until its next token refresh).
+
 Output formats:
-  table  - Rich ASCII table for interactive terminal use (default)
+  table  - Interactive dashboard in a terminal; a plain ASCII table when piped
   brief  - One-line summary for tmux/status bar integration
   json   - Machine-readable JSON for scripting
   alerts - Alert-only mode for logging (outputs only when thresholds crossed)
 
 Examples:
-  caam monitor                              # Interactive monitor
+  caam monitor                              # Interactive dashboard
+  caam monitor --interval 2m                # Poll less often
+  caam monitor --reload-daemon              # A codex switch also reloads its daemon
   caam monitor --format brief --once        # tmux status bar integration
   caam monitor --format alerts --threshold 80  # Alert mode
   caam monitor --format json --once | jq .  # JSON output for scripting
   caam monitor --provider claude            # Monitor specific provider
-  caam monitor --interval 10s               # Faster refresh rate
 
-Keyboard shortcuts (table mode):
-  r - Refresh immediately
-  q - Quit`,
+Keyboard shortcuts (dashboard):
+  up/down, j/k - Select a row
+  enter        - Switch to the selected account (asks first)
+  r            - Refresh now
+  q            - Quit`,
 	RunE: runMonitor,
 }
 
@@ -49,12 +67,13 @@ func init() {
 	rootCmd.AddCommand(monitorCmd)
 
 	monitorCmd.Flags().DurationP("interval", "i", 30*time.Second, "refresh interval")
-	monitorCmd.Flags().StringSliceP("provider", "p", nil, "providers to monitor (default: all)")
+	monitorCmd.Flags().StringSliceP("provider", "p", nil, "providers to monitor (default: every provider with a usage API)")
 	monitorCmd.Flags().StringP("format", "f", "table", "output format: table, brief, json, alerts")
 	monitorCmd.Flags().Float64P("threshold", "t", 80.0, "alert threshold percentage")
 	monitorCmd.Flags().BoolP("once", "1", false, "fetch once and exit")
 	monitorCmd.Flags().Bool("no-emoji", false, "disable emoji in table output")
 	monitorCmd.Flags().IntP("width", "w", 75, "table width")
+	monitorCmd.Flags().Bool("reload-daemon", false, "for codex: when switching from the dashboard, SIGTERM a running codex app-server/mcp-server so the switched auth takes effect")
 }
 
 func runMonitor(cmd *cobra.Command, args []string) error {
@@ -75,10 +94,11 @@ func runMonitor(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid format %q: must be table, brief, json, or alerts", format)
 	}
 
-	// Default providers
+	// Default providers: the ones with a usage API.
 	if len(providers) == 0 {
-		providers = []string{"claude", "codex", "gemini", "opencode", "cursor"}
+		providers = append([]string(nil), monitor.DefaultProviders...)
 	}
+	reloadDaemon, _ := cmd.Flags().GetBool("reload-daemon")
 
 	// Create renderer based on format
 	var renderer monitor.Renderer
@@ -126,6 +146,7 @@ func runMonitor(cmd *cobra.Command, args []string) error {
 
 	healthStore = health.NewStorage("")
 
+	lookup := buildCredentialLookup(vaultPath)
 	mon := monitor.NewMonitor(
 		monitor.WithInterval(interval),
 		monitor.WithProviders(providers),
@@ -133,6 +154,11 @@ func runMonitor(cmd *cobra.Command, args []string) error {
 		monitor.WithDB(db),
 		monitor.WithHealthStore(healthStore),
 		monitor.WithAuthPool(pool),
+		monitor.WithActiveProfile(lookup.ActiveName),
+		monitor.WithLiveCredential(func(provider, name string) (string, bool) {
+			c := lookup.inspect(credNamespaceLive, provider, name)
+			return c.Token, c.Found() && c.Token != ""
+		}),
 	)
 
 	out := cmd.OutOrStdout()
@@ -147,8 +173,48 @@ func runMonitor(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Interactive live monitoring
+	// Interactive dashboard when a person is at the terminal.
+	if format == "table" && term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
+		return runDashboard(ctx, mon, interval, reloadDaemon)
+	}
+
+	// Live monitoring for the other formats, or table mode piped somewhere.
 	return runLiveMonitor(ctx, mon, renderer, out, format, interval)
+}
+
+// runDashboard runs the interactive monitor. Switching from it goes through
+// switchProfile, the same non-interactive core `caam activate` uses, so the
+// outgoing account is re-captured first and a failed re-capture aborts.
+func runDashboard(ctx context.Context, mon *monitor.Monitor, interval time.Duration, reloadDaemon bool) error {
+	switcher := func(ctx context.Context, provider, profile string) (string, error) {
+		res, err := switchProfile(ctx, provider, profile, switchOptions{Quiet: true, ReloadDaemon: reloadDaemon})
+		if err != nil {
+			return "", err
+		}
+		summary := fmt.Sprintf("switched %s to %s", provider, profile)
+		if res.Recaptured {
+			summary += fmt.Sprintf(" (re-captured %s first)", res.PreviousProfile)
+		}
+		if res.CodexDaemon.Detected {
+			if res.CodexDaemon.Reloaded {
+				summary += "; reloaded the codex daemon"
+			} else {
+				summary += "; a running codex daemon still holds the old account (restart it, or use --reload-daemon)"
+			}
+		}
+		return summary, nil
+	}
+
+	dash := monitor.NewDashboard(mon, monitor.DashboardOptions{
+		Interval: interval,
+		Switch:   switcher,
+	})
+	p := tea.NewProgram(dash, tea.WithAltScreen(), tea.WithContext(ctx))
+	_, err := p.Run()
+	if err != nil && ctx.Err() != nil {
+		return nil // interrupted; not an error
+	}
+	return err
 }
 
 func runLiveMonitor(ctx context.Context, mon *monitor.Monitor, renderer monitor.Renderer, out io.Writer, format string, interval time.Duration) error {

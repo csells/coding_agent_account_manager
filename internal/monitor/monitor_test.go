@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -175,5 +176,128 @@ func writeProfileDir(t *testing.T, vault *authfile.Vault, provider, profile stri
 	dir := vault.ProfilePath(provider, profile)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
+	}
+}
+
+// recordingFetcher notes the token it was handed for each profile so a test
+// can prove which credential a row was built from.
+type recordingFetcher struct {
+	fakeFetcher
+	seen map[string]string
+}
+
+func (r *recordingFetcher) FetchAllProfiles(ctx context.Context, provider string, profiles map[string]string) []usage.ProfileUsage {
+	if r.seen == nil {
+		r.seen = make(map[string]string)
+	}
+	for name, token := range profiles {
+		r.seen[provider+"/"+name] = token
+	}
+	return r.fakeFetcher.FetchAllProfiles(ctx, provider, profiles)
+}
+
+// TestMonitorRefreshMarksActiveAndReadsItsLiveCredential: the active
+// profile's row is starred and built from the credential the tool has in
+// force, not from the vault copy that froze at activate time.
+func TestMonitorRefreshMarksActiveAndReadsItsLiveCredential(t *testing.T) {
+	tmpDir := t.TempDir()
+	vault := authfile.NewVault(tmpDir)
+	writeProfileFile(t, vault, "codex", "a", "auth.json", `{"tokens":{"access_token":"vault-a"}}`)
+	writeProfileFile(t, vault, "codex", "b", "auth.json", `{"tokens":{"access_token":"vault-b"}}`)
+
+	fetcher := &recordingFetcher{}
+	mon := NewMonitor(
+		WithVault(vault),
+		WithFetcher(fetcher),
+		WithProviders([]string{"codex"}),
+		WithHealthStore(nil),
+		WithActiveProfile(func(provider string) string { return "b" }),
+		WithLiveCredential(func(provider, name string) (string, bool) {
+			if provider == "codex" && name == "b" {
+				return "live-b", true
+			}
+			return "", false
+		}),
+	)
+	_ = mon.Refresh(context.Background())
+
+	state := mon.GetState()
+	if !state.Profiles["codex/b"].Active || state.Profiles["codex/a"].Active {
+		t.Fatalf("active flags wrong: a=%v b=%v", state.Profiles["codex/a"].Active, state.Profiles["codex/b"].Active)
+	}
+	if fetcher.seen["codex/b"] != "live-b" {
+		t.Fatalf("active row fetched with %q, want the live credential", fetcher.seen["codex/b"])
+	}
+	if fetcher.seen["codex/a"] != "vault-a" {
+		t.Fatalf("inactive row fetched with %q, want its vault copy", fetcher.seen["codex/a"])
+	}
+}
+
+// TestMonitorRefreshReadsEveryProviderWithACredentialReader: the monitor
+// used to know only claude and codex; the other providers with usage APIs
+// are read through the same credential readers `caam limits` uses.
+func TestMonitorRefreshReadsEveryProviderWithACredentialReader(t *testing.T) {
+	tmpDir := t.TempDir()
+	vault := authfile.NewVault(tmpDir)
+	writeProfileFile(t, vault, "kimi", "k", "kimi-code.json", `{"access_token":"tok-kimi","refresh_token":"r","expires_at":4102444800}`)
+	writeProfileDir(t, vault, "cursor", "c")
+	writeProfileFile(t, vault, "claude", "settings-only", "settings.json", `{}`)
+
+	fetcher := &recordingFetcher{}
+	mon := NewMonitor(WithVault(vault), WithFetcher(fetcher), WithProviders([]string{"kimi", "cursor", "claude"}), WithHealthStore(nil))
+	_ = mon.Refresh(context.Background())
+
+	if fetcher.seen["kimi/k"] != "tok-kimi" {
+		t.Fatalf("kimi credential not read: %q", fetcher.seen["kimi/k"])
+	}
+	state := mon.GetState()
+	if p := state.Profiles["cursor/c"]; p == nil || p.Usage == nil || p.Usage.Error == "" {
+		t.Fatalf("cursor (no usage API) should be an explicit error row: %+v", p)
+	}
+	// A profile captured without a credential file says so, not "open ...:
+	// no such file or directory".
+	p := state.Profiles["claude/settings-only"]
+	if p == nil || p.Usage == nil || !strings.Contains(p.Usage.Error, "no credential captured") {
+		t.Fatalf("credential-less profile error = %+v", p)
+	}
+}
+
+// TestMonitorRefreshNeverWritesTheVault: polling presents the access token
+// it already holds and nothing else. A refresh must not touch a single
+// vault file, because rewriting a credential is how a rotating
+// refresh-token family gets replayed.
+func TestMonitorRefreshNeverWritesTheVault(t *testing.T) {
+	tmpDir := t.TempDir()
+	vault := authfile.NewVault(tmpDir)
+	writeProfileFile(t, vault, "claude", "alice", ".credentials.json", `{"claudeAiOauth":{"accessToken":"tok-claude","refreshToken":"rt","expiresAt":4102444800000}}`)
+	writeProfileFile(t, vault, "codex", "bob", "auth.json", `{"tokens":{"access_token":"tok-codex","refresh_token":"rt"}}`)
+
+	snapshot := func() map[string]string {
+		out := make(map[string]string)
+		_ = filepath.Walk(tmpDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return err
+			}
+			data, _ := os.ReadFile(path)
+			out[path] = info.ModTime().String() + "|" + string(data)
+			return nil
+		})
+		return out
+	}
+	before := snapshot()
+
+	mon := NewMonitor(WithVault(vault), WithFetcher(&fakeFetcher{}), WithProviders([]string{"claude", "codex"}), WithHealthStore(nil))
+	for i := 0; i < 3; i++ {
+		_ = mon.Refresh(context.Background())
+	}
+
+	after := snapshot()
+	if len(after) != len(before) {
+		t.Fatalf("refresh changed the vault's file set: %d -> %d files", len(before), len(after))
+	}
+	for path, want := range before {
+		if after[path] != want {
+			t.Fatalf("refresh modified %s", path)
+		}
 	}
 }

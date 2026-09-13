@@ -25,6 +25,9 @@ type ProfileState struct {
 	InCooldown    bool
 	CooldownUntil *time.Time
 	Alert         *Alert
+	// Active reports that this is the profile its provider's tool is using
+	// right now, when the monitor was given a way to tell.
+	Active bool
 }
 
 // Clone returns a shallow copy of the state and profile map for safe reads.

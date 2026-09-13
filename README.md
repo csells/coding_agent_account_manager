@@ -544,6 +544,7 @@ choice; with no model given, every per-model allowance counts.
 | `caam limits claude --cached` | The same view offline, from the snapshot Claude Code caches on disk (no network, no token presented) |
 | `caam limits <tool> --profile <name> --source live\|vault\|isolated\|shallow` | Read a specific credential namespace (`live` is the credential the tool is using right now) |
 | `caam limits <tool> --rank earliest-reset-headroom` | Rank seats for **new** work: spend the included quota that refreshes soonest, preserve the rest |
+| `caam monitor` | Live dashboard: every captured account, one column per window (share **left** and local reset), `*` on the active account, Enter to switch |
 | `caam cooldown set <provider/profile>` | Mark profile as rate-limited (default: 60min cooldown) |
 | `caam cooldown list` | List active cooldowns with remaining time |
 | `caam cooldown clear <provider/profile>` | Clear cooldown for a specific profile |
@@ -740,6 +741,50 @@ Rotation policies decide which profile `caam` *switches the host to*. To rank se
 When `stealth.cooldown.enabled` is true in config, `caam activate` warns if the target profile is in cooldown and prompts for confirmation. Use `--force` to bypass.
 
 When `stealth.rotation.enabled` is true, `caam activate <tool>` automatically falls back to rotation if the default profile is in cooldown.
+
+#### Live dashboard: `caam monitor`
+
+`caam limits` answers "how much has each account used"; `caam monitor` in a
+terminal answers the question you actually have while working — *how much is
+left on each window, when does it come back, and which account is in use* —
+and lets you switch without leaving the screen:
+
+```
+caam monitor  refreshed 14:16:59, next 14:17:59
+
+PROFILE                                 5-HOUR                    WEEKLY                           WEEKLY FABLE                 STATUS
+* claude/chris@gascity.com              70% left, resets 6:10 PM  47% left, resets Tue 5:00 PM     6% left, resets Tue 5:00 PM  ok
+  claude/csells@sellsbrothers.com       -                         -                                -                            no credential captured for this profile...
+* codex/ops+chris-claude-1@gascity.com  -                         30% left, resets Sep 20 8:45 AM  -                            ok
+* zcode/chris@gascity.com               -                         -                                -                            no Z.ai coding plan on this account
+
+up/down select   enter switch   r refresh   q quit     * = active account
+```
+
+- **Columns come from what each provider reports.** A 5-hour window, a weekly
+  window, a per-model weekly window (`WEEKLY FABLE`, `WEEKLY OPUS`), a monthly
+  one where a provider has it. Nothing is invented: a provider without a
+  window leaves the cell as `-`, and neither Anthropic nor OpenAI publishes a
+  monthly cap.
+- **The active account per provider is starred.** Select any other row and
+  press Enter; the dashboard asks first, then switches through the same path
+  as `caam activate`: the outgoing account is re-captured into the vault
+  before the incoming one is installed, and a failed re-capture aborts the
+  switch. The star moves when the switch succeeds. Sessions already running
+  keep their current login (codex until it restarts, or pass
+  `--reload-daemon`; Claude Code until its next token refresh).
+- **Leaving it running is safe.** A refresh presents the access token caam
+  already holds and nothing more; it never refreshes or rewrites a
+  credential, so polling cannot replay a rotating refresh-token family. Set
+  the cadence with `--interval` (default 30s).
+- **A row whose fetch fails keeps its last good numbers**, marked
+  `last known 12m ago: auth expired (re-login)` in STATUS, instead of going
+  blank. Only the active account's token rotates, so an inactive account's
+  vaulted token can expire; the dashboard does not refresh it for you, for
+  the reason above.
+
+Piped or run with `--once`, `caam monitor` prints the plain table it always
+did; `--format brief|json|alerts` are unchanged.
 
 ### Uninstall Notes
 

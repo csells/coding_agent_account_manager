@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -29,6 +30,9 @@ type Monitor struct {
 	health    *health.Storage
 	db        *caamdb.DB
 	pool      *authpool.AuthPool
+
+	activeProfile  func(provider string) string
+	liveCredential func(provider, name string) (string, bool)
 
 	mu    sync.RWMutex
 	state *MonitorState
@@ -83,11 +87,32 @@ func WithAuthPool(pool *authpool.AuthPool) MonitorOption {
 	}
 }
 
+// WithActiveProfile tells the monitor how to learn which profile a provider's
+// tool is using right now, so that profile's row can be marked Active.
+func WithActiveProfile(fn func(provider string) string) MonitorOption {
+	return func(m *Monitor) {
+		m.activeProfile = fn
+	}
+}
+
+// WithLiveCredential tells the monitor how to read the credential a provider's
+// tool has in force for the active profile. The tool rotates that credential
+// in place while the profile is active, so the vault copy is stale for
+// exactly that account; the live one is read instead when the hook finds it.
+func WithLiveCredential(fn func(provider, name string) (token string, ok bool)) MonitorOption {
+	return func(m *Monitor) {
+		m.liveCredential = fn
+	}
+}
+
+// DefaultProviders are the providers with a usage API the monitor can query.
+var DefaultProviders = []string{"claude", "codex", "agy", "kimi", "zcode", "opencode"}
+
 // NewMonitor creates a new monitor with default settings.
 func NewMonitor(opts ...MonitorOption) *Monitor {
 	m := &Monitor{
 		interval:  30 * time.Second,
-		providers: []string{"claude", "codex", "gemini", "opencode", "cursor"},
+		providers: append([]string(nil), DefaultProviders...),
 		fetcher:   usage.NewMultiProfileFetcher(),
 		vault:     authfile.NewVault(authfile.DefaultVaultPath()),
 		health:    health.NewStorage(""),
@@ -165,27 +190,37 @@ func (m *Monitor) Refresh(ctx context.Context) error {
 			continue
 		}
 
+		active := ""
+		if m.activeProfile != nil {
+			active = m.activeProfile(provider)
+		}
+
 		tokens := make(map[string]string)
 		for _, name := range profiles {
 			if authfile.IsSystemProfile(name) {
 				continue
 			}
 			token, err := m.readAccessToken(provider, name)
+			if name == active && m.liveCredential != nil {
+				if live, ok := m.liveCredential(provider, name); ok && live != "" {
+					token, err = live, nil
+				}
+			}
 			if err != nil {
 				state.Profiles[profileKey(provider, name)] = m.buildProfileState(provider, name, &usage.UsageInfo{
-					Provider:  provider,
+					Provider:    provider,
 					ProfileName: name,
-					Error:     err.Error(),
-					FetchedAt: time.Now(),
+					Error:       err.Error(),
+					FetchedAt:   time.Now(),
 				}, cooldowns)
 				continue
 			}
 			if token == "" {
 				state.Profiles[profileKey(provider, name)] = m.buildProfileState(provider, name, &usage.UsageInfo{
-					Provider:  provider,
+					Provider:    provider,
 					ProfileName: name,
-					Error:     "missing access token",
-					FetchedAt: time.Now(),
+					Error:       "missing access token",
+					FetchedAt:   time.Now(),
 				}, cooldowns)
 				continue
 			}
@@ -212,16 +247,26 @@ func (m *Monitor) Refresh(ctx context.Context) error {
 			info := item.Usage
 			if info == nil {
 				info = &usage.UsageInfo{
-					Provider:  res.provider,
+					Provider:    res.provider,
 					ProfileName: item.ProfileName,
-					Error:     "usage fetch returned nil",
-					FetchedAt: time.Now(),
+					Error:       "usage fetch returned nil",
+					FetchedAt:   time.Now(),
 				}
 			}
 			if info.ProfileName == "" {
 				info.ProfileName = item.ProfileName
 			}
 			state.Profiles[profileKey(res.provider, item.ProfileName)] = m.buildProfileState(res.provider, item.ProfileName, info, cooldowns)
+		}
+	}
+
+	if m.activeProfile != nil {
+		for _, provider := range m.providers {
+			if name := m.activeProfile(provider); name != "" {
+				if p := state.Profiles[profileKey(provider, name)]; p != nil {
+					p.Active = true
+				}
+			}
 		}
 	}
 
@@ -290,29 +335,41 @@ func (m *Monitor) readAccessToken(provider, name string) (string, error) {
 		return "", fmt.Errorf("vault is nil")
 	}
 
-	switch provider {
-	case "claude":
-		profilePath := m.vault.ProfilePath(provider, name)
-		creds := filepath.Join(profilePath, ".credentials.json")
-		token, _, err := usage.ReadClaudeCredentials(creds)
-		if err != nil {
-			oldPath := filepath.Join(profilePath, ".claude.json")
-			token, _, err = usage.ReadClaudeCredentials(oldPath)
-			if err != nil {
-				authPath := filepath.Join(profilePath, "auth.json")
-				token, _, err = usage.ReadClaudeCredentials(authPath)
-			}
-		}
-		return token, err
-	case "codex":
-		authPath := filepath.Join(m.vault.ProfilePath(provider, name), "auth.json")
-		token, _, err := usage.ReadCodexCredentials(authPath)
-		return token, err
-	case "opencode", "cursor":
-		return "", fmt.Errorf("usage fetch not yet supported for provider %s", provider)
-	default:
+	files := usage.CredentialFiles(provider)
+	if len(files) == 0 {
 		return "", fmt.Errorf("usage fetch unsupported for provider %s", provider)
 	}
+
+	// The first credential file that yields a token wins, in the same
+	// preference order `caam limits` uses; the last read error is what the
+	// row reports when none does.
+	profilePath := m.vault.ProfilePath(provider, name)
+	var lastErr error
+	found := false
+	for _, file := range files {
+		path := filepath.Join(profilePath, file)
+		if _, statErr := os.Stat(path); statErr != nil {
+			continue
+		}
+		found = true
+		token, _, err := usage.ReadCredentials(provider, path)
+		if err == nil && token != "" {
+			return token, nil
+		}
+		if err != nil {
+			lastErr = err
+		}
+	}
+	if !found {
+		// A captured profile with settings but no credential file (a Claude
+		// profile vaulted before the keychain bridge, say) cannot be queried;
+		// say that rather than surfacing the path that failed to open.
+		return "", fmt.Errorf("no credential captured for this profile (re-run caam backup %s %s)", provider, name)
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("missing access token")
+	}
+	return "", lastErr
 }
 
 func (m *Monitor) buildProfileState(provider, name string, info *usage.UsageInfo, cooldowns map[string]time.Time) *ProfileState {
