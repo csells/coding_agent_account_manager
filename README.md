@@ -319,6 +319,7 @@ and a second sync writes nothing. Pass `--no-sync-config` to skip it.
 | **Gemini CLI** (legacy) | OAuth: `~/.gemini/settings.json` (+ `oauth_creds.json`) • API key: `~/.gemini/.env` | `gemini` interactive |
 | **Grok Build** (xAI) | OAuth/OIDC: `~/.grok/auth.json` (+ `~/.grok/config.toml`); respects `GROK_HOME` | `grok login` (browser OIDC) |
 | **Kimi Code** (Moonshot AI) | OAuth: `~/.kimi-code/credentials/kimi-code.json`; respects `KIMI_CODE_HOME` | `/login` inside `kimi` (device flow) |
+| **zcode** (Z.ai) | Sealed record: `~/.zcode/v2/credentials.json` (AES-GCM under a per-user secret); respects `ZCODE_DATA_BASE_DIR` | `zcode login` (Z.AI OAuth) |
 
 ### Claude Code (Claude Max)
 
@@ -386,6 +387,15 @@ and a second sync writes nothing. Pass `--no-sync-config` to skip it.
 **Identity:** `caam backup kimi` asks Kimi's `/me` once and records the account in the profile's `meta.json`. Profile detection hashes the token's subject (or the refresh token), so the CLI's in-place refresh does not lose the active profile.
 
 **Limits:** `caam limits kimi` calls `GET https://api.kimi.com/coding/v1/usages` with the same device-identity headers the CLI sends (the device id is read from `~/.kimi-code/device_id`, never created) and reports the five-hour rate limit as the primary window, the weekly request allowance as the secondary, and the membership tier as the plan.
+
+### zcode (Z.ai)
+
+**Auth Files:**
+- `~/.zcode/v2/credentials.json` — one shared record written by `zcode login`; every value is sealed with AES-256-GCM under a per-user secret (`ZCODE_CREDENTIAL_SECRET`, or `<platform>:<home>:<user>` by default), so the file is readable by this user's processes on this machine and opaque elsewhere. Respects `ZCODE_DATA_BASE_DIR`.
+
+**Login Command:** `zcode login` (or `/login` in the TUI). `zcode logout` removes the login.
+
+**Notes:** caam captures and restores the file verbatim and unseals it only to read identity (the signed-in Z.ai user's email) and to present the session token to zcode's billing API. zcode re-seals the record with a fresh IV on every write, so profile detection hashes the sealed user id, not the bytes. `caam limits zcode` calls `GET https://zcode.z.ai/api/v1/zcode-plan/billing/current`; an account without a Z.ai coding plan is reported as exactly that, not as 0% used.
 
 ### Grok Build (xAI)
 

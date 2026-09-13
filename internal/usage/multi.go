@@ -63,6 +63,7 @@ type MultiProfileFetcher struct {
 	codexFetcher  *CodexFetcher
 	agyFetcher    *AgyFetcher
 	kimiFetcher   *KimiFetcher
+	zcodeFetcher  *ZcodeFetcher
 	logScanner    logs.Scanner // Optional scanner for burn rate calculation
 }
 
@@ -83,6 +84,7 @@ func NewMultiProfileFetcher(opts ...FetcherOption) *MultiProfileFetcher {
 		codexFetcher:  NewCodexFetcher(),
 		agyFetcher:    NewAgyFetcher(),
 		kimiFetcher:   NewKimiFetcher(),
+		zcodeFetcher:  NewZcodeFetcher(),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -149,6 +151,16 @@ func (m *MultiProfileFetcher) FetchAllProfiles(ctx context.Context, provider str
 					}
 				} else {
 					info, err = m.kimiFetcher.Fetch(ctx, token)
+				}
+			case "zcode":
+				if m.zcodeFetcher == nil {
+					info = &UsageInfo{
+						Provider:  provider,
+						FetchedAt: time.Now(),
+						Error:     "zcode fetcher unavailable",
+					}
+				} else {
+					info, err = m.zcodeFetcher.Fetch(ctx, token)
 				}
 			default:
 				info = &UsageInfo{
@@ -394,6 +406,8 @@ func CredentialFiles(provider string) []string {
 		return []string{"antigravity-oauth-token"}
 	case "kimi":
 		return []string{"kimi-code.json"}
+	case "zcode":
+		return []string{"credentials.json"}
 	}
 	return nil
 }
@@ -410,6 +424,8 @@ func ReadCredentials(provider, path string) (accessToken string, accountID strin
 		return ReadAgyCredentials(path)
 	case "kimi":
 		return ReadKimiCredentials(path)
+	case "zcode":
+		return ReadZcodeCredentials(path)
 	}
 	return "", "", fmt.Errorf("no credential reader for provider %q", provider)
 }

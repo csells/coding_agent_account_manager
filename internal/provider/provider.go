@@ -248,6 +248,12 @@ var providerMetaRegistry = map[string]ProviderMeta{
 		AccountURL:  "https://www.kimi.com/code/console",
 		Description: "Kimi Code console",
 	},
+	"zcode": {
+		ID:          "zcode",
+		DisplayName: "zcode (Z.ai)",
+		AccountURL:  "https://z.ai/manage-apikey/coding-plan/personal/my-plan",
+		Description: "Z.ai coding plan",
+	},
 }
 
 // GetProviderMeta returns metadata for a provider by ID.

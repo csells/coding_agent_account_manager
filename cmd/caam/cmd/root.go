@@ -37,6 +37,7 @@ import (
 	grokprovider "github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider/grok"
 	kimiprovider "github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider/kimi"
 	opencodeprovider "github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider/opencode"
+	zcodeprovider "github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider/zcode"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/tui"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/version"
@@ -66,6 +67,7 @@ var tools = map[string]func() authfile.AuthFileSet{
 	"opencode": authfile.OpenCodeAuthFiles,
 	"cursor":   authfile.CursorAuthFiles,
 	"kimi":     authfile.KimiAuthFiles,
+	"zcode":    authfile.ZcodeAuthFiles,
 }
 
 // supportedTools returns the auth-swap providers (the keys of the tools map),
@@ -129,6 +131,7 @@ Supported tools:
   - opencode (OpenCode)
   - cursor   (Cursor CLI)
   - kimi     (Kimi Code / Moonshot AI)
+  - zcode    (zcode / Z.ai)
 
 Advanced: Profile isolation for simultaneous sessions:
   caam profile add codex work
@@ -167,6 +170,7 @@ Run 'caam' without arguments to launch the interactive TUI.`,
 		registry.Register(opencodeprovider.New())
 		registry.Register(cursorprovider.New())
 		registry.Register(kimiprovider.New())
+		registry.Register(zcodeprovider.New())
 
 		// Initialize runner
 		runner = exec.NewRunner(registry)
@@ -308,6 +312,8 @@ func buildProfileHealth(tool, profileName string) *health.ProfileHealth {
 		expInfo, err = health.ParseAgyExpiry(vaultPath)
 	case "kimi":
 		expInfo, err = health.ParseKimiExpiry(filepath.Join(vaultPath, "kimi-code.json"))
+	case "zcode":
+		expInfo, err = health.ParseZcodeExpiry(filepath.Join(vaultPath, "credentials.json"))
 	case "grok":
 		// Grok's auth.json is keyed by a dynamic "<issuer>::<client-id>" key,
 		// which the Codex parser cannot read; without its own case every Grok
@@ -363,6 +369,8 @@ func liveAuthExpiry(tool string) *health.ExpiryInfo {
 		info, err = health.ParseAgyExpiry("")
 	case "kimi":
 		info, err = health.ParseKimiExpiry("")
+	case "zcode":
+		info, err = health.ParseZcodeExpiry("")
 	case "grok":
 		home, homeErr := os.UserHomeDir()
 		if homeErr != nil {
@@ -430,6 +438,8 @@ func parseLiveProfileExpiry(tool, profileName string) *health.ExpiryInfo {
 		info, err = health.ParseAgyExpiry(filepath.Join(prof.HomePath(), ".gemini", "antigravity-cli"))
 	case "kimi":
 		info, err = health.ParseKimiExpiry(filepath.Join(prof.HomePath(), ".kimi-code", "credentials", "kimi-code.json"))
+	case "zcode":
+		info, err = health.ParseZcodeExpiry(filepath.Join(prof.HomePath(), ".zcode", "v2", "credentials.json"))
 	case "grok":
 		info, err = health.ParseGrokExpiry(filepath.Join(prof.HomePath(), ".grok", "auth.json"))
 	default:
@@ -494,6 +504,13 @@ func getVaultIdentity(tool, profileName string) *identity.Identity {
 		return id
 	case "kimi":
 		id, err := identity.ExtractFromKimiCredentials(filepath.Join(vaultPath, "kimi-code.json"))
+		if err != nil {
+			return nil
+		}
+		normalizeIdentityPlan(id)
+		return id
+	case "zcode":
+		id, err := identity.ExtractFromZcodeCredentials(filepath.Join(vaultPath, "credentials.json"))
 		if err != nil {
 			return nil
 		}
@@ -958,7 +975,7 @@ type statusHealth struct {
 // so a logged-in tool is never silently missing from the active-account view;
 // a tool with no auth reads "(not logged in)".
 func statusTools() []string {
-	preferred := []string{"codex", "claude", "gemini", "agy", "grok", "opencode", "cursor", "kimi"}
+	preferred := []string{"codex", "claude", "gemini", "agy", "grok", "opencode", "cursor", "kimi", "zcode"}
 	seen := make(map[string]bool, len(preferred))
 	var out []string
 	for _, tool := range preferred {

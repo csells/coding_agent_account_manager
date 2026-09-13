@@ -18,6 +18,7 @@ import (
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/identity"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/keychain"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/zcodecred"
 )
 
 // ErrNoExpiry indicates that expiry information could not be determined.
@@ -922,6 +923,50 @@ func ParseKimiExpiry(authPath string) (*ExpiryInfo, error) {
 	return info, nil
 }
 
+// ParseZcodeExpiry extracts token expiry from a zcode credential record —
+// authPath, or the live record under ZCODE_DATA_BASE_DIR / HOME when "".
+// The record is sealed. zcode runs on its session JWT, which carries no
+// expiry and stays valid long after the short-lived Z.ai access token
+// beside it has lapsed (a live install answered its billing API two weeks
+// past that token's exp), so when a session is present the expiry is
+// reported as unknown rather than as the access token's; only a record
+// with an access token and no session reports the token's exp. zcode stores
+// no refresh token and renews the login itself, so nothing here is
+// renewable by caam.
+func ParseZcodeExpiry(authPath string) (*ExpiryInfo, error) {
+	if authPath == "" {
+		authPath = zcodecred.DefaultPath()
+	}
+	rec, err := zcodecred.ReadRecord(authPath)
+	if err != nil {
+		if errors.Is(err, zcodecred.ErrNoRecord) {
+			return nil, ErrNoAuthFile
+		}
+		return nil, err
+	}
+	if !rec.LoggedIn() {
+		return nil, ErrNoAuthFile
+	}
+	info := &ExpiryInfo{
+		HasRefreshToken: rec.RefreshToken != "",
+		Source:          authPath,
+	}
+	info.Renewable = info.HasRefreshToken
+	if rec.JWTToken != "" {
+		// The session is the login; its lifetime is not recorded.
+		return info, nil
+	}
+	if exp := jwtExpiry(rec.AccessToken); !exp.IsZero() {
+		info.ExpiresAt = exp
+		return info, nil
+	}
+	if info.HasRefreshToken {
+		return info, nil
+	}
+	return nil, ErrNoExpiry
+}
+
+// ParseAllExpiry attempts to parse expiry for all providers and returns combined results.
 func ParseAllExpiry() map[string]*ExpiryInfo {
 	results := make(map[string]*ExpiryInfo)
 
@@ -939,6 +984,9 @@ func ParseAllExpiry() map[string]*ExpiryInfo {
 	}
 	if info, err := ParseKimiExpiry(""); err == nil {
 		results["kimi"] = info
+	}
+	if info, err := ParseZcodeExpiry(""); err == nil {
+		results["zcode"] = info
 	}
 
 	return results

@@ -15,6 +15,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -24,6 +25,7 @@ import (
 	"time"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/keychain"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/zcodecred"
 )
 
 // AuthFileSpec defines where a tool stores its auth credentials.
@@ -319,6 +321,26 @@ func KimiAuthFiles() AuthFileSet {
 	}
 }
 
+// ZcodeAuthFiles returns the auth files for zcode (Z.ai's coding harness).
+// `zcode login` writes one shared, sealed record at
+// $ZCODE_DATA_BASE_DIR-or-~/.zcode/v2/credentials.json holding the Z.ai
+// access token, the zcode session JWT and the user's profile; every value
+// is AES-GCM sealed under a per-user secret, so the file is captured and
+// restored verbatim and unsealed only to read identity.
+func ZcodeAuthFiles() AuthFileSet {
+	return AuthFileSet{
+		Tool: "zcode",
+		Files: []AuthFileSpec{
+			{
+				Tool:        "zcode",
+				Path:        zcodecred.DefaultPath(),
+				Description: "zcode shared Z.AI login (sealed credential record)",
+				Required:    true,
+			},
+		},
+	}
+}
+
 // CursorAuthFiles returns the auth files for Cursor CLI.
 // Cursor stores config in ~/.cursor/ directory.
 func CursorAuthFiles() AuthFileSet {
@@ -369,6 +391,8 @@ func GetAuthFileSet(provider string) (AuthFileSet, bool) {
 		return CursorAuthFiles(), true
 	case "kimi", "kimi-code":
 		return KimiAuthFiles(), true
+	case "zcode":
+		return ZcodeAuthFiles(), true
 	default:
 		return AuthFileSet{}, false
 	}
@@ -1396,6 +1420,15 @@ func fileCarriesLogin(tool, path string) bool {
 			return true // not our shape; leave it to the caller as before
 		}
 		return strings.TrimSpace(creds.AccessToken) != "" || strings.TrimSpace(creds.RefreshToken) != ""
+	case "zcode":
+		rec, err := zcodecred.ReadRecord(path)
+		if err != nil {
+			// Unreadable (another user's secret) is still a file worth
+			// capturing verbatim; only a readable, session-less record is
+			// a logout.
+			return !errors.Is(err, zcodecred.ErrNoRecord)
+		}
+		return rec.LoggedIn()
 	}
 	return true
 }
@@ -1749,6 +1782,8 @@ func stableFileHash(tool, path string) (string, error) {
 		return stableAgyHash(path)
 	case "kimi":
 		return stableKimiHash(path)
+	case "zcode":
+		return stableZcodeHash(path)
 	default:
 		return hashFile(path)
 	}
@@ -1777,6 +1812,33 @@ func stableKimiHash(path string) (string, error) {
 		return hashLabeled("kimi:refresh-token:", creds.RefreshToken), nil
 	}
 	return hashBytes(data), nil
+}
+
+// stableZcodeHash hashes a zcode credential record by the signed-in user.
+// zcode re-seals every value with a fresh IV whenever it rewrites the file,
+// so the bytes change without the account changing; the user id (or email)
+// in the sealed profile does not. A record that cannot be unsealed hashes
+// whole.
+func stableZcodeHash(path string) (string, error) {
+	rec, err := zcodecred.ReadRecord(path)
+	if err != nil {
+		if errors.Is(err, zcodecred.ErrNoRecord) {
+			return "", err
+		}
+		return hashFile(path)
+	}
+	if rec.UserInfo != nil {
+		if rec.UserInfo.UserID != "" {
+			return hashLabeled("zcode:user-id:", rec.UserInfo.UserID), nil
+		}
+		if rec.UserInfo.Email != "" {
+			return hashLabeled("zcode:email:", rec.UserInfo.Email), nil
+		}
+	}
+	if sub := jwtSubject(rec.AccessToken); sub != "" {
+		return hashLabeled("zcode:subject:", sub), nil
+	}
+	return hashFile(path)
 }
 
 // hashLabeled hashes a stable identity value under a namespace label.
@@ -2295,9 +2357,24 @@ func (v *Vault) ProfileIdentity(tool, profile string) string {
 		// The token may be opaque; `caam backup kimi` records what Kimi's
 		// /me reported.
 		return profileMetaIdentity(profileDir)
+	case "zcode":
+		return zcodeProfileIdentity(profileDir)
 	default:
 		return ""
 	}
+}
+
+// zcodeProfileIdentity extracts the signed-in Z.ai user's email from a
+// zcode vault profile's sealed record. It never returns token material.
+func zcodeProfileIdentity(profileDir string) string {
+	rec, err := zcodecred.ReadRecord(filepath.Join(profileDir, "credentials.json"))
+	if err != nil || rec.UserInfo == nil {
+		return profileMetaIdentity(profileDir)
+	}
+	if rec.UserInfo.Email != "" {
+		return rec.UserInfo.Email
+	}
+	return profileMetaIdentity(profileDir)
 }
 
 // agyProfileIdentity extracts the human-readable identity (active Google account

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/zcodecred"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1221,5 +1222,57 @@ func TestParseKimiExpiry(t *testing.T) {
 	}
 	if info2, err := ParseKimiExpiry(path); err != nil || info2.ExpiresAt != info.ExpiresAt {
 		t.Errorf("explicit path = %+v, %v", info2, err)
+	}
+}
+
+func TestParseZcodeExpiry(t *testing.T) {
+	t.Setenv(zcodecred.SecretEnv, "unit-secret")
+	base := t.TempDir()
+	t.Setenv(zcodecred.DataBaseDirEnv, base)
+	if _, err := ParseZcodeExpiry(""); !errors.Is(err, ErrNoAuthFile) {
+		t.Fatalf("no record = %v, want ErrNoAuthFile", err)
+	}
+	path := zcodecred.DefaultPath()
+	seal := func(v string) string {
+		t.Helper()
+		s, err := zcodecred.EncryptWith(v, "unit-secret")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	write := func(values map[string]string) {
+		t.Helper()
+		data, _ := json.Marshal(values)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(map[string]string{zcodecred.KeyActiveProvider: seal("zai")})
+	if _, err := ParseZcodeExpiry(""); !errors.Is(err, ErrNoAuthFile) {
+		t.Fatalf("session-less record = %v, want ErrNoAuthFile", err)
+	}
+	claims := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"u-1","exp":1893456000,"iat":1893452400}`))
+	access := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`)) + "." + claims + ".sig"
+	// An access token alone reports its exp.
+	write(map[string]string{zcodecred.KeyAccessToken: seal(access)})
+	info, err := ParseZcodeExpiry("")
+	if err != nil {
+		t.Fatalf("ParseZcodeExpiry: %v", err)
+	}
+	if info.ExpiresAt.Unix() != 1893456000 || info.HasRefreshToken || info.Renewable || info.Source != path {
+		t.Errorf("info = %+v", info)
+	}
+	// With a session present the login is the session, whose lifetime is
+	// unknown: a lapsed access token beside it must not read as expired.
+	write(map[string]string{
+		zcodecred.KeyJWTToken:    seal("SYNTHETIC-SESSION"),
+		zcodecred.KeyAccessToken: seal(access),
+	})
+	if info, err := ParseZcodeExpiry(""); err != nil || !info.ExpiresAt.IsZero() {
+		t.Errorf("session record = %+v, %v", info, err)
 	}
 }
