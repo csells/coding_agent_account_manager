@@ -506,3 +506,57 @@ func TestResnapshotOutgoingSkipsTokenlessClaudeProfile(t *testing.T) {
 		t.Fatalf("vault credential after re-capture = %q", got)
 	}
 }
+
+// TestRestoreRefusesTokenlessClaudeSnapshot: a vault profile that holds
+// settings but no credential (captured before the keychain bridge, or from
+// a logged-out state) must not "activate": that would install the settings,
+// push nothing to the keychain, and report success while the live login
+// stays what it was. Restore refuses before touching anything.
+func TestRestoreRefusesTokenlessClaudeSnapshot(t *testing.T) {
+	f := newKeychainFixture(t)
+	live := keychainCreds("at-live")
+	f.storeToken(live)
+
+	profileDir := filepath.Join(f.vaultDir, "claude", "alice")
+	if err := os.MkdirAll(profileDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeFixtureFile(t, filepath.Join(profileDir, ".claude.json"), keychainState("alice@example.com"))
+
+	err := f.vault.Restore(f.fileSet, "alice")
+	if err == nil {
+		t.Fatal("Restore installed a profile that holds no credential")
+	}
+	for _, want := range []string{"no credential", "/login", "caam backup claude alice"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Restore error %q does not mention %q", err, want)
+		}
+	}
+	if got, ok := f.storedToken(); !ok || got != live {
+		t.Fatalf("live keychain item changed: ok=%v", ok)
+	}
+	if fileExists(f.statePath) {
+		t.Fatalf("Restore wrote %s before refusing", f.statePath)
+	}
+}
+
+// TestRestoreAcceptsAPIKeyModeSnapshot: settings.json carrying an API-key
+// helper is a credential in its own right, and such a profile still restores.
+func TestRestoreAcceptsAPIKeyModeSnapshot(t *testing.T) {
+	f := newKeychainFixture(t)
+	settingsPath := filepath.Join(filepath.Dir(f.credPath), "settings.json")
+	f.fileSet.Files = append(f.fileSet.Files, AuthFileSpec{Tool: "claude", Path: settingsPath, Required: false})
+
+	profileDir := filepath.Join(f.vaultDir, "claude", "alice")
+	if err := os.MkdirAll(profileDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeFixtureFile(t, filepath.Join(profileDir, "settings.json"), `{"apiKeyHelper":"/usr/local/bin/key-helper","enabledPlugins":{}}`)
+
+	if err := f.vault.Restore(f.fileSet, "alice"); err != nil {
+		t.Fatalf("Restore rejected an API-key-mode profile: %v", err)
+	}
+	if !fileExists(settingsPath) {
+		t.Fatalf("settings.json not restored")
+	}
+}

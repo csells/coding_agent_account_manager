@@ -1030,6 +1030,16 @@ func (v *Vault) Restore(fileSet AuthFileSet, profile string) error {
 		}
 	}
 
+	// Refuse, before touching anything, a profile that holds no credential
+	// to install. Restoring such a profile used to copy its settings over,
+	// push nothing to the keychain and report "Activated" while the live
+	// login stayed exactly what it was — a switch that succeeded on paper.
+	// Backup already refuses to write this shape of profile; a copy that
+	// predates that rule must not be installable either.
+	if !vaultProfileCarriesAuth(fileSet, profileDir) {
+		return credentialLessProfileError(fileSet.Tool, profile)
+	}
+
 	// Mirror the login keychain onto disk first: on macOS it, not the file, is
 	// what the freshness guard below must compare the snapshot against, and a
 	// keychain caam cannot read is one it cannot write either — better to stop
@@ -3037,4 +3047,61 @@ func (v *Vault) geminiProfileIdentity(profileDir string) string {
 	}
 
 	return ""
+}
+
+// vaultProfileCarriesAuth reports whether a vault profile holds a credential
+// a restore could install: its required credential file, or — for Claude,
+// whose optional files can be the credential (API-key mode via settings.json,
+// the desktop token cache) — an optional file that carries auth of its own.
+// It is Backup's optionalFilesCarryAuth rule applied to the vault copy, so a
+// profile Backup would refuse to write is one Restore refuses to install.
+func vaultProfileCarriesAuth(fileSet AuthFileSet, profileDir string) bool {
+	for _, spec := range fileSet.Files {
+		src := filepath.Join(profileDir, vaultFileName(fileSet.Tool, spec.Path))
+		if spec.Required {
+			if fileExists(src) {
+				return true
+			}
+			continue
+		}
+		if fileSet.Tool != "claude" {
+			// Every other AllowOptionalOnly tool treats any optional file as
+			// an auth state (see optionalFilesCarryAuth).
+			if fileExists(src) {
+				return true
+			}
+			continue
+		}
+		switch {
+		case isClaudeUserSettings(fileSet.Tool, spec.Path):
+			if claudeUserSettingsCarryAuth(src) {
+				return true
+			}
+		case isClaudeDesktopConfig(fileSet.Tool, spec.Path):
+			if _, ok, err := claudeDesktopTokenCache(src); err == nil && ok {
+				return true
+			}
+		case filepath.Base(spec.Path) == "auth.json":
+			if fileExists(src) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// credentialLessProfileError is the loud refusal for a restore that would
+// install settings and no credential — a switch that reports success and
+// changes nothing.
+func credentialLessProfileError(tool, profile string) error {
+	login := "log in"
+	switch tool {
+	case "claude":
+		login = "log in with /login in Claude Code"
+	case "codex":
+		login = "log in with `codex login`"
+	case "agy":
+		login = "log in with agy"
+	}
+	return fmt.Errorf("profile %s/%s holds no credential to install (settings only); %s as that account, then re-capture it with `caam backup %s %s`", tool, profile, login, tool, profile)
 }
