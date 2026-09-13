@@ -427,11 +427,12 @@ func (v *Vault) Backup(fileSet AuthFileSet, profile string) error {
 		}
 	}
 
-	// On macOS the live Claude credentials are in the login keychain, not on
-	// disk. Mirror them out before the walk below, or the snapshot captures
-	// settings with no token in them (issue #98). A refused keychain is fatal
-	// here: a token-less profile is worse than a failed backup.
-	if err := pullClaudeKeychain(fileSet); err != nil {
+	// On macOS the live Claude and Antigravity credentials are in the login
+	// keychain, not on disk. Mirror them out before the walk below, or the
+	// snapshot captures settings with no token in them (issue #98). A refused
+	// keychain is fatal here: a token-less profile is worse than a failed
+	// backup.
+	if err := pullKeychain(fileSet); err != nil {
 		return err
 	}
 
@@ -647,6 +648,10 @@ func missingRequiredBackupError(fileSet AuthFileSet, path string) error {
 	if fileSet.Tool == "claude" && claudeKeychainPath(fileSet) != "" && filepath.Base(path) == claudeCredentialsFile {
 		return fmt.Errorf("no Claude Code credential to back up: %s is absent and the login keychain holds no %q item for account %q; log in with /login in Claude Code, then back up again (CAAM_DEBUG=1 prints every keychain lookup)",
 			path, keychain.ClaudeService, keychain.LoginAccount())
+	}
+	if fileSet.Tool == "agy" && agyKeychainPath(fileSet) == path {
+		return fmt.Errorf("no Antigravity credential to back up: %s is absent and the login keychain holds no %q item for account %q; log in with agy, then back up again (CAAM_DEBUG=1 prints every keychain lookup)",
+			path, keychain.AgyService, keychain.AgyAccount)
 	}
 	return fmt.Errorf("required auth file not found: %s", path)
 }
@@ -873,7 +878,7 @@ func (v *Vault) Restore(fileSet AuthFileSet, profile string) error {
 	// what the freshness guard below must compare the snapshot against, and a
 	// keychain caam cannot read is one it cannot write either — better to stop
 	// than to report a switch that did not happen (issue #98).
-	if err := pullClaudeKeychain(fileSet); err != nil {
+	if err := pullKeychain(fileSet); err != nil {
 		return err
 	}
 
@@ -998,9 +1003,9 @@ func (v *Vault) Restore(fileSet AuthFileSet, profile string) error {
 		}
 	}
 
-	// The restored file only becomes the account Claude Code uses once it is
-	// back in the login keychain (issue #98).
-	if err := pushClaudeKeychain(fileSet); err != nil {
+	// The restored file only becomes the account Claude Code (or agy) uses
+	// once it is back in the login keychain (issue #98).
+	if err := pushKeychain(fileSet); err != nil {
 		return err
 	}
 
@@ -1159,7 +1164,7 @@ func (v *Vault) ActiveProfile(fileSet AuthFileSet) (string, error) {
 	// Best-effort: on macOS the live token is in the keychain, so without the
 	// mirror the hash comparison below has nothing to compare (issue #98).
 	// A refused keychain leaves detection where it was before the bridge.
-	_ = pullClaudeKeychain(fileSet)
+	_ = pullKeychain(fileSet)
 
 	profiles, err := v.List(fileSet.Tool)
 	if err != nil {
@@ -1257,10 +1262,10 @@ func (v *Vault) ActiveProfile(fileSet AuthFileSet) (string, error) {
 
 // HasAuthFiles checks if the tool currently has auth files present.
 func HasAuthFiles(fileSet AuthFileSet) bool {
-	// Best-effort mirror: a macOS Claude login lives in the keychain, and
-	// reporting "not logged in" for it would send callers down the login path
-	// (issue #98).
-	_ = pullClaudeKeychain(fileSet)
+	// Best-effort mirror: a macOS Claude or Antigravity login lives in the
+	// keychain, and reporting "not logged in" for it would send callers down
+	// the login path (issue #98).
+	_ = pullKeychain(fileSet)
 
 	optionalFound := false
 	for _, spec := range fileSet.Files {
@@ -1303,7 +1308,7 @@ func ClearAuthFiles(fileSet AuthFileSet) error {
 
 	// Removing the mirror is not a logout while the keychain still holds the
 	// token Claude Code prefers (issue #98).
-	return clearClaudeKeychain(fileSet)
+	return clearKeychain(fileSet)
 }
 
 // --- Claude Desktop OAuth token cache (macOS) -------------------------------

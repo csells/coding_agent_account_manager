@@ -72,6 +72,13 @@ func DeleteClaude() error {
 // isolated HOME, or a login that predates the keychain), and every caller but
 // backup treats them as a no-op.
 func EnsureMirror(credPath string) (bool, error) {
+	return ensureMirrorFrom(credPath, ReadClaude)
+}
+
+// ensureMirrorFrom is EnsureMirror for any keychain item: read fetches the
+// item's bytes, and credPath is kept as their 0600 mirror. Every bridged tool
+// shares the memo, keyed by the mirror path.
+func ensureMirrorFrom(credPath string, read func() ([]byte, error)) (bool, error) {
 	if !Enabled() {
 		return false, ErrNoKeychain
 	}
@@ -79,7 +86,7 @@ func EnsureMirror(credPath string) (bool, error) {
 		// The mirror was refreshed a moment ago, so nothing was written now.
 		return false, err
 	}
-	wrote, err := ensureMirror(credPath)
+	wrote, err := ensureMirror(credPath, read)
 	rememberMirror(credPath, err)
 	return wrote, err
 }
@@ -133,8 +140,8 @@ func ForgetMirrors() {
 	mirrorCache = map[string]mirrorResult{}
 }
 
-func ensureMirror(credPath string) (bool, error) {
-	blob, err := ReadClaude()
+func ensureMirror(credPath string, read func() ([]byte, error)) (bool, error) {
+	blob, err := read()
 	if err != nil {
 		return false, err
 	}

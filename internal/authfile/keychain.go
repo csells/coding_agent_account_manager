@@ -13,12 +13,18 @@ import (
 // model. On macOS, Claude Code keeps its OAuth blob as a generic password and
 // only falls back to ~/.claude/.credentials.json when the keychain is
 // unreachable, so without the bridge `Backup` snapshots a profile with no
-// token and `Restore` swaps files the CLI ignores (issue #98).
+// token and `Restore` swaps files the CLI ignores (issue #98). The
+// Antigravity CLI does the same with its Google OAuth token (service
+// "gemini", account "antigravity") and the antigravity-oauth-token file.
 //
 // The keychain is authoritative and the credentials file is its mirror: every
 // existing path that hashes, dedupes, or expiry-checks the file keeps working
 // untouched. On a host with no login keychain (non-darwin, an isolated HOME,
 // CAAM_KEYCHAIN=0) each helper is inert.
+//
+// pullKeychain, pushKeychain and clearKeychain dispatch on the file set's tool
+// and are the only entry points the vault calls; the per-tool helpers below
+// them decide whether a given file set is bridged at all.
 
 // claudeKeychainPath returns the credentials file the login keychain should be
 // bridged to, or "" when the bridge does not apply to this file set.
@@ -100,6 +106,111 @@ func clearClaudeKeychain(fileSet AuthFileSet) error {
 	}
 	if err := keychain.DeleteClaude(); err != nil {
 		return fmt.Errorf("remove Claude credentials from the macOS login keychain: %w", err)
+	}
+	return nil
+}
+
+// agyKeychainPath returns the Antigravity token file the keychain item should
+// be bridged to, or "" when the bridge does not apply to this file set. As
+// for Claude, only the token under the current HOME's default ~/.gemini
+// belongs to the login keychain; a GEMINI_HOME pointed elsewhere (a shallow
+// lane, a fixture) is left to the file it names.
+func agyKeychainPath(fileSet AuthFileSet) string {
+	if fileSet.Tool != "agy" || !keychain.Enabled() {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	want := filepath.Join(home, ".gemini", "antigravity-cli", agyTokenFile)
+	for _, spec := range fileSet.Files {
+		if filepath.Base(spec.Path) == agyTokenFile && filepath.Clean(spec.Path) == want {
+			return spec.Path
+		}
+	}
+	return ""
+}
+
+// agyTokenFile is the basename of the Antigravity CLI's authoritative token
+// file, the one its keychain item is mirrored onto.
+const agyTokenFile = "antigravity-oauth-token"
+
+// pullAgyKeychain refreshes the antigravity-oauth-token mirror from the
+// login keychain; same contract as pullClaudeKeychain.
+func pullAgyKeychain(fileSet AuthFileSet) error {
+	tokenPath := agyKeychainPath(fileSet)
+	if tokenPath == "" {
+		return nil
+	}
+	if _, err := keychain.EnsureAgyMirror(tokenPath); err != nil {
+		if errors.Is(err, keychain.ErrNoKeychain) || errors.Is(err, keychain.ErrNotFound) {
+			return nil
+		}
+		return fmt.Errorf("read Antigravity credentials from the macOS login keychain: %w", err)
+	}
+	return nil
+}
+
+// pushAgyKeychain writes the just-restored token file into the login
+// keychain, which is what changes the account agy uses.
+func pushAgyKeychain(fileSet AuthFileSet) error {
+	tokenPath := agyKeychainPath(fileSet)
+	if tokenPath == "" || !fileExists(tokenPath) {
+		return nil
+	}
+	if err := keychain.PushAgyMirror(tokenPath); err != nil {
+		if errors.Is(err, keychain.ErrNoKeychain) {
+			return nil
+		}
+		return fmt.Errorf("write Antigravity credentials to the macOS login keychain: %w", err)
+	}
+	return nil
+}
+
+// clearAgyKeychain removes the Antigravity item as part of a logout.
+func clearAgyKeychain(fileSet AuthFileSet) error {
+	if agyKeychainPath(fileSet) == "" {
+		return nil
+	}
+	if err := keychain.DeleteAgy(); err != nil {
+		return fmt.Errorf("remove Antigravity credentials from the macOS login keychain: %w", err)
+	}
+	return nil
+}
+
+// pullKeychain refreshes the live credential file of a bridged tool from the
+// login keychain before a caller reads it. Tools without a keychain item are
+// a no-op.
+func pullKeychain(fileSet AuthFileSet) error {
+	switch fileSet.Tool {
+	case "claude":
+		return pullClaudeKeychain(fileSet)
+	case "agy":
+		return pullAgyKeychain(fileSet)
+	}
+	return nil
+}
+
+// pushKeychain writes a bridged tool's just-restored credential file back
+// into the login keychain.
+func pushKeychain(fileSet AuthFileSet) error {
+	switch fileSet.Tool {
+	case "claude":
+		return pushClaudeKeychain(fileSet)
+	case "agy":
+		return pushAgyKeychain(fileSet)
+	}
+	return nil
+}
+
+// clearKeychain removes a bridged tool's keychain item as part of a logout.
+func clearKeychain(fileSet AuthFileSet) error {
+	switch fileSet.Tool {
+	case "claude":
+		return clearClaudeKeychain(fileSet)
+	case "agy":
+		return clearAgyKeychain(fileSet)
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
 package keychain_test
 
 import (
+	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
@@ -240,5 +241,54 @@ func TestPushMirror(t *testing.T) {
 
 	if err := keychain.PushMirror(filepath.Join(t.TempDir(), "missing.json")); err == nil {
 		t.Fatal("PushMirror() accepted a missing file")
+	}
+}
+
+// TestAgyRoundTripKeepsTheGoKeyringEnvelope: agy files its token through
+// go-keyring, which wraps a value that ends in a newline as
+// "go-keyring-base64:…" before calling `security`. caam must unwrap on read
+// and re-wrap on write, or agy reads back a token it cannot parse.
+func TestAgyRoundTripKeepsTheGoKeyringEnvelope(t *testing.T) {
+	items := testutil.FakeKeychain(t)
+	payload := "{\"auth_method\":\"oauth\",\"token\":\"SYNTHETIC\"}\n"
+	enveloped := "go-keyring-base64:" + base64.StdEncoding.EncodeToString([]byte(payload))
+	testutil.FakeKeychainStore(t, items, keychain.AgyService, keychain.AgyAccount, enveloped)
+
+	got, err := keychain.ReadAgy()
+	if err != nil {
+		t.Fatalf("ReadAgy(): %v", err)
+	}
+	if string(got) != payload {
+		t.Fatalf("ReadAgy() = %q, want the unwrapped payload %q", got, payload)
+	}
+
+	rotated := "{\"auth_method\":\"oauth\",\"token\":\"ROTATED\"}\n"
+	if err := keychain.WriteAgy([]byte(rotated)); err != nil {
+		t.Fatalf("WriteAgy(): %v", err)
+	}
+	stored, ok := testutil.FakeKeychainRead(t, items, keychain.AgyService)
+	if !ok {
+		t.Fatal("WriteAgy() stored nothing")
+	}
+	if want := "go-keyring-base64:" + base64.StdEncoding.EncodeToString([]byte(rotated)); stored != want {
+		t.Fatalf("WriteAgy() stored %q, want the base64 envelope %q", stored, want)
+	}
+
+	// A bare value and a hex envelope, as older go-keyring versions wrote
+	// them, are read back unwrapped too.
+	testutil.FakeKeychainStore(t, items, keychain.AgyService, keychain.AgyAccount, `{"token":"bare"}`)
+	if got, err := keychain.ReadAgy(); err != nil || string(got) != `{"token":"bare"}` {
+		t.Fatalf("bare value read = %q, %v", got, err)
+	}
+	testutil.FakeKeychainStore(t, items, keychain.AgyService, keychain.AgyAccount, "go-keyring-encoded:7b7d")
+	if got, err := keychain.ReadAgy(); err != nil || string(got) != "{}" {
+		t.Fatalf("hex envelope read = %q, %v; want {}", got, err)
+	}
+
+	if err := keychain.DeleteAgy(); err != nil {
+		t.Fatalf("DeleteAgy(): %v", err)
+	}
+	if _, err := keychain.ReadAgy(); !errors.Is(err, keychain.ErrNotFound) {
+		t.Fatalf("ReadAgy() after delete = %v, want ErrNotFound", err)
 	}
 }

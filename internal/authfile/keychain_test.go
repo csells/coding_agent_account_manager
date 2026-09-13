@@ -5,6 +5,7 @@ package authfile
 // silent no-op. The keychain is bridged to ~/.claude/.credentials.json.
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -293,5 +294,187 @@ func TestBackupAcceptsAPIKeyModeWithoutKeychainItem(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(f.vaultDir, "claude", "alice", "settings.json")); err != nil {
 		t.Fatalf("settings.json not vaulted: %v", err)
+	}
+}
+
+// --- Antigravity ------------------------------------------------------------
+//
+// agy keeps its Google OAuth token in the login keychain (service "gemini",
+// account "antigravity", via go-keyring) and, on a Mac, never writes
+// antigravity-oauth-token; the file set used to look only for the file, so
+// backup failed with "no auth files found" (switcher handoff, work item C).
+
+type agyKeychainFixture struct {
+	t            *testing.T
+	vault        *Vault
+	vaultDir     string
+	fileSet      AuthFileSet
+	items        string
+	tokenPath    string
+	accountsPath string
+}
+
+func newAgyKeychainFixture(t *testing.T) *agyKeychainFixture {
+	t.Helper()
+	items := testutil.FakeKeychain(t)
+
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	if err := os.MkdirAll(filepath.Join(home, ".gemini", "antigravity-cli"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	// The bridge applies to the token under the current HOME's ~/.gemini
+	// only, so the fixture has to own HOME and leave GEMINI_HOME unset.
+	t.Setenv("HOME", home)
+	t.Setenv("GEMINI_HOME", "")
+	f := &agyKeychainFixture{
+		t:            t,
+		vaultDir:     filepath.Join(tmp, "vault"),
+		items:        items,
+		tokenPath:    filepath.Join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token"),
+		accountsPath: filepath.Join(home, ".gemini", "google_accounts.json"),
+	}
+	f.vault = NewVault(f.vaultDir)
+	f.fileSet = AntigravityAuthFiles()
+	if got := f.fileSet.Files[0].Path; got != f.tokenPath {
+		t.Fatalf("fixture token path = %q, want %q", got, f.tokenPath)
+	}
+	return f
+}
+
+// storeToken files the token the way agy does: through go-keyring, which
+// base64-wraps a value ending in a newline before handing it to `security`.
+func (f *agyKeychainFixture) storeToken(blob string) {
+	f.t.Helper()
+	testutil.FakeKeychainStore(f.t, f.items, keychain.AgyService, keychain.AgyAccount,
+		"go-keyring-base64:"+base64.StdEncoding.EncodeToString([]byte(blob)))
+}
+
+func (f *agyKeychainFixture) storedToken() (string, bool) {
+	f.t.Helper()
+	return testutil.FakeKeychainRead(f.t, f.items, keychain.AgyService)
+}
+
+func agyKeychainToken(tag string) string {
+	return `{"auth_method":"oauth","token":{"access_token":"SYNTHETIC-` + tag + `","refresh_token":"SYNTHETIC-RT-` + tag + `","expiry":"2030-01-01T00:00:00Z"}}` + "\n"
+}
+
+func TestAgyBackupCapturesKeychainToken(t *testing.T) {
+	f := newAgyKeychainFixture(t)
+	f.storeToken(agyKeychainToken("alice"))
+	writeFixtureFile(t, f.accountsPath, `{"active":"alice@example.com","old":[]}`)
+
+	if !HasAuthFiles(f.fileSet) {
+		t.Fatal("HasAuthFiles missed a keychain-only agy login")
+	}
+	if err := f.vault.Backup(f.fileSet, "alice"); err != nil {
+		t.Fatalf("Backup: %v", err)
+	}
+	saved := filepath.Join(f.vaultDir, "agy", "alice", "antigravity-oauth-token")
+	if got := readFixtureFile(t, saved); got != agyKeychainToken("alice") {
+		t.Fatalf("vault token = %q, want the unwrapped keychain payload", got)
+	}
+	info, err := os.Stat(f.tokenPath)
+	if err != nil {
+		t.Fatalf("stat mirror: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("mirror mode = %o, want 600", perm)
+	}
+	if id := f.vault.ProfileIdentity("agy", "alice"); id != "alice@example.com" {
+		t.Fatalf("ProfileIdentity = %q, want the active Google account", id)
+	}
+}
+
+func TestAgyBackupRefusesWhenNothingIsStored(t *testing.T) {
+	f := newAgyKeychainFixture(t)
+	writeFixtureFile(t, f.accountsPath, `{"active":"alice@example.com","old":[]}`)
+
+	if HasAuthFiles(f.fileSet) {
+		t.Fatal("HasAuthFiles reported a login with no token anywhere")
+	}
+	err := f.vault.Backup(f.fileSet, "alice")
+	if err == nil {
+		t.Fatal("Backup succeeded with no token anywhere")
+	}
+	for _, want := range []string{f.tokenPath, keychain.AgyService, keychain.AgyAccount} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Backup error %q does not mention %q", err, want)
+		}
+	}
+}
+
+func TestAgyRestorePushesTokenToKeychain(t *testing.T) {
+	f := newAgyKeychainFixture(t)
+
+	f.storeToken(agyKeychainToken("alice"))
+	writeFixtureFile(t, f.accountsPath, `{"active":"alice@example.com","old":[]}`)
+	if err := f.vault.Backup(f.fileSet, "alice"); err != nil {
+		t.Fatalf("Backup alice: %v", err)
+	}
+	f.storeToken(agyKeychainToken("bob"))
+	writeFixtureFile(t, f.accountsPath, `{"active":"bob@example.com","old":["alice@example.com"]}`)
+	if err := f.vault.Backup(f.fileSet, "bob"); err != nil {
+		t.Fatalf("Backup bob: %v", err)
+	}
+
+	if err := f.vault.Restore(f.fileSet, "alice"); err != nil {
+		t.Fatalf("Restore alice: %v", err)
+	}
+	stored, ok := f.storedToken()
+	if !ok {
+		t.Fatal("Restore left no keychain item")
+	}
+	// Stored in the envelope agy itself unwraps: the payload ends in a
+	// newline, so go-keyring base64-wraps it.
+	want := "go-keyring-base64:" + base64.StdEncoding.EncodeToString([]byte(agyKeychainToken("alice")))
+	if stored != want {
+		t.Fatalf("keychain holds %q after activating alice, want the enveloped alice token", stored)
+	}
+	if got := readFixtureFile(t, f.tokenPath); got != agyKeychainToken("alice") {
+		t.Fatalf("mirror holds %q after activating alice", got)
+	}
+	if got := readFixtureFile(t, f.accountsPath); !strings.Contains(got, `"active":"alice@example.com"`) {
+		t.Fatalf("google_accounts.json not restored: %s", got)
+	}
+	if name, _ := f.vault.ActiveProfile(f.fileSet); name != "alice" {
+		t.Fatalf("ActiveProfile = %q, want alice", name)
+	}
+}
+
+func TestAgyRestoreFailsWhenKeychainRefuses(t *testing.T) {
+	f := newAgyKeychainFixture(t)
+	f.storeToken(agyKeychainToken("alice"))
+	if err := f.vault.Backup(f.fileSet, "alice"); err != nil {
+		t.Fatalf("Backup: %v", err)
+	}
+	t.Setenv("CAAM_FAKE_KEYCHAIN_LOCKED", "1")
+	if err := f.vault.Restore(f.fileSet, "alice"); err == nil || !strings.Contains(err.Error(), "keychain") {
+		t.Fatalf("Restore against a locked keychain = %v, want a keychain error", err)
+	}
+}
+
+func TestAgyClearAuthFilesRemovesKeychainItem(t *testing.T) {
+	f := newAgyKeychainFixture(t)
+	f.storeToken(agyKeychainToken("alice"))
+	writeFixtureFile(t, f.tokenPath, agyKeychainToken("alice"))
+
+	if err := ClearAuthFiles(f.fileSet); err != nil {
+		t.Fatalf("ClearAuthFiles: %v", err)
+	}
+	if _, ok := f.storedToken(); ok {
+		t.Fatal("ClearAuthFiles left the keychain item behind")
+	}
+}
+
+// TestAgyBridgeIgnoresRelocatedGeminiHome: a GEMINI_HOME outside HOME (a
+// shallow lane) belongs to the file it names, not to the login keychain.
+func TestAgyBridgeIgnoresRelocatedGeminiHome(t *testing.T) {
+	f := newAgyKeychainFixture(t)
+	f.storeToken(agyKeychainToken("keychain"))
+	t.Setenv("GEMINI_HOME", filepath.Join(t.TempDir(), "lane", ".gemini"))
+	fileSet := AntigravityAuthFiles()
+	if HasAuthFiles(fileSet) {
+		t.Fatal("a relocated GEMINI_HOME with no token file was reported as logged in from the keychain")
 	}
 }
