@@ -893,6 +893,14 @@ func (v *Vault) ResnapshotOutgoing(fileSet AuthFileSet, outgoing, target string)
 	if st, err := os.Stat(profileDir); err != nil || !st.IsDir() {
 		return nil
 	}
+	// A Claude profile captured without an OAuth credential (settings-only,
+	// or API-key mode) has no rotating chain to go stale; when the live
+	// state carries none either there is nothing to refresh, and Backup's
+	// refusal of a token-less snapshot must not block the switch.
+	if fileSet.Tool == "claude" && !fileExists(claudeFileSetPath(fileSet, claudeCredentialsFile)) &&
+		!fileExists(filepath.Join(profileDir, claudeCredentialsFile)) {
+		return nil
+	}
 
 	return v.Backup(fileSet, outgoing)
 }

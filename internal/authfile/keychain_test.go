@@ -478,3 +478,31 @@ func TestAgyBridgeIgnoresRelocatedGeminiHome(t *testing.T) {
 		t.Fatal("a relocated GEMINI_HOME with no token file was reported as logged in from the keychain")
 	}
 }
+
+// TestResnapshotOutgoingSkipsTokenlessClaudeProfile: a profile captured
+// without an OAuth credential has no rotating chain to refresh, so the
+// switch away from it must not be blocked by Backup's refusal to vault a
+// token-less snapshot.
+func TestResnapshotOutgoingSkipsTokenlessClaudeProfile(t *testing.T) {
+	f := newKeychainFixture(t)
+	t.Setenv("CAAM_KEYCHAIN", "0")
+	writeFixtureFile(t, f.statePath, keychainState("alice@example.com"))
+	// The vault profile holds only the session state, as an older backup or
+	// a settings-only login leaves it.
+	if err := os.MkdirAll(filepath.Join(f.vaultDir, "claude", "alice"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeFixtureFile(t, filepath.Join(f.vaultDir, "claude", "alice", ".claude.json"), keychainState("alice@example.com"))
+
+	if err := f.vault.ResnapshotOutgoing(f.fileSet, "alice", "bob"); err != nil {
+		t.Fatalf("ResnapshotOutgoing blocked a switch away from a token-less profile: %v", err)
+	}
+	// With a live credential present the profile is re-captured as usual.
+	writeFixtureFile(t, f.credPath, keychainCreds("at-live"))
+	if err := f.vault.ResnapshotOutgoing(f.fileSet, "alice", "bob"); err != nil {
+		t.Fatalf("ResnapshotOutgoing: %v", err)
+	}
+	if got := readFixtureFile(t, filepath.Join(f.vaultDir, "claude", "alice", ".credentials.json")); got != keychainCreds("at-live") {
+		t.Fatalf("vault credential after re-capture = %q", got)
+	}
+}

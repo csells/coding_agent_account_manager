@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
 )
 
 func kimiToken(t *testing.T, sub, access string) string {
