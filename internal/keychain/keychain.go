@@ -23,6 +23,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/user"
@@ -51,6 +53,43 @@ const defaultBinary = "/usr/bin/security"
 // enough that a headless run cannot hang forever.
 const commandTimeout = 60 * time.Second
 
+// DebugOutput receives the bridge's diagnostics when CAAM_DEBUG is set: which
+// `security` subcommand ran against which item, its exit status, what it said
+// on stderr, and how long it took. The secret itself is never logged. It is a
+// variable so tests can capture the stream.
+var DebugOutput io.Writer = os.Stderr
+
+func debugEnabled() bool {
+	return os.Getenv("CAAM_DEBUG") != ""
+}
+
+// debugf writes one structured diagnostic line when CAAM_DEBUG is set. It is
+// how a bridge that silently answers "no item" is told apart from one that
+// never ran, was denied, or timed out (the failure mode behind a backup that
+// vaulted no credential).
+func debugf(msg string, kv ...any) {
+	if !debugEnabled() {
+		return
+	}
+	logger := slog.New(slog.NewTextHandler(DebugOutput, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger.Debug("keychain: "+msg, kv...)
+}
+
+// itemArgs extracts the service and account named on a `security` command
+// line, which is all of it that is safe to log: an add-generic-password call
+// carries the secret in its arguments.
+func itemArgs(args []string) (service, account string) {
+	for i := 0; i+1 < len(args); i++ {
+		switch args[i] {
+		case "-s":
+			service = args[i+1]
+		case "-a":
+			account = args[i+1]
+		}
+	}
+	return service, account
+}
+
 // Enabled reports whether the keychain bridge should be attempted at all.
 //
 // CAAM_KEYCHAIN=0 turns it off (tests set this, and it is the escape hatch for
@@ -76,7 +115,9 @@ func binary() string {
 
 // run executes `security` with the given arguments and classifies its failure.
 func run(args ...string) (stdout []byte, err error) {
+	service, account := itemArgs(args)
 	if !Enabled() {
+		debugf("bridge disabled, not running security", "subcommand", args[0], "service", service, "account", account, "CAAM_KEYCHAIN", os.Getenv("CAAM_KEYCHAIN"), "goos", runtime.GOOS)
 		return nil, ErrNoKeychain
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
@@ -86,7 +127,21 @@ func run(args ...string) (stdout []byte, err error) {
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
+	start := time.Now()
 	runErr := cmd.Run()
+	elapsed := time.Since(start).Round(time.Millisecond)
+
+	exitCode := 0
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) {
+		exitCode = exitErr.ExitCode()
+	} else if runErr != nil {
+		exitCode = -1
+	}
+	debugf("security ran", "binary", binary(), "subcommand", args[0], "service", service, "account", account,
+		"exit", exitCode, "stdout_bytes", outBuf.Len(), "stderr", strings.TrimSpace(errBuf.String()),
+		"elapsed", elapsed, "timed_out", ctx.Err() != nil, "spawn_error", spawnError(runErr, exitErr))
+
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("keychain: `security %s` timed out after %s (an unanswered keychain prompt?)", args[0], commandTimeout)
 	}
@@ -97,6 +152,16 @@ func run(args ...string) (stdout []byte, err error) {
 		return nil, ErrNoKeychain
 	}
 	return nil, classify(runErr, errBuf.String())
+}
+
+// spawnError describes a failure to run `security` at all (a missing binary,
+// a permission problem) for the diagnostic line; an ordinary non-zero exit is
+// already covered by the exit code.
+func spawnError(runErr error, exitErr *exec.ExitError) string {
+	if runErr == nil || exitErr != nil {
+		return ""
+	}
+	return runErr.Error()
 }
 
 // classify turns `security`'s exit status and diagnostics into one of the

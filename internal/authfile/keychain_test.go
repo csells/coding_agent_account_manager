@@ -253,3 +253,45 @@ func (f *keychainFixture) active() string {
 	}
 	return name
 }
+
+// TestBackupRefusesTokenlessClaudeSnapshot: a Mac with no keychain item and
+// no credentials file used to back up "successfully" — settings and session
+// state, no token — and `caam limits` then found nothing to present. A
+// Required credential that cannot be obtained must be an error that names
+// the item it looked for.
+func TestBackupRefusesTokenlessClaudeSnapshot(t *testing.T) {
+	f := newKeychainFixture(t)
+	// The fake keychain holds no Claude item at all; the state file alone
+	// carries an identity, which is what made the old profile look complete.
+	writeFixtureFile(t, f.statePath, keychainState("alice@example.com"))
+
+	err := f.vault.Backup(f.fileSet, "alice")
+	if err == nil {
+		t.Fatal("Backup succeeded with no credential anywhere")
+	}
+	for _, want := range []string{f.credPath, keychain.ClaudeService, "/login"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Backup error %q does not mention %q", err, want)
+		}
+	}
+	if _, statErr := os.Stat(filepath.Join(f.vaultDir, "claude", "alice", "meta.json")); statErr == nil {
+		t.Fatal("Backup wrote profile metadata despite having no credential")
+	}
+}
+
+// TestBackupAcceptsAPIKeyModeWithoutKeychainItem: API-key mode has no OAuth
+// blob to find; settings.json is the credential and the snapshot stays valid.
+func TestBackupAcceptsAPIKeyModeWithoutKeychainItem(t *testing.T) {
+	f := newKeychainFixture(t)
+	settingsPath := filepath.Join(filepath.Dir(f.credPath), "settings.json")
+	f.fileSet.Files = append(f.fileSet.Files, AuthFileSpec{Tool: "claude", Path: settingsPath, Required: false})
+	writeFixtureFile(t, settingsPath, `{"apiKeyHelper":"/usr/local/bin/key-helper","enabledPlugins":{}}`)
+	writeFixtureFile(t, f.statePath, keychainState("alice@example.com"))
+
+	if err := f.vault.Backup(f.fileSet, "alice"); err != nil {
+		t.Fatalf("Backup rejected an API-key-mode login: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(f.vaultDir, "claude", "alice", "settings.json")); err != nil {
+		t.Fatalf("settings.json not vaulted: %v", err)
+	}
+}

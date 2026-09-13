@@ -23,14 +23,18 @@ func ReadClaude() ([]byte, error) {
 	account := LoginAccount()
 	secret, err := Get(ClaudeService, account)
 	if errors.Is(err, ErrNotFound) && account != "" {
+		debugf("no Claude item under the login account, retrying by service alone", "service", ClaudeService, "account", account)
 		secret, err = Get(ClaudeService, "")
 	}
 	if err != nil {
+		debugf("Claude item not read", "service", ClaudeService, "account", account, "error", err)
 		return nil, err
 	}
 	if !validJSONObject(secret) {
+		debugf("Claude item is not a JSON object", "service", ClaudeService, "account", account, "bytes", len(secret))
 		return nil, fmt.Errorf("keychain: item %q does not hold a JSON object", ClaudeService)
 	}
+	debugf("Claude item read", "service", ClaudeService, "account", account, "bytes", len(secret))
 	return secret, nil
 }
 

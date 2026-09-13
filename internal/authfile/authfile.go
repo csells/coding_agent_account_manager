@@ -22,6 +22,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/keychain"
 )
 
 // AuthFileSpec defines where a tool stores its auth credentials.
@@ -491,8 +493,12 @@ func (v *Vault) Backup(fileSet AuthFileSet, profile string) error {
 		return fmt.Errorf("no auth files found to backup for %s; ensure you're logged in first with '%s' or 'caam add %s'", tool, tool, tool)
 	}
 	if len(missingRequired) > 0 {
-		if !(fileSet.AllowOptionalOnly && !requiredFound && optionalFound) {
-			return fmt.Errorf("required auth file not found: %s", missingRequired[0])
+		// A snapshot without the required credential is only an account when
+		// an optional file carries a credential of its own (API-key mode).
+		// Otherwise it is settings with no token in them — exactly the profile
+		// that reported success and vaulted nothing, so it is refused loudly.
+		if !(fileSet.AllowOptionalOnly && !requiredFound && optionalFound && optionalFilesCarryAuth(fileSet)) {
+			return missingRequiredBackupError(fileSet, missingRequired[0])
 		}
 	}
 
@@ -574,6 +580,75 @@ func (v *Vault) Backup(fileSet AuthFileSet, profile string) error {
 	}
 
 	return nil
+}
+
+// optionalFilesCarryAuth reports whether a file set's optional files hold a
+// credential of their own, so a snapshot taken without the required file is
+// still an account rather than an empty shell. Only Claude has optional files
+// that can carry auth (API-key mode via settings.json, the config-dir
+// auth.json, or the desktop token cache); every other AllowOptionalOnly tool
+// keeps its existing behaviour.
+func optionalFilesCarryAuth(fileSet AuthFileSet) bool {
+	if fileSet.Tool != "claude" {
+		return true
+	}
+	for _, spec := range fileSet.Files {
+		if spec.Required {
+			continue
+		}
+		switch {
+		case isClaudeUserSettings(fileSet.Tool, spec.Path):
+			if claudeUserSettingsCarryAuth(spec.Path) {
+				return true
+			}
+		case isClaudeDesktopConfig(fileSet.Tool, spec.Path):
+			if _, ok, err := claudeDesktopTokenCache(spec.Path); err == nil && ok {
+				return true
+			}
+		case filepath.Base(spec.Path) == "auth.json":
+			if fileExists(spec.Path) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// claudeUserSettingsCarryAuth reports whether ~/.claude/settings.json puts
+// Claude Code in API-key mode: an apiKeyHelper, or an env block that supplies
+// the key or auth token directly.
+func claudeUserSettingsCarryAuth(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var root map[string]interface{}
+	if err := json.Unmarshal(data, &root); err != nil {
+		return false
+	}
+	if jsonString(root, "apiKeyHelper") != "" {
+		return true
+	}
+	if env, ok := root["env"].(map[string]interface{}); ok {
+		for _, key := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"} {
+			if jsonString(env, key) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// missingRequiredBackupError names what a backup could not find. On a Mac
+// the Claude credential is a keychain item before it is a file, so the error
+// says which item was looked for and under which account, and how to see the
+// lookups themselves.
+func missingRequiredBackupError(fileSet AuthFileSet, path string) error {
+	if fileSet.Tool == "claude" && claudeKeychainPath(fileSet) != "" && filepath.Base(path) == claudeCredentialsFile {
+		return fmt.Errorf("no Claude Code credential to back up: %s is absent and the login keychain holds no %q item for account %q; log in with /login in Claude Code, then back up again (CAAM_DEBUG=1 prints every keychain lookup)",
+			path, keychain.ClaudeService, keychain.LoginAccount())
+	}
+	return fmt.Errorf("required auth file not found: %s", path)
 }
 
 // HasOriginalBackup reports whether the system-managed `_original` profile exists
