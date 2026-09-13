@@ -37,6 +37,7 @@ import (
 	grokprovider "github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider/grok"
 	opencodeprovider "github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider/opencode"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/tui"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/version"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/warnings"
 	"github.com/spf13/cobra"
@@ -299,6 +300,8 @@ func buildProfileHealth(tool, profileName string) *health.ProfileHealth {
 		// Migrate legacy vault filename before reading.
 		_ = authfile.MigrateGeminiVaultDir(vaultPath)
 		expInfo, err = health.ParseGeminiExpiry(vaultPath)
+	case "agy":
+		expInfo, err = health.ParseAgyExpiry(vaultPath)
 	case "grok":
 		// Grok's auth.json is keyed by a dynamic "<issuer>::<client-id>" key,
 		// which the Codex parser cannot read; without its own case every Grok
@@ -350,6 +353,8 @@ func liveAuthExpiry(tool string) *health.ExpiryInfo {
 		info, err = health.ParseCodexExpiry("")
 	case "gemini":
 		info, err = health.ParseGeminiExpiry("")
+	case "agy":
+		info, err = health.ParseAgyExpiry("")
 	case "grok":
 		home, homeErr := os.UserHomeDir()
 		if homeErr != nil {
@@ -413,6 +418,8 @@ func parseLiveProfileExpiry(tool, profileName string) *health.ExpiryInfo {
 		info, err = health.ParseClaudeExpiry(filepath.Join(prof.HomePath(), ".claude"))
 	case "gemini":
 		info, err = health.ParseGeminiExpiry(filepath.Join(prof.HomePath(), ".gemini"))
+	case "agy":
+		info, err = health.ParseAgyExpiry(filepath.Join(prof.HomePath(), ".gemini", "antigravity-cli"))
 	case "grok":
 		info, err = health.ParseGrokExpiry(filepath.Join(prof.HomePath(), ".grok", "auth.json"))
 	default:
@@ -468,6 +475,13 @@ func getVaultIdentity(tool, profileName string) *identity.Identity {
 			normalizeIdentityPlan(id)
 			return id
 		}
+	case "agy":
+		id, err := identity.ExtractFromAgyProfile(vaultPath)
+		if err != nil {
+			return nil
+		}
+		normalizeIdentityPlan(id)
+		return id
 	case "grok":
 		id, err := identity.ExtractFromGrokAuth(filepath.Join(vaultPath, "auth.json"))
 		if err != nil {
@@ -754,7 +768,10 @@ type backupOutput struct {
 	Tool    string `json:"tool"`
 	Profile string `json:"profile"`
 	Path    string `json:"path"`
-	Error   string `json:"error,omitempty"`
+	// Identity is the account the snapshot was resolved to when the tool's
+	// files carry none of their own (Antigravity).
+	Identity string `json:"identity,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 // backupCmd saves current auth files to the vault.
@@ -831,6 +848,21 @@ func runBackup(cmd *cobra.Command, args []string) error {
 	output.Success = true
 	output.Path = vault.ProfilePath(tool, profileName)
 
+	// The Antigravity token carries no identity and no agy file records the
+	// signed-in Google account, so ask Google once, now, and keep the answer
+	// with the snapshot. Best-effort: offline, the profile is still captured.
+	identityNote := ""
+	if tool == "agy" {
+		if email, err := resolveAgyIdentity(cmd.Context()); err == nil {
+			if err := vault.RecordProfileIdentity(tool, profileName, email); err == nil {
+				output.Identity = email
+				identityNote = email
+			}
+		} else if !jsonOutput {
+			fmt.Fprintf(os.Stderr, "Warning: could not resolve the Google account for this profile: %v\n", err)
+		}
+	}
+
 	if jsonOutput {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
@@ -839,7 +871,29 @@ func runBackup(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Backed up %s auth to profile '%s'\n", tool, profileName)
 	fmt.Printf("  Vault: %s\n", output.Path)
+	if identityNote != "" {
+		fmt.Printf("  Account: %s\n", identityNote)
+	}
 	return nil
+}
+
+// resolveAgyIdentity asks Google which account the live Antigravity token
+// belongs to (userinfo, with the token in the Authorization header).
+func resolveAgyIdentity(ctx context.Context) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	path := liveCredentialPath("agy")
+	if path == "" {
+		return "", fmt.Errorf("no live Antigravity credential path")
+	}
+	token, _, err := usage.ReadCredentials("agy", path)
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return usage.NewAgyFetcher().AgyUserInfo(ctx, token)
 }
 
 // statusOutput is the JSON output structure for status command.
@@ -873,6 +927,30 @@ type statusHealth struct {
 	health.Signals
 }
 
+// statusTools is the order `caam status` reports every managed tool in: the
+// three original providers first, as they always were, then the rest in the
+// order the root help lists them. Every tool caam can swap auth for is shown,
+// so a logged-in tool is never silently missing from the active-account view;
+// a tool with no auth reads "(not logged in)".
+func statusTools() []string {
+	preferred := []string{"codex", "claude", "gemini", "agy", "grok", "opencode", "cursor"}
+	seen := make(map[string]bool, len(preferred))
+	var out []string
+	for _, tool := range preferred {
+		if _, ok := tools[tool]; ok && !seen[tool] {
+			out = append(out, tool)
+			seen[tool] = true
+		}
+	}
+	for _, tool := range supportedTools() {
+		if !seen[tool] {
+			out = append(out, tool)
+			seen[tool] = true
+		}
+	}
+	return out
+}
+
 // statusCmd shows which profile is currently active.
 var statusCmd = &cobra.Command{
 	Use:   "status [tool]",
@@ -899,7 +977,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	jsonOutput, _ := cmd.Flags().GetBool("json")
 	formatOpts := health.FormatOptions{NoColor: noColor || !isTerminal()}
 
-	toolsToCheck := []string{"codex", "claude", "gemini"}
+	toolsToCheck := statusTools()
 	if len(args) > 0 {
 		tool := strings.ToLower(args[0])
 		if _, ok := tools[tool]; !ok {

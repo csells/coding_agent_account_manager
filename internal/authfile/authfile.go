@@ -583,6 +583,50 @@ func (v *Vault) Backup(fileSet AuthFileSet, profile string) error {
 	return nil
 }
 
+// RecordProfileIdentity stores a human-readable account identity (an email)
+// in a profile's meta.json, for tools whose credential files carry no
+// identity of their own and whose identity a caller resolved elsewhere — the
+// Antigravity CLI, whose Google account is only known to Google. It is what
+// `caam ls` and `caam status` show, and what ActiveProfile can match on once
+// the token has rotated. A profile that is not in the vault is an error.
+func (v *Vault) RecordProfileIdentity(tool, profile, identity string) error {
+	profileDir, err := v.safeProfileDir(tool, profile)
+	if err != nil {
+		return err
+	}
+	metaPath := filepath.Join(profileDir, "meta.json")
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		return fmt.Errorf("read profile metadata: %w", err)
+	}
+	var meta map[string]interface{}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return fmt.Errorf("parse profile metadata: %w", err)
+	}
+	identity = strings.TrimSpace(identity)
+	if identity == "" {
+		return fmt.Errorf("empty identity for %s/%s", tool, profile)
+	}
+	meta["identity"] = identity
+	return writeJSONFileAtomic(metaPath, meta, 0600)
+}
+
+// profileMetaIdentity reads the identity Backup (or RecordProfileIdentity)
+// stored in a profile's meta.json, "" when absent.
+func profileMetaIdentity(profileDir string) string {
+	data, err := os.ReadFile(filepath.Join(profileDir, "meta.json"))
+	if err != nil {
+		return ""
+	}
+	var meta struct {
+		Identity string `json:"identity"`
+	}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(meta.Identity)
+}
+
 // optionalFilesCarryAuth reports whether a file set's optional files hold a
 // credential of their own, so a snapshot taken without the required file is
 // still an account rather than an empty shell. Only Claude has optional files
@@ -1256,6 +1300,12 @@ func (v *Vault) ActiveProfile(fileSet AuthFileSet) (string, error) {
 	if fileSet.Tool == "claude" {
 		return v.claudeActiveProfileByIdentity(fileSet, profiles), nil
 	}
+	// Google rotates the Antigravity access token hourly, so the token file
+	// stops matching its own snapshot within the hour; the active Google
+	// account recorded beside it does not change.
+	if fileSet.Tool == "agy" {
+		return v.agyActiveProfileByIdentity(fileSet, profiles), nil
+	}
 
 	return "", nil
 }
@@ -1635,9 +1685,47 @@ func stableFileHash(tool, path string) (string, error) {
 		return stableClaudeHash(path)
 	case "codex":
 		return stableCodexHash(path)
+	case "agy":
+		return stableAgyHash(path)
 	default:
 		return hashFile(path)
 	}
+}
+
+// stableAgyHash hashes the Antigravity token file by its refresh token
+// alone. Google renews the access token (and its expiry) every hour while
+// the same login stays in place, so a whole-file hash stops matching the
+// profile's own snapshot within the hour; the refresh token only changes
+// with a new login, which is a new account or a new grant either way. A file
+// without one hashes whole, as before.
+func stableAgyHash(path string) (string, error) {
+	if filepath.Base(path) != agyTokenFile {
+		return hashFile(path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	var root struct {
+		Token struct {
+			RefreshToken string `json:"refresh_token"`
+		} `json:"token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.Unmarshal(data, &root); err != nil {
+		return hashBytes(data), nil
+	}
+	refresh := root.Token.RefreshToken
+	if refresh == "" {
+		refresh = root.RefreshToken
+	}
+	if refresh == "" {
+		return hashBytes(data), nil
+	}
+	h := sha256.New()
+	h.Write([]byte("agy:refresh-token:"))
+	h.Write([]byte(refresh))
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // stableClaudeHash extracts identity-bearing fields from Claude auth files and
@@ -2094,8 +2182,50 @@ func (v *Vault) ProfileIdentity(tool, profile string) string {
 // email) from an Antigravity (agy) vault profile by reading google_accounts.json.
 // It never reads the antigravity-oauth-token bytes.
 func (v *Vault) agyProfileIdentity(profileDir string) string {
-	accountsPath := filepath.Join(profileDir, "google_accounts.json")
-	data, err := os.ReadFile(accountsPath)
+	if email := agyActiveAccount(filepath.Join(profileDir, "google_accounts.json")); email != "" {
+		return email
+	}
+	// google_accounts.json is the legacy Gemini CLI's and may name no active
+	// account at all; the identity `caam backup agy` resolved from Google is
+	// recorded in meta.json instead.
+	return profileMetaIdentity(profileDir)
+}
+
+// agyActiveProfileByIdentity is the rotation-tolerant fallback used by
+// ActiveProfile for Antigravity: the profile whose google_accounts.json
+// names the same active account as the live one is the active profile.
+// User-named profiles win over system profiles, which can legitimately carry
+// the same account.
+func (v *Vault) agyActiveProfileByIdentity(fileSet AuthFileSet, profiles []string) string {
+	var live string
+	for _, spec := range fileSet.Files {
+		if filepath.Base(spec.Path) == "google_accounts.json" {
+			live = agyActiveAccount(spec.Path)
+			break
+		}
+	}
+	if live == "" {
+		return ""
+	}
+	systemMatch := ""
+	for _, profile := range profiles {
+		if v.agyProfileIdentity(v.ProfilePath(fileSet.Tool, profile)) != live {
+			continue
+		}
+		if !IsSystemProfile(profile) {
+			return profile
+		}
+		if systemMatch == "" {
+			systemMatch = profile
+		}
+	}
+	return systemMatch
+}
+
+// agyActiveAccount returns the active Google account email recorded in a
+// google_accounts.json, or "".
+func agyActiveAccount(path string) string {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
@@ -2105,7 +2235,7 @@ func (v *Vault) agyProfileIdentity(profileDir string) string {
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		return ""
 	}
-	return parsed.Active
+	return strings.TrimSpace(parsed.Active)
 }
 
 // codexProfileIdentity extracts identity from a Codex vault profile by parsing

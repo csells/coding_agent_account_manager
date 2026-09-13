@@ -817,6 +817,68 @@ func parseExpiresIn(v any) int64 {
 	return 0
 }
 
+// ParseAgyExpiry extracts token expiry from the Antigravity CLI's token
+// file — <authDir>/antigravity-oauth-token, or the live one under
+// GEMINI_HOME / ~/.gemini/antigravity-cli when authDir is "". On a Mac the
+// live token is a login-keychain item mirrored onto that file, so the mirror
+// is refreshed first.
+//
+// The file is JSON with an oauth2 token object nested under "token":
+//
+//	{"auth_method":"oauth","token":{"access_token":"...","token_type":"Bearer",
+//	 "refresh_token":"...","expiry":"2026-09-13T12:42:14.351122-07:00"}}
+//
+// Google renews the access token hourly from the refresh token whenever agy
+// runs, so a credential that carries one is renewable — and self-refreshing,
+// in the same sense as Claude's: caam holds no Antigravity OAuth client and
+// must not try to renew it, so an hourly expiry is routine lifecycle, not a
+// fault to warn about.
+func ParseAgyExpiry(authDir string) (*ExpiryInfo, error) {
+	var tokenPath string
+	if authDir == "" {
+		geminiHome := os.Getenv("GEMINI_HOME")
+		if geminiHome == "" {
+			homeDir, _ := os.UserHomeDir()
+			geminiHome = filepath.Join(homeDir, ".gemini")
+		}
+		tokenPath = filepath.Join(geminiHome, "antigravity-cli", "antigravity-oauth-token")
+		_, _ = keychain.EnsureAgyMirror(tokenPath)
+	} else {
+		tokenPath = filepath.Join(authDir, "antigravity-oauth-token")
+	}
+
+	data, err := os.ReadFile(tokenPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrNoAuthFile
+		}
+		return nil, err
+	}
+	info, err := parseAgyTokenJSON(data)
+	if err != nil {
+		return nil, err
+	}
+	info.SelfRefreshing = info.HasRefreshToken
+	info.Renewable = info.HasRefreshToken
+	info.Source = tokenPath
+	return info, nil
+}
+
+// parseAgyTokenJSON extracts expiry info from the contents of an Antigravity
+// token file: the nested oauth2 object first, then a flat layout.
+func parseAgyTokenJSON(data []byte) (*ExpiryInfo, error) {
+	var root struct {
+		Token json.RawMessage `json:"token"`
+	}
+	if err := json.Unmarshal(data, &root); err != nil {
+		return nil, fmt.Errorf("parse JSON: %w", err)
+	}
+	if len(root.Token) > 0 && root.Token[0] == '{' {
+		return parseOAuthJSON(root.Token)
+	}
+	return parseOAuthJSON(data)
+}
+
 // ParseAllExpiry attempts to parse expiry for all providers and returns combined results.
 func ParseAllExpiry() map[string]*ExpiryInfo {
 	results := make(map[string]*ExpiryInfo)
@@ -829,6 +891,9 @@ func ParseAllExpiry() map[string]*ExpiryInfo {
 	}
 	if info, err := ParseGeminiExpiry(""); err == nil {
 		results["gemini"] = info
+	}
+	if info, err := ParseAgyExpiry(""); err == nil {
+		results["agy"] = info
 	}
 
 	return results

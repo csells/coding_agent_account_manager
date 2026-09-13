@@ -1142,3 +1142,52 @@ func TestParseGrokExpiry(t *testing.T) {
 		}
 	})
 }
+
+func TestParseAgyExpiry(t *testing.T) {
+	t.Setenv("CAAM_KEYCHAIN", "0")
+	dir := t.TempDir()
+	tokenPath := filepath.Join(dir, "antigravity-oauth-token")
+
+	if _, err := ParseAgyExpiry(dir); !errors.Is(err, ErrNoAuthFile) {
+		t.Fatalf("ParseAgyExpiry(empty dir) = %v, want ErrNoAuthFile", err)
+	}
+
+	nested := `{"auth_method":"oauth","token":{"access_token":"SYNTHETIC","token_type":"Bearer","refresh_token":"SYNTHETIC-RT","expiry":"2030-01-01T12:00:00Z"}}`
+	if err := os.WriteFile(tokenPath, []byte(nested), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := ParseAgyExpiry(dir)
+	if err != nil {
+		t.Fatalf("ParseAgyExpiry: %v", err)
+	}
+	if info.ExpiresAt.Year() != 2030 || info.ExpiresAt.Hour() != 12 {
+		t.Errorf("ExpiresAt = %v, want the nested token's expiry", info.ExpiresAt)
+	}
+	if !info.HasRefreshToken || !info.Renewable {
+		t.Errorf("refresh token not recognised: %+v", info)
+	}
+	if !info.SelfRefreshing {
+		t.Error("SelfRefreshing must be set: agy renews its own token and caam cannot")
+	}
+	if info.Source != tokenPath {
+		t.Errorf("Source = %q, want %q", info.Source, tokenPath)
+	}
+
+	// The live location follows GEMINI_HOME.
+	geminiHome := filepath.Join(t.TempDir(), ".gemini")
+	t.Setenv("GEMINI_HOME", geminiHome)
+	if err := os.MkdirAll(filepath.Join(geminiHome, "antigravity-cli"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	flat := `{"access_token":"SYNTHETIC","expires_at":1893456000}`
+	if err := os.WriteFile(filepath.Join(geminiHome, "antigravity-cli", "antigravity-oauth-token"), []byte(flat), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err = ParseAgyExpiry("")
+	if err != nil {
+		t.Fatalf("ParseAgyExpiry(live): %v", err)
+	}
+	if info.ExpiresAt.IsZero() || info.HasRefreshToken {
+		t.Errorf("flat layout parsed as %+v", info)
+	}
+}
