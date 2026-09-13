@@ -120,8 +120,7 @@ func (p *ProviderPanel) View() string {
 			style = p.styles.SelectedItem
 		}
 
-		// Capitalize first letter for display
-		displayName := capitalizeFirst(name)
+		displayName := providerLabel(name)
 		item := fmt.Sprintf("%s%s %s", indicator, displayName, countStr)
 		items = append(items, style.Render(item))
 	}
@@ -140,6 +139,24 @@ func (p *ProviderPanel) View() string {
 
 // capitalizeFirst capitalizes the first letter of a string.
 // Uses Unicode-aware rune handling.
+// providerLabel is the name a provider goes by on screen: the product's
+// own name, not its caam id ("Antigravity", not "Agy").
+func providerLabel(id string) string {
+	switch id {
+	case "agy":
+		return "Antigravity"
+	case "kimi":
+		return "Kimi Code"
+	case "zcode":
+		return "zcode"
+	case "opencode":
+		return "OpenCode"
+	case "grok":
+		return "Grok"
+	}
+	return capitalizeFirst(id)
+}
+
 func capitalizeFirst(s string) string {
 	if s == "" {
 		return s

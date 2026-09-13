@@ -213,6 +213,51 @@ type Model struct {
 	notice    string
 	noticeErr bool
 	noticeKey string
+
+	// profileHealth is each profile's health verdict as computed when the
+	// profiles were loaded (see computeHealthMap), keyed provider/name.
+	profileHealth map[string]*health.ProfileHealth
+}
+
+// computeHealthMap builds the health verdict for every listed profile. With
+// Hooks.Health it is the same verdict `caam ls` and `caam status` print —
+// parsed from the profile's credential, live or vaulted — rather than the
+// stored snapshot, which records an expiry only when something wrote one
+// and so read "Unknown" for accounts the CLI called healthy. Without the
+// hook the stored snapshot is what there is. It runs inside the load
+// command, off the UI goroutine.
+func (m Model) computeHealthMap(profiles map[string][]Profile) map[string]*health.ProfileHealth {
+	out := make(map[string]*health.ProfileHealth)
+	for provider, ps := range profiles {
+		for _, p := range ps {
+			var h *health.ProfileHealth
+			if m.hooks.Health != nil {
+				h = m.hooks.Health(provider, p.Name)
+			} else if m.healthStorage != nil {
+				if stored, err := m.healthStorage.GetProfile(provider, p.Name); err == nil {
+					h = stored
+				}
+			}
+			if h != nil {
+				out[limitsKey(provider, p.Name)] = h
+			}
+		}
+	}
+	return out
+}
+
+// healthFor returns a profile's health verdict: the one computed at load
+// time, else the stored snapshot.
+func (m Model) healthFor(provider, name string) *health.ProfileHealth {
+	if h, ok := m.profileHealth[limitsKey(provider, name)]; ok && h != nil {
+		return h
+	}
+	if m.healthStorage != nil {
+		if h, err := m.healthStorage.GetProfile(provider, name); err == nil && h != nil {
+			return h
+		}
+	}
+	return nil
 }
 
 // selectionKey identifies the selected provider/profile, or "" when none.
@@ -523,7 +568,7 @@ func (m Model) loadProfiles() tea.Msg {
 		profiles[name] = ps
 	}
 
-	return profilesLoadedMsg{profiles: profiles, meta: meta, vaultMeta: vaultMeta}
+	return profilesLoadedMsg{profiles: profiles, meta: meta, vaultMeta: vaultMeta, health: m.computeHealthMap(profiles)}
 }
 
 func authFileSetForProvider(provider string) (authfile.AuthFileSet, bool) {
@@ -535,6 +580,7 @@ type profilesLoadedMsg struct {
 	profiles  map[string][]Profile
 	meta      map[string]map[string]*profile.Profile
 	vaultMeta map[string]map[string]vaultProfileMeta
+	health    map[string]*health.ProfileHealth
 }
 
 // errMsg is sent when an error occurs.
@@ -848,6 +894,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case profilesLoadedMsg:
 		m.profiles = msg.profiles
+		if msg.health != nil {
+			m.profileHealth = msg.health
+		}
 		if msg.meta != nil {
 			m.profileMeta = msg.meta
 		} else {
@@ -877,6 +926,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.profiles = msg.profiles
+		if msg.health != nil {
+			m.profileHealth = msg.health
+		}
 		if msg.meta != nil {
 			m.profileMeta = msg.meta
 		}
@@ -1620,7 +1672,7 @@ func (m Model) handleOpenInBrowser() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.statusMsg = fmt.Sprintf("Opened %s account page in browser", strings.ToUpper(provider[:1])+provider[1:])
+	m.statusMsg = fmt.Sprintf("Opened %s account page in browser", providerLabel(provider))
 	return m, nil
 }
 
@@ -2224,13 +2276,13 @@ func (m Model) buildProfileInfo(provider string, p Profile, projectDefault strin
 	penalty := float64(0)
 	var tokenExpiry time.Time
 
-	if m.healthStorage != nil {
-		if h, err := m.healthStorage.GetProfile(provider, p.Name); err == nil && h != nil {
-			healthStatus = health.CalculateStatus(h)
-			errorCount = h.ErrorCount1h
-			penalty = h.Penalty
-			tokenExpiry = h.TokenExpiresAt
-		}
+	renewable := false
+	if h := m.healthFor(provider, p.Name); h != nil {
+		healthStatus = health.CalculateStatus(h)
+		errorCount = h.ErrorCount1h
+		penalty = h.Penalty
+		tokenExpiry = h.TokenExpiresAt
+		renewable = h.CredentialRenewable()
 	}
 
 	return ProfileInfo{
@@ -2248,6 +2300,7 @@ func (m Model) buildProfileInfo(provider string, p Profile, projectDefault strin
 		TokenExpiry:    tokenExpiry,
 		ErrorCount:     errorCount,
 		Penalty:        penalty,
+		Renewable:      renewable,
 		NoCredential:   vmeta.NoCredential,
 	}
 }
@@ -2336,14 +2389,13 @@ func (m Model) syncDetailPanel() {
 	penalty := float64(0)
 	var tokenExpiry time.Time
 
-	// Fetch real health data if available
-	if m.healthStorage != nil {
-		if h, err := m.healthStorage.GetProfile(provider, profileName); err == nil && h != nil {
-			healthStatus = health.CalculateStatus(h)
-			errorCount = h.ErrorCount1h
-			penalty = h.Penalty
-			tokenExpiry = h.TokenExpiresAt
-		}
+	renewable := false
+	if h := m.healthFor(provider, profileName); h != nil {
+		healthStatus = health.CalculateStatus(h)
+		errorCount = h.ErrorCount1h
+		penalty = h.Penalty
+		tokenExpiry = h.TokenExpiresAt
+		renewable = h.CredentialRenewable()
 	}
 
 	authMode := "oauth"
@@ -2406,6 +2458,7 @@ func (m Model) syncDetailPanel() {
 		ErrorCount:   errorCount,
 		Penalty:      penalty,
 		Limits:       m.limitsInfoFor(provider, profileName),
+		Renewable:    renewable,
 		NoCredential: vmeta.NoCredential,
 	}
 	if m.notice != "" && m.noticeKey == limitsKey(provider, profileName) {
@@ -2970,7 +3023,7 @@ func (m Model) providerCount(provider string) int {
 func (m Model) renderProviderTabs() string {
 	var tabs []string
 	for i, p := range m.providers {
-		label := capitalizeFirst(p)
+		label := providerLabel(p)
 		if m.width >= 80 {
 			if count := m.providerCount(p); count > 0 {
 				label = fmt.Sprintf("%s %d", label, count)
@@ -3139,7 +3192,7 @@ func (m Model) statusModeIndicator() string {
 	default:
 		// Show current provider as context
 		if len(m.providers) > 0 && m.activeProvider >= 0 && m.activeProvider < len(m.providers) {
-			provider := strings.ToUpper(m.providers[m.activeProvider])
+			provider := strings.ToUpper(providerLabel(m.providers[m.activeProvider]))
 			return m.styles.StatusModeNormal.Render(provider)
 		}
 		return m.styles.StatusModeNormal.Render("NORMAL")
@@ -3502,6 +3555,7 @@ type profilesRefreshedMsg struct {
 	profiles  map[string][]Profile
 	meta      map[string]map[string]*profile.Profile
 	vaultMeta map[string]map[string]vaultProfileMeta
+	health    map[string]*health.ProfileHealth
 	ctx       refreshContext
 	err       error
 }
@@ -3558,7 +3612,7 @@ func (m Model) refreshProfiles(ctx refreshContext) tea.Cmd {
 			profiles[name] = ps
 		}
 
-		return profilesRefreshedMsg{profiles: profiles, meta: meta, vaultMeta: vaultMeta, ctx: ctx}
+		return profilesRefreshedMsg{profiles: profiles, meta: meta, vaultMeta: vaultMeta, health: m.computeHealthMap(profiles), ctx: ctx}
 	}
 }
 
@@ -3769,6 +3823,6 @@ func (m Model) refreshProfilesWithIndex(provider string, index int) tea.Cmd {
 			ctx.selectedProfile = providerProfiles[index].Name
 		}
 
-		return profilesRefreshedMsg{profiles: profiles, ctx: ctx}
+		return profilesRefreshedMsg{profiles: profiles, health: m.computeHealthMap(profiles), ctx: ctx}
 	}
 }

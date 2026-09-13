@@ -31,6 +31,9 @@ type ProfileInfo struct {
 	// NoCredential marks a vault profile with settings but no credential
 	// file: it cannot be switched to until it is re-captured.
 	NoCredential bool
+	// Renewable marks a credential the provider's CLI (or caam) renews on
+	// its own, so its expiry is informational, never a fault.
+	Renewable bool
 }
 
 // ProfilesPanel renders the center panel showing profiles for the selected provider.
@@ -242,6 +245,11 @@ func formatTUIStatus(pi *ProfileInfo) string {
 
 	ttl := time.Until(pi.TokenExpiry)
 	if ttl <= 0 {
+		if pi.Renewable {
+			// Matches `caam ls`: a lapsed token that renews on its own is
+			// not an expired account (health.FormatStatus).
+			return icon + " Auto-refresh"
+		}
 		return icon + " Expired"
 	}
 
@@ -364,7 +372,7 @@ func (p *ProfilesPanel) SetSize(width, height int) {
 // View renders the profiles panel.
 func (p *ProfilesPanel) View() string {
 	// Title
-	title := p.styles.Title.Render(capitalizeFirst(p.provider) + " Profiles")
+	title := p.styles.Title.Render(providerLabel(p.provider) + " Profiles")
 
 	if len(p.profiles) == 0 {
 		empty := p.styles.Empty.Render(emptyProfilesMessage(p.provider))
@@ -538,7 +546,7 @@ func (p *ProfilesPanel) View() string {
 }
 
 func emptyProfilesMessage(provider string) string {
-	label := capitalizeFirst(provider)
+	label := providerLabel(provider)
 	return fmt.Sprintf("📭 No profiles for %s yet\n\nRun: caam backup %s <email>", label, provider)
 }
 

@@ -1009,6 +1009,7 @@ func tuiHooks() tui.Hooks {
 			return err
 		},
 		Limits: fetchProfileLimits,
+		Health: getProfileHealth,
 	}
 }
 

@@ -31,6 +31,8 @@ type DetailInfo struct {
 	Limits *LimitsInfo
 	// NoCredential marks a profile that holds settings but no credential.
 	NoCredential bool
+	// Renewable marks a self-renewing credential (its expiry is not a fault).
+	Renewable bool
 	// Notice is the outcome of the last action on this profile (a switch
 	// result, a refusal), shown under the title; NoticeErr styles it red.
 	Notice    string
@@ -228,7 +230,7 @@ func (p *DetailPanel) View() string {
 	// ═══ PROFILE SECTION ═══
 	profileHeader := p.styles.SectionHeader.Render("Profile")
 	var profileRows []string
-	profileRows = append(profileRows, p.renderRow("Provider", capitalizeFirst(prof.Provider)))
+	profileRows = append(profileRows, p.renderRow("Provider", providerLabel(prof.Provider)))
 	if prof.Account != "" {
 		profileRows = append(profileRows, p.renderRow("Account", prof.Account))
 	}
@@ -264,10 +266,13 @@ func (p *DetailPanel) View() string {
 	if !prof.TokenExpiry.IsZero() {
 		ttl := time.Until(prof.TokenExpiry)
 		expiryStr := ""
-		if ttl < 0 {
-			expiryStr = p.styles.StatusBad.Render("Expired")
-		} else {
+		switch {
+		case ttl >= 0:
 			expiryStr = fmt.Sprintf("Expires in %s", formatDurationFull(ttl))
+		case prof.Renewable:
+			expiryStr = "renews on next use"
+		default:
+			expiryStr = p.styles.StatusBad.Render("Expired")
 		}
 		authRows = append(authRows, p.renderRow("Token", expiryStr))
 	}

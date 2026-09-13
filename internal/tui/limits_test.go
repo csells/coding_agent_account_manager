@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
 )
 
@@ -292,5 +295,70 @@ func TestSwitchOutcomeShowsOnTheCard(t *testing.T) {
 	m.syncDetailPanel()
 	if v := flatCard(m.detailPanel.View()); !strings.Contains(v, "Activate failed") || !strings.Contains(v, "holds no credential") {
 		t.Fatalf("failure not on the card:\n%s", v)
+	}
+}
+
+func TestHealthHookDrivesTheListStatus(t *testing.T) {
+	// The stored snapshot knows nothing about these profiles; the hook does.
+	hooks := Hooks{Health: func(provider, profile string) *health.ProfileHealth {
+		switch profile {
+		case "fresh@example.com":
+			return &health.ProfileHealth{TokenExpiresAt: time.Now().Add(3 * time.Hour), PlanType: "max"}
+		case "renews@example.com":
+			return &health.ProfileHealth{TokenExpiresAt: time.Now().Add(-time.Hour), SelfRefreshing: true}
+		}
+		return nil
+	}}
+	m := New()
+	m.width, m.height = 160, 40
+	m.hooks = hooks
+	vault := authfile.NewVault(m.vaultPath)
+	for _, name := range []string{"fresh@example.com", "renews@example.com"} {
+		dir := vault.ProfilePath("agy", name)
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "antigravity-oauth-token"), []byte(`{"access_token":"x"}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, p := range m.providers {
+		if p == "agy" {
+			m.activeProvider = i
+		}
+	}
+
+	msg := m.loadProfiles()
+	loaded, ok := msg.(profilesLoadedMsg)
+	if !ok {
+		t.Fatalf("loadProfiles returned %T", msg)
+	}
+	updated, _ := m.Update(loaded)
+	m = updated.(Model)
+
+	view := m.profilesPanel.View()
+	if !strings.Contains(view, "Antigravity Profiles") {
+		t.Errorf("provider label not Antigravity:\n%s", view)
+	}
+	if strings.Contains(view, "Unknown") {
+		t.Errorf("hook-computed health still reads Unknown:\n%s", view)
+	}
+	if !strings.Contains(view, "Auto-refresh") {
+		t.Errorf("self-renewing lapsed token should read Auto-refresh, as caam ls does:\n%s", view)
+	}
+	if strings.Contains(view, "Expired") {
+		t.Errorf("self-renewing token flagged Expired:\n%s", view)
+	}
+}
+
+func TestProviderLabels(t *testing.T) {
+	cases := map[string]string{
+		"agy": "Antigravity", "kimi": "Kimi Code", "zcode": "zcode", "opencode": "OpenCode",
+		"claude": "Claude", "codex": "Codex", "gemini": "Gemini", "grok": "Grok", "cursor": "Cursor",
+	}
+	for id, want := range cases {
+		if got := providerLabel(id); got != want {
+			t.Errorf("providerLabel(%q) = %q, want %q", id, got, want)
+		}
 	}
 }

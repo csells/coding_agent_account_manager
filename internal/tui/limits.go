@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
 )
 
@@ -22,6 +23,9 @@ type Hooks struct {
 	// Limits fetches one profile's live rate-limit windows. When nil the
 	// detail card shows no Limits section.
 	Limits func(ctx context.Context, provider, profile string) (*usage.UsageInfo, error)
+	// Health computes one profile's health verdict from its credential, the
+	// way `caam ls` does. When nil the TUI reads the stored health snapshot.
+	Health func(provider, profile string) *health.ProfileHealth
 }
 
 // limitsTTL is how long a fetched set of windows is shown before the
