@@ -52,6 +52,11 @@ stealth:
 		// round-robin's current-profile detection across activations.
 		content := fmt.Sprintf(`{"oauthAccount":{"emailAddress":"%s@example.com","accountUuid":"uuid-%s"}}`, name, name)
 		require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude.json"), []byte(content), 0600))
+		// The credential itself: a profile with settings and no credential is
+		// refused by activate (it could never switch the login), so each
+		// profile carries its own OAuth blob.
+		creds := fmt.Sprintf(`{"claudeAiOauth":{"accessToken":"at-%s","refreshToken":"rt-%s","expiresAt":4102444800000}}`, name, name)
+		require.NoError(t, os.WriteFile(filepath.Join(dir, ".credentials.json"), []byte(creds), 0600))
 	}
 
 	createProfile("p1")
