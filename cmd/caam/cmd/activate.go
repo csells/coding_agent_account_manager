@@ -80,7 +80,7 @@ After activating, just run the tool normally - it will use the new account.`,
 
 func init() {
 	activateCmd.Flags().Bool("backup-current", false, "backup current auth before switching")
-	activateCmd.Flags().Bool("force", false, "activate even if the profile is in cooldown")
+	activateCmd.Flags().Bool("force", false, "activate even if the profile is in cooldown, or if the outgoing profile could not be re-captured first")
 	activateCmd.Flags().Bool("auto", false, "auto-select profile using rotation algorithm")
 	activateCmd.Flags().Bool("json", false, "output as JSON")
 	activateCmd.Flags().Bool("reload-daemon", false, "for codex: SIGTERM a running codex app-server/mcp-server daemon so the switched auth takes effect (it respawns on next use)")
@@ -336,19 +336,27 @@ func runActivate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Re-snapshot the OUTGOING profile's (possibly rotated) tokens back into its
-	// own vault dir before we clobber the live file. Codex/ChatGPT rotate OAuth
-	// refresh tokens in place while a profile is active; without this, the
-	// vault copy of the outgoing profile goes stale and a later restore replays
-	// an already-consumed refresh_token, tripping reuse detection and bricking
-	// the account. Non-fatal: a failure here must never block the switch.
+	// Re-capture the OUTGOING profile's (possibly rotated) tokens back into
+	// its own vault dir BEFORE the live credential is overwritten. Codex,
+	// Claude and Antigravity all rotate OAuth tokens in place while a profile
+	// is active — Codex and Claude with a rotating refresh-token family —
+	// so without this the vault copy of the outgoing profile goes stale, and
+	// a later restore replays an already-consumed refresh token, trips the
+	// provider's reuse detection and revokes the whole family (README, issue
+	// #19). The vault must never be left holding a stale chain, so a failed
+	// re-capture aborts the switch with the live credential untouched;
+	// --force proceeds regardless.
 	if outgoing, _ := vault.ActiveProfile(fileSet); outgoing != "" && outgoing != profileName {
 		if err := vault.ResnapshotOutgoing(fileSet, outgoing, profileName); err != nil {
+			force, _ := cmd.Flags().GetBool("force")
+			if !force {
+				return emitJSONError(fmt.Errorf("could not re-capture the outgoing profile %s before switching: %w (the vault would be left with a stale copy of its credential; fix the cause, or re-run with --force to switch anyway)", outgoing, err))
+			}
 			if !jsonOutput {
-				fmt.Printf("Warning: could not re-snapshot outgoing profile %s: %v\n", outgoing, err)
+				fmt.Printf("Warning: could not re-snapshot outgoing profile %s: %v (proceeding due to --force)\n", outgoing, err)
 			}
 		} else if !jsonOutput {
-			fmt.Printf("Re-snapshotted outgoing profile %s (token rotation safety)\n", outgoing)
+			fmt.Printf("Re-captured outgoing profile %s (token rotation safety)\n", outgoing)
 		}
 	}
 

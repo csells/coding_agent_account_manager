@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 )
@@ -189,5 +191,152 @@ func TestActivate_AutoBackupsUnsavedStateBeforeSwitch(t *testing.T) {
 	}
 	if string(gotBackup) != string(unsaved) {
 		t.Fatalf("auto-backup auth mismatch: got %q want %q", gotBackup, unsaved)
+	}
+}
+
+// syntheticCodexAuth builds a ChatGPT-mode Codex auth.json whose id_token
+// names email and whose tokens carry iat, the way Codex writes it after a
+// login or an in-place refresh. The JWTs are unsigned and synthetic.
+func syntheticCodexAuth(t *testing.T, email, tag string, issuedAt int64) []byte {
+	t.Helper()
+	jwt := func(claims map[string]any) string {
+		payload, err := json.Marshal(claims)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`)) + "." +
+			base64.RawURLEncoding.EncodeToString(payload) + ".sig"
+	}
+	auth := map[string]any{
+		"auth_mode": "chatgpt",
+		"tokens": map[string]any{
+			"id_token":      jwt(map[string]any{"email": email, "iat": issuedAt, "exp": issuedAt + 3600}),
+			"access_token":  jwt(map[string]any{"sub": email, "iat": issuedAt, "exp": issuedAt + 3600}),
+			"refresh_token": "SYNTHETIC-REFRESH-" + tag,
+		},
+		"last_refresh": time.Unix(issuedAt, 0).UTC().Format(time.RFC3339),
+	}
+	data, err := json.Marshal(auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+// TestActivate_RecapturesOutgoingBeforeOverwriting is the Switch safety
+// rule of the switcher handoff (work item H): while a profile is active the
+// tool rotates its refresh-token family in place, so the outgoing profile's
+// vault copy must be refreshed from the live credential BEFORE the incoming
+// one is installed — or the vault holds a consumed refresh token that a
+// later switch back would replay.
+func TestActivate_RecapturesOutgoingBeforeOverwriting(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("CODEX_HOME", filepath.Join(tmpDir, "codex_home"))
+	t.Setenv("CAAM_HOME", filepath.Join(tmpDir, "caam_home"))
+	if err := os.MkdirAll(os.Getenv("CODEX_HOME"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	oldVault := vault
+	vault = authfile.NewVault(filepath.Join(tmpDir, "vault"))
+	t.Cleanup(func() { vault = oldVault })
+
+	base := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC).Unix()
+	stale := syntheticCodexAuth(t, "a@example.com", "a-stale", base)
+	rotated := syntheticCodexAuth(t, "a@example.com", "a-rotated", base+3600)
+	incoming := syntheticCodexAuth(t, "b@example.com", "b", base)
+
+	write := func(path string, data []byte) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(vault.ProfilePath("codex", "a"), "auth.json"), stale)
+	write(filepath.Join(vault.ProfilePath("codex", "b"), "auth.json"), incoming)
+	livePath := filepath.Join(os.Getenv("CODEX_HOME"), "auth.json")
+	write(livePath, rotated) // Codex rotated a's tokens since a was captured
+
+	if err := runActivate(activateCmd, []string{"codex", "b"}); err != nil {
+		t.Fatalf("runActivate: %v", err)
+	}
+
+	gotA, err := os.ReadFile(filepath.Join(vault.ProfilePath("codex", "a"), "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotA) != string(rotated) {
+		t.Fatalf("outgoing profile a was not re-captured before the switch: vault holds %s", gotA)
+	}
+	gotLive, err := os.ReadFile(livePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotLive) != string(incoming) {
+		t.Fatalf("live auth after switch = %s, want profile b", gotLive)
+	}
+
+	// Switching back installs the re-captured (rotated) tokens, not the
+	// consumed ones that were in the vault before.
+	if err := runActivate(activateCmd, []string{"codex", "a"}); err != nil {
+		t.Fatalf("runActivate back to a: %v", err)
+	}
+	gotLive, _ = os.ReadFile(livePath)
+	if string(gotLive) != string(rotated) {
+		t.Fatalf("switching back replayed a stale credential: %s", gotLive)
+	}
+}
+
+// TestActivate_AbortsWhenOutgoingCannotBeRecaptured: a switch that cannot
+// refresh the outgoing vault copy must not overwrite the live credential,
+// because that is exactly how the vault ends up holding a stale chain.
+func TestActivate_AbortsWhenOutgoingCannotBeRecaptured(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	tmpDir := t.TempDir()
+	t.Setenv("CODEX_HOME", filepath.Join(tmpDir, "codex_home"))
+	t.Setenv("CAAM_HOME", filepath.Join(tmpDir, "caam_home"))
+	if err := os.MkdirAll(os.Getenv("CODEX_HOME"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	oldVault := vault
+	vault = authfile.NewVault(filepath.Join(tmpDir, "vault"))
+	t.Cleanup(func() { vault = oldVault })
+
+	base := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC).Unix()
+	write := func(path string, data []byte) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	aDir := vault.ProfilePath("codex", "a")
+	write(filepath.Join(aDir, "auth.json"), syntheticCodexAuth(t, "a@example.com", "a", base))
+	write(filepath.Join(vault.ProfilePath("codex", "b"), "auth.json"), syntheticCodexAuth(t, "b@example.com", "b", base))
+	livePath := filepath.Join(os.Getenv("CODEX_HOME"), "auth.json")
+	rotated := syntheticCodexAuth(t, "a@example.com", "a-rotated", base+3600)
+	write(livePath, rotated)
+
+	// The outgoing profile's vault directory cannot be written to.
+	if err := os.Chmod(aDir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(aDir, 0700) })
+
+	err := runActivate(activateCmd, []string{"codex", "b"})
+	if err == nil {
+		t.Fatal("activate succeeded although the outgoing profile could not be re-captured")
+	}
+	if !strings.Contains(err.Error(), "re-capture") || !strings.Contains(err.Error(), "--force") {
+		t.Errorf("error = %v, want the re-capture failure and the --force hint", err)
+	}
+	if got, _ := os.ReadFile(livePath); string(got) != string(rotated) {
+		t.Fatal("live credential was overwritten although the switch was refused")
 	}
 }
