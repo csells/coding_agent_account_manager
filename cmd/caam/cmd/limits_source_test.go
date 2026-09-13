@@ -398,3 +398,130 @@ func TestCachedRowsAreNotOfferedAsBest(t *testing.T) {
 func itoaMillis(t time.Time) string {
 	return strconv.FormatInt(t.UnixMilli(), 10)
 }
+
+// --- live namespace -------------------------------------------------------
+//
+// The tool rotates the active profile's credential in place; the vault copy
+// froze at activate time. For the active profile the live credential is the
+// one in force, and it must be what `caam limits` presents (switcher handoff,
+// work item B: a healthy Claude login reported "unauthorized" from the vault
+// copy minutes after its token rotated).
+
+// liveClaude writes the live credentials file under the fixture's real HOME
+// and makes name the active profile.
+func (f *namespaceFixture) liveClaude(t *testing.T, name string, expires time.Time) string {
+	t.Helper()
+	path := filepath.Join(f.lookup.LiveHome, ".claude", ".credentials.json")
+	claudeCreds(t, path, expires, true)
+	f.lookup.ActiveName = func(provider string) string {
+		if provider == "claude" {
+			return name
+		}
+		return ""
+	}
+	f.lookup.LivePath = func(provider string) string {
+		if provider == "claude" {
+			return path
+		}
+		return ""
+	}
+	return path
+}
+
+func TestResolveProfileCredentialReadsLiveForTheActiveProfile(t *testing.T) {
+	f := newNamespaceFixture(t)
+	past := time.Now().Add(-30 * 24 * time.Hour)
+	future := time.Now().Add(4 * time.Hour)
+
+	f.vaultClaude(t, "chris", past, false) // frozen at activate time, since rotated
+	livePath := f.liveClaude(t, "chris", future)
+
+	res, err := resolveProfileCredential(f.lookup, "claude", "chris", "")
+	if err != nil {
+		t.Fatalf("resolveProfileCredential: %v", err)
+	}
+	if res.Selected.Namespace != credNamespaceLive {
+		t.Fatalf("namespace = %q, want %q", res.Selected.Namespace, credNamespaceLive)
+	}
+	if res.Selected.Path != livePath {
+		t.Errorf("path = %q, want the live credentials file %q", res.Selected.Path, livePath)
+	}
+	if res.Selected.State != credStateHealthy {
+		t.Errorf("live state = %q, want %q", res.Selected.State, credStateHealthy)
+	}
+	if res.Selected.Token != "SYNTHETIC-ACCESS-.claude" {
+		t.Errorf("token = %q, want the live file's token", res.Selected.Token)
+	}
+	// The stale vault copy is still reported, as an alternative, never as a
+	// reason to refuse.
+	if len(res.Alternatives) != 1 || res.Alternatives[0].Namespace != credNamespaceVault {
+		t.Fatalf("Alternatives = %+v, want the vault copy", res.Alternatives)
+	}
+	if len(res.Healthier) != 0 {
+		t.Fatalf("Healthier = %+v, want none: the live copy is the freshest", res.Healthier)
+	}
+	// A JSON consumer sees the namespace it was read from.
+	if rep := res.report(); rep.Namespace != credNamespaceLive || rep.Path != livePath {
+		t.Errorf("report = %+v, want live/%s", rep, livePath)
+	}
+}
+
+// TestLiveNamespaceHoldsOnlyTheActiveProfile: any other name has no live
+// credential, so it keeps resolving from the vault, and listing the live
+// namespace names exactly the active profile.
+func TestLiveNamespaceHoldsOnlyTheActiveProfile(t *testing.T) {
+	f := newNamespaceFixture(t)
+	future := time.Now().Add(4 * time.Hour)
+	f.vaultClaude(t, "chris", future, true)
+	f.vaultClaude(t, "other", future, true)
+	f.liveClaude(t, "chris", future)
+
+	res, err := resolveProfileCredential(f.lookup, "claude", "other", "")
+	if err != nil {
+		t.Fatalf("resolveProfileCredential(other): %v", err)
+	}
+	if res.Selected.Namespace != credNamespaceVault {
+		t.Fatalf("other resolved from %q, want %q", res.Selected.Namespace, credNamespaceVault)
+	}
+	if c := f.lookup.inspect(credNamespaceLive, "claude", "other"); c.Found() {
+		t.Fatalf("live namespace answered for a non-active profile: %+v", c)
+	}
+
+	names, err := namespaceProfileNames(f.lookup, credNamespaceLive, "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 1 || names[0] != "chris" {
+		t.Fatalf("live namespace names = %v, want [chris]", names)
+	}
+	if _, err := resolveProfileCredential(f.lookup, "claude", "other", credNamespaceLive); err == nil {
+		t.Fatal("--source live for a non-active profile must fail, it has no live credential")
+	}
+}
+
+// TestApplyLiveCredentialsReplacesTheActiveVaultToken: the all-profiles path
+// loads every vault copy; the active profile's token is then swapped for the
+// live one, and a profile whose vault copy has no token at all still gets a
+// row from the credential in force.
+func TestApplyLiveCredentialsReplacesTheActiveVaultToken(t *testing.T) {
+	f := newNamespaceFixture(t)
+	future := time.Now().Add(4 * time.Hour)
+	f.vaultClaude(t, "chris", time.Now().Add(-time.Hour), false)
+	f.vaultClaude(t, "other", future, true)
+	f.liveClaude(t, "chris", future)
+
+	creds := map[string]string{"chris": "STALE-VAULT-TOKEN", "other": "OTHER-TOKEN"}
+	applyLiveCredentials(f.lookup, "claude", creds)
+	if creds["chris"] != "SYNTHETIC-ACCESS-.claude" {
+		t.Errorf("active token = %q, want the live one", creds["chris"])
+	}
+	if creds["other"] != "OTHER-TOKEN" {
+		t.Errorf("non-active token changed: %q", creds["other"])
+	}
+
+	creds = map[string]string{}
+	applyLiveCredentials(f.lookup, "claude", creds)
+	if creds["chris"] == "" {
+		t.Error("active profile with no vault token got no live row")
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -43,6 +44,7 @@ Examples:
   caam limits codex --rank earliest-reset-headroom --format json   # Which seat to spend next
   caam limits claude --cached     # Offline: read the snapshot Claude Code cached on disk
   caam limits claude --profile work --source isolated   # Read a specific credential store
+  caam limits codex --source live  # Only the account Codex is using right now
 
 Claude reports a separate weekly allowance per model on top of the 5-hour and
 weekly windows. The SCOPED column shows the per-model allowance closest to its
@@ -54,11 +56,14 @@ Credential namespaces (--source)
 One profile name can exist in three unrelated stores: the "vault" (the
 backup/activate store), an "isolated" profile (its own HOME and XDG config
 dir, which is where an in-app /login under "caam exec" writes), and a
-"shallow" HOME. --profile reads the vault by default; output now always names
-the namespace and path it read, lists the other namespaces holding the same
+"shallow" HOME. A fourth namespace, "live", is the credential the tool is
+using right now; only the active profile has one, and it is read first for
+that profile because the tool rotates it in place while the vault copy stays
+frozen. --profile reads live-then-vault by default; output always names the
+namespace and path it read, lists the other namespaces holding the same
 name, and refuses to report a verdict when an unselected namespace holds a
-strictly healthier credential. Pass --source vault|isolated|shallow to choose
-explicitly. Credentials are never copied between namespaces.
+strictly healthier credential. Pass --source live|vault|isolated|shallow to
+choose explicitly. Credentials are never copied between namespaces.
 
 Offline mode (--cached)
 -----------------------
@@ -111,7 +116,7 @@ func init() {
 	limitsCmd.Flags().Bool("recommend", false, "show smart rotation recommendations")
 	limitsCmd.Flags().Bool("forecast", false, "show usage forecasts and optimal switch times")
 	limitsCmd.Flags().String("model", "", "model the work will run on (e.g. opus, fable); scores and eligibility then honor that model's own quota")
-	limitsCmd.Flags().String("source", "", "credential namespace to read: vault (default), isolated, or shallow")
+	limitsCmd.Flags().String("source", "", "credential namespace to read: live (the active profile's credential in force), vault, isolated, or shallow")
 	limitsCmd.Flags().Bool("cached", false, "read the usage snapshot Claude Code cached on disk instead of querying the API (offline, presents no token; claude only)")
 	addLimitsRankFlags(limitsCmd)
 }
@@ -269,7 +274,9 @@ func runLimits(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Fetch for all profiles
+		// Fetch for all profiles. The active profile's row comes from the
+		// live credential: the tool rotates it in place while the profile is
+		// active, and the vault copy is stale for exactly that account.
 		credentials, err := usage.LoadProfileCredentials(vaultDir, provider)
 		if err != nil {
 			if format != "json" {
@@ -277,6 +284,10 @@ func runLimits(cmd *cobra.Command, args []string) error {
 			}
 			continue
 		}
+		if credentials == nil {
+			credentials = map[string]string{}
+		}
+		applyLiveCredentials(lookup, provider, credentials)
 		if len(credentials) == 0 {
 			continue
 		}
@@ -349,9 +360,9 @@ func isLimitsProvider(p string) bool {
 	return false
 }
 
-// buildCredentialLookup wires the three credential namespaces from caam's
-// process globals. It is separate from the resolver itself so tests can build
-// a lookup over temp directories without touching globals.
+// buildCredentialLookup wires the credential namespaces from caam's process
+// globals. It is separate from the resolver itself so tests can build a
+// lookup over temp directories without touching globals.
 func buildCredentialLookup(vaultDir string) credentialLookup {
 	l := credentialLookup{VaultDir: vaultDir, Profiles: profileStore}
 	if home, err := os.UserHomeDir(); err == nil {
@@ -374,7 +385,47 @@ func buildCredentialLookup(vaultDir string) credentialLookup {
 		}
 		return name
 	}
+	l.LivePath = liveCredentialPath
 	return l
+}
+
+// liveCredentialPath returns the file the tool itself reads its access token
+// from: the first entry of its auth file set whose name is one of the
+// provider's credential files. Consulting the file set (rather than a
+// hard-coded path) keeps CODEX_HOME, GEMINI_HOME and the macOS keychain
+// mirror in play — ActiveProfile has already refreshed the mirror by the
+// time this is read.
+func liveCredentialPath(provider string) string {
+	get, ok := tools[provider]
+	if !ok {
+		return ""
+	}
+	fileSet := get()
+	for _, name := range usage.CredentialFiles(provider) {
+		for _, spec := range fileSet.Files {
+			if filepath.Base(spec.Path) == name {
+				return spec.Path
+			}
+		}
+	}
+	return ""
+}
+
+// applyLiveCredentials swaps in the live token for the profile that is
+// currently active, so the row for the account in use is built from the
+// credential in force rather than from the vault copy that froze at
+// activate time.
+func applyLiveCredentials(l credentialLookup, provider string, credentials map[string]string) {
+	if l.ActiveName == nil {
+		return
+	}
+	name := l.ActiveName(provider)
+	if name == "" {
+		return
+	}
+	if c := l.inspect(credNamespaceLive, provider, name); c.Found() {
+		credentials[name] = c.Token
+	}
 }
 
 // cachedProfileUsage builds one row from the usage snapshot Claude Code left

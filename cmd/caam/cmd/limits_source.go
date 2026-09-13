@@ -10,6 +10,15 @@ package cmd
 //                which is where an in-app `/login` under `caam exec` writes
 //   - shallow  — a shallow HOME under ~/orch-homes/<name>/
 //
+// A fourth, "live", is not a store at all: it is the credential the tool is
+// using right now, in its own auth location, and only the profile that is
+// currently active has one. It is listed first because the tool rotates that
+// credential in place while the profile is active, so the vault copy — frozen
+// at backup or activate time — is stale for exactly the account the user is
+// on. Reading the vault copy for the active profile reported a healthy Claude
+// login as "unauthorized" minutes after its token rotated; Switch re-captures
+// the outgoing account, and until then the live copy is the truth.
+//
 // `caam limits --profile NAME` used to read the vault copy and say nothing
 // about it. For Claude that is exactly backwards: Claude cannot use `caam
 // login`, its supported isolated-profile flow is `caam exec claude <name>`
@@ -45,14 +54,17 @@ import (
 
 // Credential namespace names, as accepted by --source and reported in output.
 const (
+	credNamespaceLive     = "live"
 	credNamespaceVault    = "vault"
 	credNamespaceIsolated = "isolated"
 	credNamespaceShallow  = "shallow"
 )
 
-// credNamespaces is the resolution order: the vault stays first so an
-// unqualified --profile keeps meaning what it always meant.
-var credNamespaces = []string{credNamespaceVault, credNamespaceIsolated, credNamespaceShallow}
+// credNamespaces is the resolution order. Live comes first: it only ever
+// answers for the active profile, and for that profile it is the credential
+// in force. The vault follows, so an unqualified --profile on any other name
+// keeps meaning what it always meant.
+var credNamespaces = []string{credNamespaceLive, credNamespaceVault, credNamespaceIsolated, credNamespaceShallow}
 
 // Credential states, worst to best. A namespace that holds no credential for
 // the name at all is credStateMissing.
@@ -80,12 +92,17 @@ func credStateRank(state string) int {
 // credentialLookup holds the roots the three namespaces live under. Every path
 // is injected so the resolver can be tested against temp directories.
 type credentialLookup struct {
-	VaultDir   string
-	Profiles   *profile.Store
-	Shallow    *shallow.Manager
-	LiveHome   string // real HOME, for the live .claude.json of the active profile
+	VaultDir string
+	Profiles *profile.Store
+	Shallow  *shallow.Manager
+	LiveHome string // real HOME, for the live .claude.json of the active profile
+	// ActiveName reports which vault profile the tool's live auth currently
+	// matches, "" when none does.
 	ActiveName func(provider string) string
-	Now        time.Time
+	// LivePath is the credential file the tool itself reads for provider —
+	// the one its login writes and its refresh rotates. "" when unknown.
+	LivePath func(provider string) string
+	Now      time.Time
 }
 
 // credentialCandidate is what one namespace holds for a name.
@@ -130,18 +147,23 @@ func ValidCredNamespace(s string) bool {
 // returns nothing.
 func (l credentialLookup) candidatePaths(namespace, provider, name string) []string {
 	switch namespace {
+	case credNamespaceLive:
+		// Only the active profile has a live credential, and only when the
+		// tool's own auth location is known.
+		if l.ActiveName == nil || l.LivePath == nil || name == "" || l.ActiveName(provider) != name {
+			return nil
+		}
+		if path := l.LivePath(provider); path != "" {
+			return []string{path}
+		}
 	case credNamespaceVault:
 		dir := filepath.Join(l.VaultDir, provider, name)
-		switch provider {
-		case "claude":
-			return []string{
-				filepath.Join(dir, ".credentials.json"),
-				filepath.Join(dir, ".claude.json"),
-				filepath.Join(dir, "auth.json"),
-			}
-		case "codex":
-			return []string{filepath.Join(dir, "auth.json")}
+		files := usage.CredentialFiles(provider)
+		paths := make([]string, 0, len(files))
+		for _, f := range files {
+			paths = append(paths, filepath.Join(dir, f))
 		}
+		return paths
 	case credNamespaceIsolated:
 		if l.Profiles == nil {
 			return nil
@@ -188,6 +210,11 @@ func (l credentialLookup) claudeJSONPath(namespace, provider, name string) strin
 		return ""
 	}
 	switch namespace {
+	case credNamespaceLive:
+		if l.LiveHome == "" {
+			return ""
+		}
+		return filepath.Join(l.LiveHome, ".claude.json")
 	case credNamespaceVault:
 		if l.ActiveName != nil && l.LiveHome != "" && l.ActiveName(provider) == name {
 			return filepath.Join(l.LiveHome, ".claude.json")
@@ -226,16 +253,7 @@ func (l credentialLookup) inspect(namespace, provider, name string) credentialCa
 	out.ClaudeJSON = l.claudeJSONPath(namespace, provider, name)
 
 	for _, path := range paths {
-		var token string
-		var err error
-		switch provider {
-		case "claude":
-			token, _, err = usage.ReadClaudeCredentials(path)
-		case "codex":
-			token, _, err = usage.ReadCodexCredentials(path)
-		default:
-			return out
-		}
+		token, _, err := usage.ReadCredentials(provider, path)
 		if err != nil || token == "" {
 			continue
 		}
@@ -353,7 +371,7 @@ func (r *resolvedCredential) AmbiguityError(provider, name string) error {
 	}
 	b.WriteString(strings.Join(parts, " and "))
 	b.WriteString(".\n")
-	fmt.Fprintf(&b, "caam limits reads the %s namespace by default and will not report a routing verdict from the stale copy.\n", credNamespaceVault)
+	fmt.Fprintf(&b, "caam limits reads the %s namespace by default (%s for the active profile) and will not report a routing verdict from the stale copy.\n", credNamespaceVault, credNamespaceLive)
 	b.WriteString("Choose the source explicitly:\n")
 	for _, alt := range r.Healthier {
 		fmt.Fprintf(&b, "  caam limits %s --profile %s --source %s\n", provider, name, alt.Namespace)
@@ -408,6 +426,13 @@ func (r *resolvedCredential) describe(provider, name string) string {
 func namespaceProfileNames(l credentialLookup, namespace, provider string) ([]string, error) {
 	var names []string
 	switch namespace {
+	case credNamespaceLive:
+		// The live namespace holds exactly the profile the tool is using.
+		if l.ActiveName != nil {
+			if name := l.ActiveName(provider); name != "" {
+				names = append(names, name)
+			}
+		}
 	case credNamespaceVault:
 		entries, err := os.ReadDir(filepath.Join(l.VaultDir, provider))
 		if err != nil {

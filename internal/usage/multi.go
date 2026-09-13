@@ -356,6 +356,32 @@ func ReadCodexCredentials(path string) (accessToken string, accountID string, er
 	return "", "", fmt.Errorf("no access token found in credentials")
 }
 
+// CredentialFiles lists, in preference order, the file names that can hold a
+// provider's access token — in a vault profile and in the provider's own live
+// auth directory alike. An unknown provider has none.
+func CredentialFiles(provider string) []string {
+	switch provider {
+	case "claude":
+		// The current location first, then the two legacy ones.
+		return []string{".credentials.json", ".claude.json", "auth.json"}
+	case "codex":
+		return []string{"auth.json"}
+	}
+	return nil
+}
+
+// ReadCredentials reads the access token (and the account id, when the file
+// carries one) from one credential file of provider.
+func ReadCredentials(provider, path string) (accessToken string, accountID string, err error) {
+	switch provider {
+	case "claude":
+		return ReadClaudeCredentials(path)
+	case "codex":
+		return ReadCodexCredentials(path)
+	}
+	return "", "", fmt.Errorf("no credential reader for provider %q", provider)
+}
+
 // LoadProfileCredentials loads credentials for all profiles of a provider from the vault.
 func LoadProfileCredentials(vaultDir, provider string) (map[string]string, error) {
 	providerDir := filepath.Join(vaultDir, provider)
@@ -377,35 +403,14 @@ func LoadProfileCredentials(vaultDir, provider string) (map[string]string, error
 		profileName := entry.Name()
 		profileDir := filepath.Join(providerDir, profileName)
 
-		var token string
-		var readErr error
-
-		switch provider {
-		case "claude":
-			// Try new location first
-			credPath := filepath.Join(profileDir, ".credentials.json")
-			token, _, readErr = ReadClaudeCredentials(credPath)
-			if readErr != nil {
-				// Fall back to old location
-				oldPath := filepath.Join(profileDir, ".claude.json")
-				token, _, readErr = ReadClaudeCredentials(oldPath)
-				if readErr != nil {
-					// Fall back to claude-code auth.json (optional file)
-					authPath := filepath.Join(profileDir, "auth.json")
-					token, _, readErr = ReadClaudeCredentials(authPath)
-				}
+		// The first credential file that yields a token wins; a profile
+		// whose files all fail to read is skipped.
+		for _, name := range CredentialFiles(provider) {
+			token, _, readErr := ReadCredentials(provider, filepath.Join(profileDir, name))
+			if readErr == nil && token != "" {
+				credentials[profileName] = token
+				break
 			}
-		case "codex":
-			authPath := filepath.Join(profileDir, "auth.json")
-			token, _, readErr = ReadCodexCredentials(authPath)
-		}
-
-		if readErr != nil {
-			continue // Skip profiles with invalid credentials
-		}
-
-		if token != "" {
-			credentials[profileName] = token
 		}
 	}
 

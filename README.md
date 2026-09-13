@@ -503,7 +503,7 @@ choice; with no model given, every per-model allowance counts.
 | `caam run <tool> [-- args]` | Wrap CLI execution with automatic failover on rate limits |
 | `caam limits <tool> [--model <name>]` | Live rate-limit usage, including each account's per-model allowance |
 | `caam limits claude --cached` | The same view offline, from the snapshot Claude Code caches on disk (no network, no token presented) |
-| `caam limits <tool> --profile <name> --source vault\|isolated\|shallow` | Read a specific credential namespace |
+| `caam limits <tool> --profile <name> --source live\|vault\|isolated\|shallow` | Read a specific credential namespace (`live` is the credential the tool is using right now) |
 | `caam limits <tool> --rank earliest-reset-headroom` | Rank seats for **new** work: spend the included quota that refreshes soonest, preserve the rest |
 | `caam cooldown set <provider/profile>` | Mark profile as rate-limited (default: 60min cooldown) |
 | `caam cooldown list` | List active cooldowns with remaining time |
@@ -641,16 +641,21 @@ or touch a running session.
 
 #### Credential namespaces: `caam limits --profile ... --source`
 
-One profile name can exist in three unrelated stores at once:
+One profile name can exist in three unrelated stores at once, plus the
+credential the tool is actually using:
 
 | Namespace | Where | Written by |
 |-----------|-------|------------|
+| `live` | the tool's own auth location (`~/.codex/auth.json`, the Claude keychain item, ...) | the tool's login and its in-place token refresh; only the **active** profile has one |
 | `vault` | `<vault>/<provider>/<name>/` | `caam backup` / `caam activate` |
 | `isolated` | the profile's own HOME and XDG config dir | `caam login`, or an in-app `/login` under `caam exec` |
 | `shallow` | `~/orch-homes/<name>/` | signing in inside a `shallow-spawn` session |
 
-`--profile NAME` still reads the vault by default, but it no longer stays quiet
-about it. Claude is the case that made this matter: Claude cannot use
+For the active profile `--profile NAME` (and the all-profiles table) reads the
+`live` credential: the tool rotates it in place while the profile is active,
+so the vault copy froze at activate time and reads as expired for exactly the
+account you are on. Every other name still reads the vault by default, and
+the lookup no longer stays quiet about which copy it used. Claude is the case that made this matter: Claude cannot use
 `caam login`, its supported isolated-profile flow is `caam exec claude <name>`
 plus an in-app `/login`, and that flow never touches the vault - so the one
 provider whose login path cannot refresh the vault copy was being reported
@@ -667,8 +672,9 @@ Now:
   did not choose one, the lookup fails with the exact commands that
   disambiguate it, rather than emitting a routing verdict drawn from the stale
   copy. A controller can fail closed on that;
-- `--source vault|isolated|shallow` is the explicit override, and also works
-  without `--profile` to list every profile in one namespace.
+- `--source live|vault|isolated|shallow` is the explicit override, and also
+  works without `--profile` to list every profile in one namespace
+  (`--source live` is the active profile alone).
 
 Credentials are never copied between namespaces: rotating OAuth credentials
 copied behind your back is how two lanes end up invalidating each other.
