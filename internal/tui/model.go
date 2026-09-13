@@ -198,11 +198,17 @@ type Model struct {
 	// Activity spinner for background operations (export/import)
 	activitySpinner *Spinner
 	activityMessage string // message to show with spinner
+
+	// Operations delegated to the command layer (see Hooks), and the
+	// per-profile rate-limit windows fetched through them.
+	hooks  Hooks
+	limits map[string]limitsEntry
 }
 
-// DefaultProviders returns the default list of provider names.
+// DefaultProviders returns the default list of provider names: every
+// provider the vault knows an auth file set for.
 func DefaultProviders() []string {
-	return []string{"claude", "codex", "gemini", "grok", "opencode", "cursor"}
+	return []string{"claude", "codex", "gemini", "grok", "opencode", "cursor", "agy", "kimi", "zcode"}
 }
 
 // New creates a new TUI model with default settings.
@@ -787,7 +793,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		return m.handleKeyPress(msg)
+		model, cmd := m.handleKeyPress(msg)
+		// A key may have moved the selection; fetch that profile's limits
+		// if the cached ones are missing or stale.
+		if next, ok := model.(Model); ok {
+			if fetch := next.limitsFetchCmd(); fetch != nil {
+				return next, tea.Batch(cmd, fetch)
+			}
+			return next, cmd
+		}
+		return model, cmd
+
+	case limitsLoadedMsg:
+		m.applyLimitsLoaded(msg)
+		return m, nil
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -817,7 +836,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Update profiles panel with current provider's profiles
 		m.syncProfilesPanel()
-		return m, nil
+		fetch := m.limitsFetchCmd()
+		return m, fetch
 
 	case profilesRefreshedMsg:
 		if msg.err != nil {
@@ -843,7 +863,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Update profiles panel with current provider's profiles
 		m.syncProfilesPanel()
-		return m, nil
+		fetch := m.limitsFetchCmd()
+		return m, fetch
 
 	case activateResultMsg:
 		if msg.err != nil {
@@ -1913,7 +1934,7 @@ func (m Model) executeConfirmedAction() (tea.Model, tea.Cmd) {
 			m.state = stateList
 			m.pendingAction = confirmNone
 
-			return m, m.doActivateProfile(provider, info.Name)
+			return m, m.switchCmd(provider, info.Name)
 		}
 
 	case confirmDelete:
@@ -2059,6 +2080,12 @@ func vaultIdentityEmail(provider, profileDir string) string {
 		if id == nil {
 			id, _ = identity.ExtractFromGenericAuth(filepath.Join(profileDir, "settings.json"))
 		}
+	case "agy":
+		id, _ = identity.ExtractFromAgyProfile(profileDir)
+	case "kimi":
+		id, _ = identity.ExtractFromKimiCredentials(filepath.Join(profileDir, "kimi-code.json"))
+	case "zcode":
+		id, _ = identity.ExtractFromZcodeCredentials(filepath.Join(profileDir, "credentials.json"))
 	}
 	if id == nil {
 		return ""
@@ -2306,6 +2333,7 @@ func (m Model) syncDetailPanel() {
 		TokenExpiry:  tokenExpiry,
 		ErrorCount:   errorCount,
 		Penalty:      penalty,
+		Limits:       m.limitsInfoFor(provider, profileName),
 	}
 	m.detailPanel.SetProfile(detail)
 }
@@ -2578,6 +2606,15 @@ func (m Model) mainView() string {
 
 	// Status bar
 	status := m.renderStatusBar(layout)
+	statusHeight := lipgloss.Height(status)
+
+	// The panels get whatever is left between the header and the status
+	// bar, never more: a detail card taller than a short window used to
+	// push the header, the provider list and the status bar off the top of
+	// the terminal.
+	if maxPanels := m.height - headerHeight - searchBarHeight - 1 - statusHeight; maxPanels > 0 {
+		panels = clampLines(panels, maxPanels)
+	}
 
 	// Combine header, search bar (if active), panels, and status
 	var content string
@@ -2598,7 +2635,7 @@ func (m Model) mainView() string {
 	}
 
 	// Add status bar at bottom
-	availableHeight := m.height - lipgloss.Height(content) - 2
+	availableHeight := m.height - lipgloss.Height(content) - 1 - statusHeight
 	if availableHeight > 0 {
 		content = lipgloss.JoinVertical(
 			lipgloss.Left,
@@ -2606,9 +2643,24 @@ func (m Model) mainView() string {
 			lipgloss.NewStyle().Height(availableHeight).Render(""),
 			status,
 		)
+	} else {
+		content = lipgloss.JoinVertical(lipgloss.Left, content, status)
 	}
 
-	return content
+	return clampLines(content, m.height)
+}
+
+// clampLines keeps at most n lines of s. Whole lines are dropped, so ANSI
+// styling within the kept lines is left intact.
+func clampLines(s string, n int) string {
+	if n <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[:n], "\n")
 }
 
 func (m Model) isCompactLayout() bool {
@@ -3203,6 +3255,12 @@ func (m Model) dumpStatsLine() string {
 
 // Run starts the TUI application.
 func Run() error {
+	return RunWithHooks(Hooks{})
+}
+
+// RunWithHooks runs the TUI with the command layer's switch and limits
+// operations plugged in (see Hooks).
+func RunWithHooks(hooks Hooks) error {
 	spmCfg, err := config.LoadSPMConfig()
 	if err != nil {
 		// Keep the TUI usable even with a broken config file.
@@ -3229,6 +3287,7 @@ func Run() error {
 	)
 
 	m := NewWithConfig(spmCfg)
+	m.hooks = hooks
 
 	pidPath := signals.DefaultPIDFilePath()
 	pidWritten := false

@@ -127,6 +127,15 @@ func TestE2E_NavigationWithTabKey(t *testing.T) {
 		t.Errorf("Expected provider 'cursor', got %q", m.currentProvider())
 	}
 
+	// ...and the providers added with their own adapters: agy, kimi, zcode
+	for _, want := range []string{"agy", "kimi", "zcode"} {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+		m = updated.(Model)
+		if m.currentProvider() != want {
+			t.Errorf("Expected provider %q, got %q", want, m.currentProvider())
+		}
+	}
+
 	// Tab should wrap around
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = updated.(Model)

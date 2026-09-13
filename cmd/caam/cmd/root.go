@@ -141,7 +141,7 @@ Advanced: Profile isolation for simultaneous sessions:
 Run 'caam' without arguments to launch the interactive TUI.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// If called with no subcommand, launch TUI
-		return tui.Run()
+		return tui.RunWithHooks(tuiHooks())
 	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if _, err := config.MigrateDataToCAAMHome(); err != nil {

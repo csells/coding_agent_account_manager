@@ -27,6 +27,30 @@ type DetailInfo struct {
 	TokenExpiry  time.Time
 	ErrorCount   int
 	Penalty      float64
+	// Limits is the profile's live rate-limit windows; nil hides the section.
+	Limits *LimitsInfo
+}
+
+// LimitsInfo is the Limits section of the detail card: one row per window
+// the provider reports, with the share left and the local reset time.
+type LimitsInfo struct {
+	Rows []LimitRow
+	// AsOf is when Rows were fetched; zero while nothing has arrived.
+	AsOf time.Time
+	// Loading is true while a fetch is in flight (Rows may be the previous
+	// result meanwhile).
+	Loading bool
+	// Err is the latest fetch failure. With Rows present it means Rows are
+	// the last known figures (Stale); without, it is all there is to show.
+	Err   string
+	Stale bool
+}
+
+// LimitRow is one window: "Weekly Fable" / "10% left, resets Tue 5:00 PM".
+type LimitRow struct {
+	Label    string
+	Value    string
+	Severity string // provider's own assessment: "", "normal", "warning", "critical"
 }
 
 // DetailPanel renders the right panel showing profile details and available actions.
@@ -39,22 +63,22 @@ type DetailPanel struct {
 
 // DetailPanelStyles holds the styles for the detail panel.
 type DetailPanelStyles struct {
-	Border        lipgloss.Style
-	Title         lipgloss.Style
-	Label         lipgloss.Style
-	Value         lipgloss.Style
-	ValueNumeric  lipgloss.Style // Right-aligned numeric values
-	StatusOK      lipgloss.Style
-	StatusWarn    lipgloss.Style
-	StatusBad     lipgloss.Style
-	StatusMuted   lipgloss.Style
-	LockIcon      lipgloss.Style
-	Divider       lipgloss.Style
-	ActionHeader  lipgloss.Style
-	ActionKey     lipgloss.Style
-	ActionDesc    lipgloss.Style
-	Empty         lipgloss.Style
-	SectionHeader lipgloss.Style // Header for grouped sections
+	Border         lipgloss.Style
+	Title          lipgloss.Style
+	Label          lipgloss.Style
+	Value          lipgloss.Style
+	ValueNumeric   lipgloss.Style // Right-aligned numeric values
+	StatusOK       lipgloss.Style
+	StatusWarn     lipgloss.Style
+	StatusBad      lipgloss.Style
+	StatusMuted    lipgloss.Style
+	LockIcon       lipgloss.Style
+	Divider        lipgloss.Style
+	ActionHeader   lipgloss.Style
+	ActionKey      lipgloss.Style
+	ActionDesc     lipgloss.Style
+	Empty          lipgloss.Style
+	SectionHeader  lipgloss.Style // Header for grouped sections
 	SectionDivider lipgloss.Style // Subtle divider between sections
 }
 
@@ -240,6 +264,15 @@ func (p *DetailPanel) View() string {
 		lipgloss.JoinVertical(lipgloss.Left, authRows...),
 	))
 
+	// ═══ LIMITS SECTION ═══
+	if rows := p.renderLimits(prof.Limits); len(rows) > 0 {
+		sections = append(sections, lipgloss.JoinVertical(lipgloss.Left,
+			thinDivider,
+			p.styles.SectionHeader.Render("Limits"),
+			lipgloss.JoinVertical(lipgloss.Left, rows...),
+		))
+	}
+
 	// ═══ USAGE SECTION ═══
 	usageHeader := p.styles.SectionHeader.Render("Usage")
 	var usageRows []string
@@ -347,11 +380,75 @@ func (p *DetailPanel) View() string {
 
 	inner := lipgloss.JoinVertical(lipgloss.Left, allSections...)
 
+	// Fit the panel's height: the border takes two rows, and a card that
+	// runs past the bottom scrolls the whole screen (the Actions legend is
+	// the least important part, so it is what gets cut).
+	if p.height > 2 {
+		lines := strings.Split(inner, "\n")
+		if max := p.height - 2; len(lines) > max {
+			inner = strings.Join(lines[:max], "\n")
+		}
+	}
+
 	// Apply border
 	if p.width > 0 {
 		return p.styles.Border.Width(p.width - 2).Render(inner)
 	}
 	return p.styles.Border.Render(inner)
+}
+
+// renderLimits renders the Limits section rows, or nothing when the section
+// is hidden (no fetcher wired in).
+func (p *DetailPanel) renderLimits(l *LimitsInfo) []string {
+	if l == nil {
+		return nil
+	}
+	label := p.styles.Label.Width(14)
+	row := func(name, value string) string {
+		return label.Render(name+":") + " " + value
+	}
+
+	var rows []string
+	for _, r := range l.Rows {
+		value := r.Value
+		switch r.Severity {
+		case "critical":
+			value = p.styles.StatusBad.Render(value)
+		case "warning":
+			value = p.styles.StatusWarn.Render(value)
+		}
+		rows = append(rows, row(r.Label, value))
+	}
+
+	switch {
+	case len(rows) == 0 && l.Loading:
+		rows = append(rows, p.styles.StatusMuted.Render("fetching..."))
+	case len(rows) == 0 && l.Err != "":
+		rows = append(rows, p.styles.StatusWarn.Render(shortLimitsError(l.Err)))
+	case len(rows) == 0:
+		rows = append(rows, p.styles.StatusMuted.Render("no windows reported"))
+	case l.Stale:
+		rows = append(rows, row("As of", p.styles.StatusWarn.Render(
+			fmt.Sprintf("%s (last known; %s)", l.AsOf.Format("15:04:05"), shortLimitsError(l.Err)))))
+	case !l.AsOf.IsZero():
+		asOf := l.AsOf.Format("15:04:05")
+		if l.Loading {
+			asOf += " (refreshing...)"
+		}
+		rows = append(rows, row("As of", p.styles.StatusMuted.Render(asOf)))
+	}
+	return rows
+}
+
+// shortLimitsError keeps a fetch error to one line of the card.
+func shortLimitsError(err string) string {
+	if i := strings.Index(err, ";"); i > 0 {
+		err = err[:i]
+	}
+	if len(err) > 48 {
+		return err[:45] + "..."
+	}
+	return err
 }
 
 // formatDurationFull formats duration for details view.

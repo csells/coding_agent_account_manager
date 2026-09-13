@@ -786,6 +786,15 @@ up/down select   enter switch   r refresh   q quit     * = active account
 Piped or run with `--once`, `caam monitor` prints the plain table it always
 did; `--format brief|json|alerts` are unchanged.
 
+The main TUI (`caam` with no arguments) shows the same windows for whichever
+account is selected, in a **Limits** block on the right-hand detail card
+(`5-hour: 82% left, resets 6:10 PM`, `Weekly Fable: 10% left, …`, with an
+"As of" time). Arrowing between accounts fetches each one's windows at most
+once a minute; a failed fetch keeps the last known figures, marked. Enter
+there switches through the same re-capture-first path as `caam activate`.
+Every provider the vault knows — Antigravity, Kimi and zcode included — is
+listed, and the screen fits the terminal instead of scrolling off the top.
+
 ### Uninstall Notes
 
 `caam uninstall` restores auth from any available `_original` backups first, then removes caam’s data/config. Useful flags:
