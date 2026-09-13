@@ -61,6 +61,7 @@ type CredentialAlternative struct {
 type MultiProfileFetcher struct {
 	claudeFetcher *ClaudeFetcher
 	codexFetcher  *CodexFetcher
+	agyFetcher    *AgyFetcher
 	logScanner    logs.Scanner // Optional scanner for burn rate calculation
 }
 
@@ -79,6 +80,7 @@ func NewMultiProfileFetcher(opts ...FetcherOption) *MultiProfileFetcher {
 	m := &MultiProfileFetcher{
 		claudeFetcher: NewClaudeFetcher(),
 		codexFetcher:  NewCodexFetcher(),
+		agyFetcher:    NewAgyFetcher(),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -125,6 +127,16 @@ func (m *MultiProfileFetcher) FetchAllProfiles(ctx context.Context, provider str
 					}
 				} else {
 					info, err = m.codexFetcher.Fetch(ctx, token)
+				}
+			case "agy":
+				if m.agyFetcher == nil {
+					info = &UsageInfo{
+						Provider:  provider,
+						FetchedAt: time.Now(),
+						Error:     "agy fetcher unavailable",
+					}
+				} else {
+					info, err = m.agyFetcher.Fetch(ctx, token)
 				}
 			default:
 				info = &UsageInfo{
@@ -366,6 +378,8 @@ func CredentialFiles(provider string) []string {
 		return []string{".credentials.json", ".claude.json", "auth.json"}
 	case "codex":
 		return []string{"auth.json"}
+	case "agy":
+		return []string{"antigravity-oauth-token"}
 	}
 	return nil
 }
@@ -378,6 +392,8 @@ func ReadCredentials(provider, path string) (accessToken string, accountID strin
 		return ReadClaudeCredentials(path)
 	case "codex":
 		return ReadCodexCredentials(path)
+	case "agy":
+		return ReadAgyCredentials(path)
 	}
 	return "", "", fmt.Errorf("no credential reader for provider %q", provider)
 }
