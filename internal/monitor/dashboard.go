@@ -357,111 +357,13 @@ func fetchedAt(u *usage.UsageInfo, now time.Time) time.Time {
 	return now
 }
 
-// windowCell pairs a window with the column it belongs in.
-type windowCell struct {
-	column string
-	rank   int
-	window *usage.UsageWindow
-}
-
-// windowsOf lists a profile's windows in display order: the general ones
-// first (shortest to longest), then the per-model ones by name.
-func windowsOf(u *usage.UsageInfo) []windowCell {
-	if u == nil {
-		return nil
-	}
-	var cells []windowCell
-	add := func(w *usage.UsageWindow, fallback string) {
-		if w == nil {
-			return
-		}
-		name, rank := windowColumn(w, fallback)
-		cells = append(cells, windowCell{column: name, rank: rank, window: w})
-	}
-	add(u.PrimaryWindow, "PRIMARY")
-	add(u.SecondaryWindow, "SECONDARY")
-	add(u.TertiaryWindow, "TERTIARY")
-
-	labels := make([]string, 0, len(u.ModelWindows))
-	for label := range u.ModelWindows {
-		labels = append(labels, label)
-	}
-	sort.Strings(labels)
-	for _, label := range labels {
-		w := u.ModelWindows[label]
-		if w == nil {
-			continue
-		}
-		fallback := strings.ToUpper(label)
-		if w.Label == "" {
-			// Name the column after the map key when the window itself
-			// does not carry a label.
-			cp := *w
-			cp.Label = label
-			w = &cp
-		}
-		add(w, fallback)
-	}
-	return cells
-}
-
-// windowColumn names the column a window belongs in, from the window's
-// duration when the provider reports one, else from its kind, else from
-// the fallback; a per-model window gets the model appended. The rank
-// orders columns left to right: shorter windows first, per-model windows
-// after the general window of the same length.
-func windowColumn(w *usage.UsageWindow, fallback string) (string, int) {
-	base, rank := "", 0
-	switch d := w.WindowDuration; {
-	case d == 5*time.Hour:
-		base, rank = "5-HOUR", 10
-	case d == 24*time.Hour:
-		base, rank = "DAILY", 20
-	case d == 7*24*time.Hour:
-		base, rank = "WEEKLY", 30
-	case d == 30*24*time.Hour:
-		base, rank = "MONTHLY", 40
-	case d > 0:
-		base, rank = strings.ToUpper(formatWindowLength(d)), 50
-	}
-	if base == "" {
-		switch w.Kind {
-		case "session":
-			base, rank = "5-HOUR", 10
-		case "weekly_all", "weekly_scoped":
-			base, rank = "WEEKLY", 30
-		}
-	}
-	if w.Label != "" {
-		if base == "" {
-			return strings.ToUpper(w.Label), 60
-		}
-		return base + " " + strings.ToUpper(w.Label), rank + 5
-	}
-	if base == "" {
-		return fallback, 70
-	}
-	return base, rank
-}
-
-func formatWindowLength(d time.Duration) string {
-	switch {
-	case d%(24*time.Hour) == 0:
-		return fmt.Sprintf("%dd", int(d.Hours())/24)
-	case d%time.Hour == 0:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	default:
-		return d.String()
-	}
-}
-
 // windowColumns is the union of every row's window columns, in rank order.
 func windowColumns(rows []dashRow) []string {
 	ranks := make(map[string]int)
 	for _, r := range rows {
-		for _, c := range windowsOf(r.Usage) {
-			if _, seen := ranks[c.column]; !seen {
-				ranks[c.column] = c.rank
+		for _, c := range usage.WindowsOf(r.Usage) {
+			if _, seen := ranks[c.Column]; !seen {
+				ranks[c.Column] = c.Rank
 			}
 		}
 	}
@@ -476,48 +378,6 @@ func windowColumns(rows []dashRow) []string {
 		return cols[i] < cols[j]
 	})
 	return cols
-}
-
-// windowText is one cell: percent left and when the window resets, in the
-// viewer's local time ("82% left, resets 6:10 PM" today, "resets Tue 5:00 PM"
-// another day).
-func windowText(w *usage.UsageWindow, now time.Time) string {
-	if w == nil {
-		return "-"
-	}
-	used := w.UsedPercent
-	if used == 0 && w.Utilization > 0 {
-		used = int(w.Utilization*100 + 0.5)
-	}
-	left := 100 - used
-	if left < 0 {
-		left = 0
-	}
-	if w.Rolled {
-		return "100% left (reset)"
-	}
-	if w.ResetsAt.IsZero() {
-		return fmt.Sprintf("%d%% left", left)
-	}
-	return fmt.Sprintf("%d%% left, resets %s", left, localReset(w.ResetsAt, now))
-}
-
-// localReset renders a reset instant in local time, dropping the day when it
-// is today.
-func localReset(at, now time.Time) string {
-	at = at.In(now.Location())
-	now = now.In(now.Location())
-	if at.Before(now) {
-		return "now"
-	}
-	clock := strings.TrimPrefix(at.Format("3:04 PM"), "0")
-	if at.Year() == now.Year() && at.YearDay() == now.YearDay() {
-		return clock
-	}
-	if at.Sub(now) < 6*24*time.Hour {
-		return at.Format("Mon ") + clock
-	}
-	return at.Format("Jan 2 ") + clock
 }
 
 // rowStatus is the STATUS cell: the newest fact about the row that the
@@ -603,8 +463,8 @@ func (d *Dashboard) renderTable(now time.Time) string {
 	cells := make([][]string, len(d.rows))
 	for i, r := range d.rows {
 		byCol := make(map[string]string)
-		for _, c := range windowsOf(r.Usage) {
-			byCol[c.column] = windowText(c.window, now)
+		for _, c := range usage.WindowsOf(r.Usage) {
+			byCol[c.Column] = usage.WindowLeftText(c.Window, now)
 		}
 		line := make([]string, 0, len(headers))
 		name := "  " + r.Provider + "/" + r.Name

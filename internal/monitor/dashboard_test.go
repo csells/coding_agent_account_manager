@@ -109,29 +109,6 @@ func key(s string) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
 
-func TestWindowColumn_NamesByDurationThenKindThenLabel(t *testing.T) {
-	cases := []struct {
-		w    usage.UsageWindow
-		want string
-	}{
-		{usage.UsageWindow{WindowDuration: 5 * time.Hour}, "5-HOUR"},
-		{usage.UsageWindow{WindowDuration: 7 * 24 * time.Hour}, "WEEKLY"},
-		{usage.UsageWindow{WindowDuration: 7 * 24 * time.Hour, Label: "Fable"}, "WEEKLY FABLE"},
-		{usage.UsageWindow{WindowDuration: 30 * 24 * time.Hour}, "MONTHLY"},
-		{usage.UsageWindow{Kind: "session"}, "5-HOUR"},
-		{usage.UsageWindow{Kind: "weekly_scoped", Label: "Opus"}, "WEEKLY OPUS"},
-		{usage.UsageWindow{Label: "gemini-2.5-pro"}, "GEMINI-2.5-PRO"},
-		{usage.UsageWindow{}, "PRIMARY"},
-		{usage.UsageWindow{WindowDuration: 3 * 24 * time.Hour}, "3D"},
-	}
-	for _, c := range cases {
-		got, _ := windowColumn(&c.w, "PRIMARY")
-		if got != c.want {
-			t.Errorf("windowColumn(%+v) = %q, want %q", c.w, got, c.want)
-		}
-	}
-}
-
 func TestDashboard_ColumnsAreTheUnionOfWindowsInOrder(t *testing.T) {
 	d, _ := newTestDashboard([]*MonitorState{stateWith(claudeProfile("chris", true), codexProfile("ops", true))}, nil)
 	load(t, d)
