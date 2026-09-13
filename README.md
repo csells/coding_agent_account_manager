@@ -318,6 +318,7 @@ and a second sync writes nothing. Pass `--no-sync-config` to skip it.
 | **Antigravity CLI** | OAuth: `~/.gemini/antigravity-cli/antigravity-oauth-token` (+ `~/.gemini/google_accounts.json`) | `agy` interactive (Google OAuth) |
 | **Gemini CLI** (legacy) | OAuth: `~/.gemini/settings.json` (+ `oauth_creds.json`) • API key: `~/.gemini/.env` | `gemini` interactive |
 | **Grok Build** (xAI) | OAuth/OIDC: `~/.grok/auth.json` (+ `~/.grok/config.toml`); respects `GROK_HOME` | `grok login` (browser OIDC) |
+| **OpenCode** | Login tables of `~/.local/share/opencode/opencode.db` (exported/restored, never swapped); older installs: `auth.json` | inside OpenCode |
 | **Kimi Code** (Moonshot AI) | OAuth: `~/.kimi-code/credentials/kimi-code.json`; respects `KIMI_CODE_HOME` | `/login` inside `kimi` (device flow) |
 | **zcode** (Z.ai) | Sealed record: `~/.zcode/v2/credentials.json` (AES-GCM under a per-user secret); respects `ZCODE_DATA_BASE_DIR` | `zcode login` (Z.AI OAuth) |
 
@@ -396,6 +397,14 @@ and a second sync writes nothing. Pass `--no-sync-config` to skip it.
 **Login Command:** `zcode login` (or `/login` in the TUI). `zcode logout` removes the login.
 
 **Notes:** caam captures and restores the file verbatim and unseals it only to read identity (the signed-in Z.ai user's email) and to present the session token to zcode's billing API. zcode re-seals the record with a fresh IV on every write, so profile detection hashes the sealed user id, not the bytes. `caam limits zcode` calls `GET https://zcode.z.ai/api/v1/zcode-plan/billing/current`; an account without a Z.ai coding plan is reported as exactly that, not as 0% used.
+
+### OpenCode
+
+**Auth store:** current OpenCode keeps its logins in `~/.local/share/opencode/opencode.db` (respects `XDG_DATA_HOME`), in the `account`, `account_state`, `control_account` and `credential` tables, next to your session history; `auth.json` is no longer written (older installs that still have one keep working, it stays in the file set as optional). caam never swaps the database: `backup` copies it aside (with its WAL sidecars) and exports just the login rows to the profile's `opencode-auth.json`; `activate` writes those rows back into the live database in one transaction; `clear` empties the login tables and leaves the file. Profile detection hashes the accounts and credentials named, not their rotating tokens.
+
+**Login Command:** log in inside OpenCode (`opencode auth login`, or the Console login). An empty store is reported as not logged in, and a backup of it fails saying so.
+
+**Limits:** OpenCode's Console login exposes no usage API a bearer token can reach (its dashboard reads usage through browser-session server functions), so `caam limits opencode` lists such a login as `no limits API` rather than as 0% used. When the store holds a Zen API key (`OPENCODE_API_KEY`, the OpenCode Go/Zen key), caam queries `GET https://opencode.ai/zen/go/v1/usage` and reports the rolling window as primary, the weekly as secondary and the monthly by name.
 
 ### Grok Build (xAI)
 

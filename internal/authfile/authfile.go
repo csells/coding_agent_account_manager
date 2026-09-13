@@ -274,7 +274,13 @@ func GrokAuthFiles() AuthFileSet {
 }
 
 // OpenCodeAuthFiles returns the auth files for OpenCode.
-// OpenCode stores auth in $XDG_DATA_HOME/opencode/auth.json (default ~/.local/share/opencode/auth.json).
+//
+// Current OpenCode stores its logins in $XDG_DATA_HOME/opencode/opencode.db
+// (default ~/.local/share/opencode/opencode.db): the account, account_state,
+// control_account and credential tables. That database is bridged rather
+// than copied — see opencode.go — and its export is the required credential.
+// Older installs wrote $XDG_DATA_HOME/opencode/auth.json instead; it stays
+// in the set as an optional file so they keep working.
 func OpenCodeAuthFiles() AuthFileSet {
 	homeDir, _ := os.UserHomeDir()
 
@@ -288,11 +294,18 @@ func OpenCodeAuthFiles() AuthFileSet {
 		Files: []AuthFileSpec{
 			{
 				Tool:        "opencode",
-				Path:        filepath.Join(dataHome, "opencode", "auth.json"),
-				Description: "OpenCode auth credentials",
+				Path:        filepath.Join(dataHome, "opencode", openCodeStoreFile),
+				Description: "OpenCode logins (account and credential tables of opencode.db)",
 				Required:    true,
 			},
+			{
+				Tool:        "opencode",
+				Path:        filepath.Join(dataHome, "opencode", "auth.json"),
+				Description: "OpenCode auth credentials (older installs)",
+				Required:    false,
+			},
 		},
+		AllowOptionalOnly: true,
 	}
 }
 
@@ -514,6 +527,30 @@ func (v *Vault) Backup(fileSet AuthFileSet, profile string) error {
 			}
 			backedUp++
 			optionalFound = true
+			originalPaths = append(originalPaths, spec.Path)
+			continue
+		}
+
+		// OpenCode database: export only the auth tables, as JSON (see
+		// opencode.go); the file itself is also the user's session history.
+		if isOpenCodeStore(fileSet.Tool, spec.Path) {
+			snap, ok, err := exportOpenCodeAuth(spec.Path)
+			if err != nil {
+				return fmt.Errorf("backup %s: %w", spec.Path, err)
+			}
+			if !ok || !snap.hasRows() {
+				if spec.Required {
+					missingRequired = append(missingRequired, spec.Path)
+				}
+				continue
+			}
+			destPath := filepath.Join(profileDir, openCodeVaultFile)
+			if err := writeJSONFileAtomic(destPath, snap, 0600); err != nil {
+				return fmt.Errorf("backup %s: %w", spec.Path, err)
+			}
+			backedUp++
+			requiredFound = requiredFound || spec.Required
+			optionalFound = optionalFound || !spec.Required
 			originalPaths = append(originalPaths, spec.Path)
 			continue
 		}
@@ -754,6 +791,12 @@ func missingRequiredBackupError(fileSet AuthFileSet, path string) error {
 	if fileSet.Tool == "agy" && agyKeychainPath(fileSet) == path {
 		return fmt.Errorf("no Antigravity credential to back up: %s is absent and the login keychain holds no %q item for account %q; log in with agy, then back up again (CAAM_DEBUG=1 prints every keychain lookup)",
 			path, keychain.AgyService, keychain.AgyAccount)
+	}
+	if isOpenCodeStore(fileSet.Tool, path) {
+		if fileExists(path) {
+			return fmt.Errorf("no OpenCode login to back up: %s holds no account or credential rows; log in inside OpenCode (`opencode auth login`, or the Console login), then back up again", path)
+		}
+		return fmt.Errorf("no OpenCode login to back up: %s does not exist; start OpenCode once and log in, then back up again", path)
 	}
 	if fileExists(path) && !fileCarriesLogin(fileSet.Tool, path) {
 		return fmt.Errorf("no %s credential to back up: %s exists but holds no login (logged out); log in with %s, then back up again", fileSet.Tool, path, fileSet.Tool)
@@ -1001,7 +1044,7 @@ func (v *Vault) Restore(fileSet AuthFileSet, profile string) error {
 	optionalFound := false
 	var missingRequired []string
 	for _, spec := range fileSet.Files {
-		filename := filepath.Base(spec.Path)
+		filename := vaultFileName(fileSet.Tool, spec.Path)
 		srcPath := filepath.Join(profileDir, filename)
 
 		// Check if backup exists
@@ -1010,6 +1053,25 @@ func (v *Vault) Restore(fileSet AuthFileSet, profile string) error {
 				missingRequired = append(missingRequired, srcPath)
 			}
 			continue // Skip optional files
+		}
+
+		// OpenCode database: write the exported auth rows back into the
+		// live database in one transaction (see opencode.go).
+		if isOpenCodeStore(fileSet.Tool, spec.Path) {
+			snap, err := readOpenCodeSnapshotFile(srcPath)
+			if err != nil {
+				return fmt.Errorf("restore %s: %w", spec.Path, err)
+			}
+			if err := applyOpenCodeAuth(spec.Path, snap); err != nil {
+				return fmt.Errorf("restore %s: %w", spec.Path, err)
+			}
+			restored++
+			if spec.Required {
+				requiredFound = true
+			} else {
+				optionalFound = true
+			}
+			continue
 		}
 
 		// Claude Desktop config: MERGE the snapshot's oauth:tokenCache* fields
@@ -1293,11 +1355,15 @@ func (v *Vault) ActiveProfile(fileSet AuthFileSet) (string, error) {
 		if _, err := os.Stat(spec.Path); os.IsNotExist(err) {
 			continue
 		}
+		// An OpenCode database with no login carries no identity.
+		if isOpenCodeStore(fileSet.Tool, spec.Path) && !openCodeStoreHasAuth(spec.Path) {
+			continue
+		}
 		hash, err := stableFileHash(fileSet.Tool, spec.Path)
 		if err != nil {
 			continue
 		}
-		base := filepath.Base(spec.Path)
+		base := vaultFileName(fileSet.Tool, spec.Path)
 		if spec.Required {
 			requiredFound = true
 			currentHashes[base] = hash
@@ -1388,6 +1454,15 @@ func HasAuthFiles(fileSet AuthFileSet) bool {
 			}
 			continue
 		}
+		if isOpenCodeStore(fileSet.Tool, spec.Path) {
+			if openCodeStoreHasAuth(spec.Path) {
+				if spec.Required {
+					return true
+				}
+				optionalFound = true
+			}
+			continue
+		}
 		if _, err := os.Stat(spec.Path); err == nil && fileCarriesLogin(fileSet.Tool, spec.Path) {
 			if spec.Required {
 				return true
@@ -1440,6 +1515,14 @@ func ClearAuthFiles(fileSet AuthFileSet) error {
 		// logout does not destroy the user's unrelated desktop settings (PR #44).
 		if isClaudeDesktopConfig(fileSet.Tool, spec.Path) {
 			if err := scrubClaudeDesktopTokenCache(spec.Path); err != nil {
+				return err
+			}
+			continue
+		}
+		// The OpenCode database is also the user's session history: empty
+		// its auth tables, never remove the file (see opencode.go).
+		if isOpenCodeStore(fileSet.Tool, spec.Path) {
+			if err := clearOpenCodeAuth(spec.Path); err != nil {
 				return err
 			}
 			continue
@@ -1784,6 +1867,14 @@ func stableFileHash(tool, path string) (string, error) {
 		return stableKimiHash(path)
 	case "zcode":
 		return stableZcodeHash(path)
+	case "opencode":
+		switch filepath.Base(path) {
+		case openCodeStoreFile:
+			return hashOpenCodeStore(path)
+		case openCodeVaultFile:
+			return hashOpenCodeVaultFile(path)
+		}
+		return hashFile(path)
 	default:
 		return hashFile(path)
 	}
@@ -2359,6 +2450,8 @@ func (v *Vault) ProfileIdentity(tool, profile string) string {
 		return profileMetaIdentity(profileDir)
 	case "zcode":
 		return zcodeProfileIdentity(profileDir)
+	case "opencode":
+		return v.openCodeProfileIdentity(profileDir)
 	default:
 		return ""
 	}

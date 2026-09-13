@@ -32,7 +32,9 @@ which is useful for deciding when to switch accounts. It also parses local logs
 to estimate token burn rate and predict when limits will be hit.
 
 Live limit fetching is available for providers with usage APIs (claude, codex,
-agy, kimi, zcode).
+agy, kimi, zcode, and opencode when its store holds a Zen API key; an
+OpenCode login without one is listed with "no limits API" rather than as
+idle).
 
 Examples:
   caam limits                     # Show limits for every provider with a usage API
@@ -353,7 +355,7 @@ func sortResultsForModel(results []usage.ProfileUsage, model string) {
 }
 
 // limitsProviders are the providers with live limit/usage API support.
-var limitsProviders = []string{"claude", "codex", "agy", "kimi", "zcode"}
+var limitsProviders = []string{"claude", "codex", "agy", "kimi", "zcode", "opencode"}
 
 func isLimitsProvider(p string) bool {
 	for _, lp := range limitsProviders {

@@ -64,6 +64,7 @@ type MultiProfileFetcher struct {
 	agyFetcher    *AgyFetcher
 	kimiFetcher   *KimiFetcher
 	zcodeFetcher  *ZcodeFetcher
+	opencode      *OpenCodeFetcher
 	logScanner    logs.Scanner // Optional scanner for burn rate calculation
 }
 
@@ -85,6 +86,7 @@ func NewMultiProfileFetcher(opts ...FetcherOption) *MultiProfileFetcher {
 		agyFetcher:    NewAgyFetcher(),
 		kimiFetcher:   NewKimiFetcher(),
 		zcodeFetcher:  NewZcodeFetcher(),
+		opencode:      NewOpenCodeFetcher(),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -111,63 +113,17 @@ func (m *MultiProfileFetcher) FetchAllProfiles(ctx context.Context, provider str
 			var info *UsageInfo
 			var err error
 
-			switch provider {
-			case "claude":
-				if m.claudeFetcher == nil {
-					info = &UsageInfo{
-						Provider:  provider,
-						FetchedAt: time.Now(),
-						Error:     "claude fetcher unavailable",
-					}
-				} else {
-					info, err = m.claudeFetcher.Fetch(ctx, token)
-				}
-			case "codex":
-				if m.codexFetcher == nil {
-					info = &UsageInfo{
-						Provider:  provider,
-						FetchedAt: time.Now(),
-						Error:     "codex fetcher unavailable",
-					}
-				} else {
-					info, err = m.codexFetcher.Fetch(ctx, token)
-				}
-			case "agy":
-				if m.agyFetcher == nil {
-					info = &UsageInfo{
-						Provider:  provider,
-						FetchedAt: time.Now(),
-						Error:     "agy fetcher unavailable",
-					}
-				} else {
-					info, err = m.agyFetcher.Fetch(ctx, token)
-				}
-			case "kimi":
-				if m.kimiFetcher == nil {
-					info = &UsageInfo{
-						Provider:  provider,
-						FetchedAt: time.Now(),
-						Error:     "kimi fetcher unavailable",
-					}
-				} else {
-					info, err = m.kimiFetcher.Fetch(ctx, token)
-				}
-			case "zcode":
-				if m.zcodeFetcher == nil {
-					info = &UsageInfo{
-						Provider:  provider,
-						FetchedAt: time.Now(),
-						Error:     "zcode fetcher unavailable",
-					}
-				} else {
-					info, err = m.zcodeFetcher.Fetch(ctx, token)
-				}
-			default:
+			switch {
+			case token == "" && provider == "opencode":
+				// A login with nothing a usage API accepts. Say so rather
+				// than presenting the account as idle or dropping it.
 				info = &UsageInfo{
 					Provider:  provider,
 					FetchedAt: time.Now(),
-					Error:     fmt.Sprintf("unsupported provider: %s", provider),
+					Error:     ErrNoOpenCodeLimitsAPI,
 				}
+			default:
+				info, err = m.fetchOne(ctx, provider, token)
 			}
 
 			if info == nil {
@@ -270,6 +226,81 @@ func (m *MultiProfileFetcher) FetchAllProfiles(ctx context.Context, provider str
 	})
 
 	return results
+}
+
+// fetchOne runs the provider's fetcher for one token.
+func (m *MultiProfileFetcher) fetchOne(ctx context.Context, provider, token string) (*UsageInfo, error) {
+	var info *UsageInfo
+	var err error
+	switch provider {
+	case "claude":
+		if m.claudeFetcher == nil {
+			info = &UsageInfo{
+				Provider:  provider,
+				FetchedAt: time.Now(),
+				Error:     "claude fetcher unavailable",
+			}
+		} else {
+			info, err = m.claudeFetcher.Fetch(ctx, token)
+		}
+	case "codex":
+		if m.codexFetcher == nil {
+			info = &UsageInfo{
+				Provider:  provider,
+				FetchedAt: time.Now(),
+				Error:     "codex fetcher unavailable",
+			}
+		} else {
+			info, err = m.codexFetcher.Fetch(ctx, token)
+		}
+	case "agy":
+		if m.agyFetcher == nil {
+			info = &UsageInfo{
+				Provider:  provider,
+				FetchedAt: time.Now(),
+				Error:     "agy fetcher unavailable",
+			}
+		} else {
+			info, err = m.agyFetcher.Fetch(ctx, token)
+		}
+	case "kimi":
+		if m.kimiFetcher == nil {
+			info = &UsageInfo{
+				Provider:  provider,
+				FetchedAt: time.Now(),
+				Error:     "kimi fetcher unavailable",
+			}
+		} else {
+			info, err = m.kimiFetcher.Fetch(ctx, token)
+		}
+	case "zcode":
+		if m.zcodeFetcher == nil {
+			info = &UsageInfo{
+				Provider:  provider,
+				FetchedAt: time.Now(),
+				Error:     "zcode fetcher unavailable",
+			}
+		} else {
+			info, err = m.zcodeFetcher.Fetch(ctx, token)
+		}
+	case "opencode":
+		if m.opencode == nil {
+			info = &UsageInfo{
+				Provider:  provider,
+				FetchedAt: time.Now(),
+				Error:     "opencode fetcher unavailable",
+			}
+		} else {
+			info, err = m.opencode.Fetch(ctx, token)
+		}
+	default:
+		info = &UsageInfo{
+			Provider:  provider,
+			FetchedAt: time.Now(),
+			Error:     fmt.Sprintf("unsupported provider: %s", provider),
+		}
+	}
+	return info, err
 }
 
 // GetBestProfile returns the profile with the highest availability score.
@@ -408,6 +439,9 @@ func CredentialFiles(provider string) []string {
 		return []string{"kimi-code.json"}
 	case "zcode":
 		return []string{"credentials.json"}
+	case "opencode":
+		// The export of opencode.db's auth tables, then the older auth.json.
+		return []string{"opencode-auth.json", "auth.json"}
 	}
 	return nil
 }
@@ -426,6 +460,8 @@ func ReadCredentials(provider, path string) (accessToken string, accountID strin
 		return ReadKimiCredentials(path)
 	case "zcode":
 		return ReadZcodeCredentials(path)
+	case "opencode":
+		return ReadOpenCodeCredentials(path)
 	}
 	return "", "", fmt.Errorf("no credential reader for provider %q", provider)
 }
@@ -452,11 +488,17 @@ func LoadProfileCredentials(vaultDir, provider string) (map[string]string, error
 		profileDir := filepath.Join(providerDir, profileName)
 
 		// The first credential file that yields a token wins; a profile
-		// whose files all fail to read is skipped.
+		// whose files all fail to read is skipped — except one whose store
+		// is present but holds no credential a usage API accepts, which
+		// gets an empty token so the table can say so (see NoLimitsAPI).
 		for _, name := range CredentialFiles(provider) {
 			token, _, readErr := ReadCredentials(provider, filepath.Join(profileDir, name))
 			if readErr == nil && token != "" {
 				credentials[profileName] = token
+				break
+			}
+			if readErr != nil && readErr.Error() == ErrNoOpenCodeLimitsAPI {
+				credentials[profileName] = ""
 				break
 			}
 		}

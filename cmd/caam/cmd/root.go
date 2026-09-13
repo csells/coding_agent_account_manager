@@ -524,6 +524,12 @@ func getVaultIdentity(tool, profileName string) *identity.Identity {
 		normalizeIdentityPlan(id)
 		return id
 	case "opencode":
+		// The export of opencode.db's login tables first, then an older
+		// install's auth.json.
+		if id, err := identity.ExtractFromOpenCodeExport(filepath.Join(vaultPath, "opencode-auth.json")); err == nil {
+			normalizeIdentityPlan(id)
+			return id
+		}
 		id, err := identity.ExtractFromGenericAuth(filepath.Join(vaultPath, "auth.json"))
 		if err != nil {
 			return nil
