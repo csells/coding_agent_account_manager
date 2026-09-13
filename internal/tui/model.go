@@ -23,6 +23,7 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/refresh"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/signals"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/sync"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/watcher"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -115,6 +116,9 @@ type Profile struct {
 type vaultProfileMeta struct {
 	Description string
 	Account     string
+	// NoCredential: the profile directory holds no file a credential can be
+	// read from, so activating it would install settings and no login.
+	NoCredential bool
 }
 
 // Model is the main Bubble Tea model for the caam TUI.
@@ -203,6 +207,28 @@ type Model struct {
 	// per-profile rate-limit windows fetched through them.
 	hooks  Hooks
 	limits map[string]limitsEntry
+
+	// notice is the outcome of the last action on noticeKey's profile,
+	// shown on the detail card while that profile is selected.
+	notice    string
+	noticeErr bool
+	noticeKey string
+}
+
+// selectionKey identifies the selected provider/profile, or "" when none.
+func (m Model) selectionKey() string {
+	info := m.selectedProfileInfo()
+	if info == nil {
+		return ""
+	}
+	return limitsKey(m.currentProvider(), info.Name)
+}
+
+// setNotice records an action outcome to show on the detail card.
+func (m *Model) setNotice(provider, profile, text string, isErr bool) {
+	m.notice = text
+	m.noticeErr = isErr
+	m.noticeKey = limitsKey(provider, profile)
 }
 
 // DefaultProviders returns the default list of provider names: every
@@ -793,10 +819,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		before := m.selectionKey()
 		model, cmd := m.handleKeyPress(msg)
 		// A key may have moved the selection; fetch that profile's limits
-		// if the cached ones are missing or stale.
+		// if the cached ones are missing or stale, and drop a notice that
+		// was about the profile the selection left.
 		if next, ok := model.(Model); ok {
+			if next.selectionKey() != before && next.noticeKey != next.selectionKey() {
+				next.notice = ""
+				next.noticeKey = ""
+			}
 			if fetch := next.limitsFetchCmd(); fetch != nil {
 				return next, tea.Batch(cmd, fetch)
 			}
@@ -869,9 +901,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case activateResultMsg:
 		if msg.err != nil {
 			m.showError(msg.err, "Activate")
-			return m, nil
+			// The status bar is easy to miss; the detail card is where the
+			// eye is, so the refusal goes there too, verbatim.
+			m.setNotice(msg.provider, msg.profile, "Activate failed: "+msg.err.Error(), true)
+			return m, m.addToast(m.statusMsg, StatusError)
 		}
 		m.showActivateSuccess(msg.provider, msg.profile)
+		m.setNotice(msg.provider, msg.profile, fmt.Sprintf("Switched %s to %s", msg.provider, msg.profile), false)
 		// Refresh profiles to update active state
 		ctx := refreshContext{
 			provider:        msg.provider,
@@ -1214,6 +1250,16 @@ func (m Model) handleActivateProfile() (tea.Model, tea.Cmd) {
 	if info.IsActive {
 		m.statusMsg = fmt.Sprintf("'%s' is already active", info.Name)
 		return m, nil
+	}
+
+	// A profile with no credential cannot be switched to: installing its
+	// settings would leave the live login as it is while reporting success.
+	if info.NoCredential {
+		provider := m.currentProvider()
+		msg := fmt.Sprintf("%s has no captured credential; log in with %s as that account, then run: caam backup %s %s", info.Name, provider, provider, info.Name)
+		m.setNotice(provider, info.Name, msg, true)
+		m.statusMsg = "Cannot activate: no credential captured for " + info.Name
+		return m, m.addToast(m.statusMsg, StatusError)
 	}
 
 	// Enter confirmation state
@@ -2054,7 +2100,32 @@ func loadVaultProfileMeta(vault *authfile.Vault, provider, name string) vaultPro
 	}
 
 	meta.Account = vaultIdentityEmail(provider, profileDir)
+	meta.NoCredential = vaultProfileHasNoCredential(provider, profileDir)
 	return meta
+}
+
+// vaultProfileHasNoCredential reports a vault profile none of whose
+// credential files yields a token. Providers without a credential reader
+// (gemini, grok, cursor) are never flagged: the vault knows no better.
+func vaultProfileHasNoCredential(provider, profileDir string) bool {
+	files := usage.CredentialFiles(provider)
+	if len(files) == 0 {
+		return false
+	}
+	for _, name := range files {
+		path := filepath.Join(profileDir, name)
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		token, _, err := usage.ReadCredentials(provider, path)
+		if token != "" {
+			return false
+		}
+		if err != nil && err.Error() == usage.ErrNoOpenCodeLimitsAPI {
+			return false // an OpenCode login without a Zen key is still a login
+		}
+	}
+	return true
 }
 
 func vaultIdentityEmail(provider, profileDir string) string {
@@ -2177,6 +2248,7 @@ func (m Model) buildProfileInfo(provider string, p Profile, projectDefault strin
 		TokenExpiry:    tokenExpiry,
 		ErrorCount:     errorCount,
 		Penalty:        penalty,
+		NoCredential:   vmeta.NoCredential,
 	}
 }
 
@@ -2334,6 +2406,11 @@ func (m Model) syncDetailPanel() {
 		ErrorCount:   errorCount,
 		Penalty:      penalty,
 		Limits:       m.limitsInfoFor(provider, profileName),
+		NoCredential: vmeta.NoCredential,
+	}
+	if m.notice != "" && m.noticeKey == limitsKey(provider, profileName) {
+		detail.Notice = m.notice
+		detail.NoticeErr = m.noticeErr
 	}
 	m.detailPanel.SetProfile(detail)
 }

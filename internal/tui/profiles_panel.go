@@ -28,6 +28,9 @@ type ProfileInfo struct {
 	TokenExpiry    time.Time
 	ErrorCount     int
 	Penalty        float64
+	// NoCredential marks a vault profile with settings but no credential
+	// file: it cannot be switched to until it is re-captured.
+	NoCredential bool
 }
 
 // ProfilesPanel renders the center panel showing profiles for the selected provider.
@@ -226,6 +229,12 @@ func truncateWithEllipsis(s string, maxWidth int) string {
 // formatTUIStatus formats the health status string.
 func formatTUIStatus(pi *ProfileInfo) string {
 	icon := pi.HealthStatus.Icon()
+
+	if pi.NoCredential {
+		// Nothing to switch to: say so here, where the eye lands, not only
+		// after Enter.
+		return icon + " No credential"
+	}
 
 	if pi.TokenExpiry.IsZero() {
 		return icon + " " + formatStatusLabel(pi.HealthStatus)

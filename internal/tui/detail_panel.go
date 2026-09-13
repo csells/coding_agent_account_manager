@@ -29,6 +29,12 @@ type DetailInfo struct {
 	Penalty      float64
 	// Limits is the profile's live rate-limit windows; nil hides the section.
 	Limits *LimitsInfo
+	// NoCredential marks a profile that holds settings but no credential.
+	NoCredential bool
+	// Notice is the outcome of the last action on this profile (a switch
+	// result, a refusal), shown under the title; NoticeErr styles it red.
+	Notice    string
+	NoticeErr bool
 }
 
 // LimitsInfo is the Limits section of the detail card: one row per window
@@ -206,6 +212,19 @@ func (p *DetailPanel) View() string {
 
 	var sections []string
 
+	// ═══ NOTICE (last action on this profile) ═══
+	if prof.Notice != "" {
+		width := p.width - 6
+		if width < 20 {
+			width = 20
+		}
+		style := p.styles.StatusOK
+		if prof.NoticeErr {
+			style = p.styles.StatusBad
+		}
+		sections = append(sections, style.Width(width).Render(prof.Notice))
+	}
+
 	// ═══ PROFILE SECTION ═══
 	profileHeader := p.styles.SectionHeader.Render("Profile")
 	var profileRows []string
@@ -256,6 +275,12 @@ func (p *DetailPanel) View() string {
 	// Lock status
 	if prof.Locked {
 		authRows = append(authRows, p.renderRow("Lock", p.styles.LockIcon.Render("🔒 Locked")))
+	}
+
+	// A profile that cannot be switched to says so before Enter is pressed.
+	if prof.NoCredential {
+		authRows = append(authRows, p.renderRow("Credential", p.styles.StatusBad.Render(
+			fmt.Sprintf("none captured; log in, then: caam backup %s %s", prof.Provider, prof.Name))))
 	}
 
 	sections = append(sections, lipgloss.JoinVertical(lipgloss.Left,

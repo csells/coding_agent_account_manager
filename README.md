@@ -791,7 +791,13 @@ account is selected, in a **Limits** block on the right-hand detail card
 (`5-hour: 82% left, resets 6:10 PM`, `Weekly Fable: 10% left, …`, with an
 "As of" time). Arrowing between accounts fetches each one's windows at most
 once a minute; a failed fetch keeps the last known figures, marked. Enter
-there switches through the same re-capture-first path as `caam activate`.
+there switches through the same re-capture-first path as `caam activate`,
+and the outcome — switched, refused, failed — is written on the card, not
+only in the status bar. A profile that holds settings but no credential
+(captured before the keychain bridge, or from a logged-out state) is listed
+as `No credential`, cannot be activated from the TUI, and is refused by
+`caam activate` too: installing it would change nothing while reporting
+success.
 Every provider the vault knows — Antigravity, Kimi and zcode included — is
 listed, and the screen fits the terminal instead of scrolling off the top.
 

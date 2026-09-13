@@ -226,3 +226,71 @@ func TestMainViewNeverExceedsTheTerminalHeight(t *testing.T) {
 		}
 	}
 }
+
+func TestEnterRefusesACredentialLessProfileUpFront(t *testing.T) {
+	called := false
+	hooks := Hooks{Switch: func(ctx context.Context, provider, profile string) error {
+		called = true
+		return nil
+	}}
+	m := modelWithTwoClaudeProfiles(hooks)
+	m.vaultMeta = map[string]map[string]vaultProfileMeta{
+		"claude": {"b@example.com": {NoCredential: true}},
+	}
+	m.syncProfilesPanel()
+
+	// The list says so before anything is pressed.
+	if v := m.profilesPanel.View(); !strings.Contains(v, "No credential") {
+		t.Fatalf("list does not flag the credential-less profile:\n%s", v)
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.state == stateConfirm || called {
+		t.Fatalf("enter should refuse, not confirm: state=%v called=%v", m.state, called)
+	}
+	if cmd == nil {
+		t.Fatalf("refusal should raise a toast")
+	}
+	m.syncDetailPanel()
+	v := flatCard(m.detailPanel.View())
+	for _, want := range []string{"none captured", "caam backup claude b@example.com", "no captured credential"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("detail card lacks %q:\n%s", want, v)
+		}
+	}
+
+	// Moving to another profile clears the notice; coming back does not
+	// resurrect it.
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = updated.(Model)
+	m.syncDetailPanel()
+	if strings.Contains(flatCard(m.detailPanel.View()), "no captured credential") {
+		t.Fatalf("notice followed the selection to another profile")
+	}
+}
+
+// flatCard collapses a rendered card to one line of words so a phrase that
+// wrapped inside the box can still be matched.
+func flatCard(v string) string {
+	return strings.Join(strings.Fields(strings.ReplaceAll(v, "│", " ")), " ")
+}
+
+func TestSwitchOutcomeShowsOnTheCard(t *testing.T) {
+	m := modelWithTwoClaudeProfiles(Hooks{})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+
+	updated, cmd := m.Update(activateResultMsg{provider: "claude", profile: "b@example.com",
+		err: errors.New("profile claude/b@example.com holds no credential to install (settings only)")})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatalf("a failed switch should raise a toast")
+	}
+	m.syncDetailPanel()
+	if v := flatCard(m.detailPanel.View()); !strings.Contains(v, "Activate failed") || !strings.Contains(v, "holds no credential") {
+		t.Fatalf("failure not on the card:\n%s", v)
+	}
+}
