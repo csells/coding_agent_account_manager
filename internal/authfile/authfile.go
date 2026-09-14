@@ -861,8 +861,10 @@ func (v *Vault) BackupCurrent(fileSet AuthFileSet) (string, error) {
 //   - the target profile we are about to switch TO (would be pointless/racey)
 //   - no live auth files present
 //
-// Errors are returned to the caller but are intended to be treated as
-// NON-FATAL (a failed re-snapshot must never block a switch).
+// A failed re-snapshot ABORTS the switch: the vault would otherwise be left
+// with a stale copy of the outgoing profile, which is the #19 sequence.
+// internal/switcher.Switch enforces this; its Force option is the only
+// override, and the caller has to say so.
 func (v *Vault) ResnapshotOutgoing(fileSet AuthFileSet, outgoing, target string) error {
 	outgoing = strings.TrimSpace(outgoing)
 	target = strings.TrimSpace(target)

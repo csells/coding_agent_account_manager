@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 )
 
 var workspaceCmd = &cobra.Command{
@@ -313,8 +315,10 @@ func switchWorkspace(cfg *config.Config, workspaceName string) error {
 			fmt.Printf("  Backed up original %s auth\n", tool)
 		}
 
-		// Restore profile
-		if err := vault.Restore(fileSet, profile); err != nil {
+		// Switch through the shared core: the outgoing account is
+		// re-captured first, and a switch that cannot keep the vault fresh
+		// is not made.
+		if _, err := switcher.Switch(context.Background(), vault, fileSet, switcher.Options{Profile: profile, Source: "workspace"}); err != nil {
 			fmt.Printf("  Error activating %s/%s: %v\n", tool, profile, err)
 			continue
 		}

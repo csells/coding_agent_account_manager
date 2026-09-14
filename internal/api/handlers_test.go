@@ -1,9 +1,15 @@
 package api
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 )
 
 func TestFormatDuration(t *testing.T) {
@@ -239,4 +245,90 @@ func TestToolsMapContainsExpectedTools(t *testing.T) {
 			t.Errorf("tools map missing %q", tool)
 		}
 	}
+}
+
+// POST /actions/activate switches through the shared core: the signed-in
+// account is re-captured first, and a failed re-capture is an error, not a
+// switch.
+func TestAPIActivate_RecapturesBeforeRestoring(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	tmp := t.TempDir()
+	t.Setenv("CODEX_HOME", filepath.Join(tmp, "codex_home"))
+	if err := os.MkdirAll(os.Getenv("CODEX_HOME"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	vault := authfile.NewVault(filepath.Join(tmp, "vault"))
+	write := func(path string, data []byte) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC).Unix()
+	stale := syntheticCodexAuth(t, "a@example.com", "a-stale", base)
+	rotated := syntheticCodexAuth(t, "a@example.com", "a-rotated", base+3600)
+	incoming := syntheticCodexAuth(t, "b@example.com", "b", base)
+	write(filepath.Join(vault.ProfilePath("codex", "a"), "auth.json"), stale)
+	write(filepath.Join(vault.ProfilePath("codex", "b"), "auth.json"), incoming)
+	livePath := filepath.Join(os.Getenv("CODEX_HOME"), "auth.json")
+	write(livePath, rotated)
+
+	h := NewHandlers(vault, nil, nil)
+	resp, err := h.Activate(ActivateRequest{Tool: "codex", Profile: "b"})
+	if err != nil || !resp.Success {
+		t.Fatalf("Activate() = %+v, %v", resp, err)
+	}
+	gotA, _ := os.ReadFile(filepath.Join(vault.ProfilePath("codex", "a"), "auth.json"))
+	if string(gotA) != string(rotated) {
+		t.Fatalf("outgoing a was not re-captured before the switch; vault holds %s", gotA)
+	}
+	if gotLive, _ := os.ReadFile(livePath); string(gotLive) != string(incoming) {
+		t.Fatalf("live credential = %s, want b", gotLive)
+	}
+
+	// Switch back with b un-recapturable: refused, live untouched.
+	bDir := vault.ProfilePath("codex", "b")
+	if err := os.Chmod(bDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(bDir, 0o700) })
+	write(livePath, syntheticCodexAuth(t, "b@example.com", "b-rotated", base+7200))
+	if _, err := h.Activate(ActivateRequest{Tool: "codex", Profile: "a"}); err == nil {
+		t.Fatal("Activate() should refuse when the outgoing account cannot be re-captured")
+	}
+	if gotLive, _ := os.ReadFile(livePath); !strings.Contains(string(gotLive), "b-rotated") {
+		t.Fatalf("live credential was replaced despite the refusal: %s", gotLive)
+	}
+}
+
+// syntheticCodexAuth builds a ChatGPT-mode Codex auth.json whose id_token
+// names email; unsigned and synthetic.
+func syntheticCodexAuth(t *testing.T, email, tag string, issuedAt int64) []byte {
+	t.Helper()
+	jwt := func(claims map[string]any) string {
+		payload, err := json.Marshal(claims)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`)) + "." +
+			base64.RawURLEncoding.EncodeToString(payload) + ".sig"
+	}
+	auth := map[string]any{
+		"auth_mode": "chatgpt",
+		"tokens": map[string]any{
+			"id_token":      jwt(map[string]any{"email": email, "iat": issuedAt, "exp": issuedAt + 3600}),
+			"access_token":  jwt(map[string]any{"sub": email, "iat": issuedAt, "exp": issuedAt + 3600}),
+			"refresh_token": "SYNTHETIC-REFRESH-" + tag,
+		},
+		"last_refresh": time.Unix(issuedAt, 0).UTC().Format(time.RFC3339),
+	}
+	data, err := json.Marshal(auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }

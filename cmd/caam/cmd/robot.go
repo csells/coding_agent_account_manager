@@ -15,6 +15,7 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -849,8 +850,10 @@ func runRobotAct(cmd *cobra.Command, args []string) error {
 			result.OldProfile = oldProfile
 		}
 
-		// Activate the profile
-		if err := vault.Restore(fileSet, profile); err != nil {
+		// Switch through the shared core: the outgoing account is
+		// re-captured first, and a switch that cannot keep the vault fresh
+		// is refused.
+		if _, err := switcher.Switch(cmd.Context(), vault, fileSet, switcher.Options{Profile: profile, Source: "robot"}); err != nil {
 			return robotError(cmd, "act", "ACTIVATE_FAILED",
 				fmt.Sprintf("failed to activate %s/%s", provider, profile),
 				err.Error(),

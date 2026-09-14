@@ -24,6 +24,7 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/ratelimit"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/rotation"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 )
 
 // ExecCommand allows mocking exec.CommandContext in tests
@@ -329,8 +330,9 @@ func (w *Wrapper) runOnce(ctx context.Context, profile string) (int, bool, error
 		return 1, false, fmt.Errorf("unknown provider: %s", w.config.Provider)
 	}
 
-	// Activate the profile (restore auth files)
-	if err := w.vault.Restore(fileSet, profile); err != nil {
+	// Switch through the shared core: the account that was signed in is
+	// re-captured before this one is installed.
+	if _, err := switcher.Switch(ctx, w.vault, fileSet, switcher.Options{Profile: profile, DB: w.db, Source: "wrap"}); err != nil {
 		return 1, false, fmt.Errorf("activate profile %s: %w", profile, err)
 	}
 

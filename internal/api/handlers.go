@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/identity"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 )
 
 // Handlers provides the business logic for API endpoints.
@@ -383,9 +385,11 @@ func (h *Handlers) Activate(req ActivateRequest) (*ActivateResponse, error) {
 		}
 	}
 
-	// Restore the profile (activating it)
-	if err := h.vault.Restore(fileSet, req.Profile); err != nil {
-		return nil, fmt.Errorf("activate failed: %w", err)
+	// Switch through the shared core: the outgoing account is re-captured
+	// first, and a switch that cannot keep the vault fresh is refused
+	// unless forced.
+	if _, err := switcher.Switch(context.Background(), h.vault, fileSet, switcher.Options{Profile: req.Profile, Force: req.Force, DB: h.db, Source: "api"}); err != nil {
+		return nil, err
 	}
 
 	return &ActivateResponse{

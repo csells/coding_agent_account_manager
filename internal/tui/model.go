@@ -1828,35 +1828,6 @@ func (m Model) doRefreshProfile(provider, profile string) tea.Cmd {
 	}
 }
 
-// doActivateProfile returns a tea.Cmd that performs the profile activation.
-func (m Model) doActivateProfile(provider, profile string) tea.Cmd {
-	return func() tea.Msg {
-		fileSet, ok := authFileSetForProvider(provider)
-		if !ok {
-			return activateResultMsg{
-				provider: provider,
-				profile:  profile,
-				err:      fmt.Errorf("unknown provider: %s", provider),
-			}
-		}
-
-		vault := authfile.NewVault(m.vaultPath)
-		if err := vault.Restore(fileSet, profile); err != nil {
-			return activateResultMsg{
-				provider: provider,
-				profile:  profile,
-				err:      err,
-			}
-		}
-
-		return activateResultMsg{
-			provider: provider,
-			profile:  profile,
-			err:      nil,
-		}
-	}
-}
-
 // handleOpenInBrowser opens the account page in browser.
 func (m Model) handleOpenInBrowser() (tea.Model, tea.Cmd) {
 	provider := m.currentProvider()

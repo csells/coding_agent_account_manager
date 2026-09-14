@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -684,5 +685,46 @@ func TestNextDelay_NegativeMultiplier(t *testing.T) {
 	// With default multiplier of 2.0: 10s * 2^1 = 20s
 	if d != 20*time.Second {
 		t.Errorf("NextDelay(1) with negative multiplier = %v, want 20s", d)
+	}
+}
+
+// Every attempt's switch goes through the shared core: the account that
+// was signed in is re-captured before the wrapper installs the one it
+// runs with.
+func TestWrapRunOnce_SwitchesThroughTheCore(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("CODEX_HOME", filepath.Join(tmp, "codex_home"))
+	if err := os.MkdirAll(os.Getenv("CODEX_HOME"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	vault := authfile.NewVault(filepath.Join(tmp, "vault"))
+	stale := []byte(`{"auth_mode":"chatgpt","tokens":{"id_token":"","access_token":"","refresh_token":"SYNTHETIC-a-stale"}}`)
+	write := func(path string, data []byte) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(vault.ProfilePath("codex", "a"), "auth.json"), stale)
+	write(filepath.Join(vault.ProfilePath("codex", "b"), "auth.json"), []byte(`{"auth_mode":"chatgpt","tokens":{"id_token":"","access_token":"","refresh_token":"SYNTHETIC-b"}}`))
+	livePath := filepath.Join(os.Getenv("CODEX_HOME"), "auth.json")
+	write(livePath, stale) // a is signed in
+
+	cfg := DefaultConfig()
+	cfg.Provider = "codex"
+	cfg.NotifyOnSwitch = false
+	cfg.Stdout, cfg.Stderr = &bytes.Buffer{}, &bytes.Buffer{}
+	w := NewWrapper(vault, nil, nil, cfg)
+
+	if _, _, err := w.runOnce(context.Background(), "b"); err == nil {
+		// codex is not installed in the test environment; the switch
+		// happens before the command runs, which is what is asserted.
+		t.Log("runOnce ran a command; fine")
+	}
+	got, _ := os.ReadFile(livePath)
+	if !strings.Contains(string(got), "SYNTHETIC-b") {
+		t.Fatalf("live credential after runOnce = %s, want b", got)
 	}
 }

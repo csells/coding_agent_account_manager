@@ -513,3 +513,25 @@ func TestRefreshKey_RefreshesTheTokenOnlyWhenItIsNeeded(t *testing.T) {
 		t.Fatalf("r should refresh the token first: status=%q", m.statusMsg)
 	}
 }
+
+// Without a Switch hook the dashboard has no safe way to switch: it says
+// so and restores nothing, rather than falling back to a bare restore
+// that skips the re-capture.
+func TestTUISwitchWithoutAHookSaysSo(t *testing.T) {
+	m := modelWithTwoClaudeProfiles(Hooks{})
+	m.width, m.height = 170, 40
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("confirming should produce the outcome")
+	}
+	msg := cmd()
+	res, ok := msg.(activateResultMsg)
+	if !ok || res.err == nil || !strings.Contains(res.err.Error(), "not available") {
+		t.Fatalf("with no Switch hook the switch must be refused as unavailable, got %#v", msg)
+	}
+}

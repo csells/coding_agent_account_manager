@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"time"
@@ -214,11 +215,14 @@ func formatCredits(c *usage.CreditInfo) string {
 	return "-"
 }
 
-// switchCmd performs the confirmed activation: through the Switch hook when
-// the command layer supplied one, else the TUI's own vault restore.
+// switchCmd performs the confirmed activation through the Switch hook the
+// command layer supplied. Without one there is no safe way to switch (a
+// bare restore skips the re-capture), so the outcome says so.
 func (m Model) switchCmd(provider, profile string) tea.Cmd {
 	if m.hooks.Switch == nil {
-		return m.doActivateProfile(provider, profile)
+		return func() tea.Msg {
+			return activateResultMsg{provider: provider, profile: profile, err: fmt.Errorf("switching is not available in this build (no switch hook)")}
+		}
 	}
 	sw := m.hooks.Switch
 	return func() tea.Msg {

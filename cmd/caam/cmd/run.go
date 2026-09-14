@@ -20,6 +20,7 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/notify"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/profile"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/rotation"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
 	"github.com/spf13/cobra"
 )
@@ -231,8 +232,7 @@ func runWrap(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("no profile selected for %s", tool)
 		}
 		activeProfileName = res.Selected
-		// Restore it
-		if err := vault.Restore(fileSet, activeProfileName); err != nil {
+		if err := switchForRun(tool, activeProfileName, spmCfg, db); err != nil {
 			return fmt.Errorf("activate profile: %w", err)
 		}
 	}
@@ -387,15 +387,48 @@ func runPrecheck(tool string, threshold float64, quiet bool, db *caamdb.DB, algo
 		return false // Couldn't find better alternative
 	}
 
-	// Switch to the better profile
-	if err := vault.Restore(fileSet, result.Selected); err != nil {
+	return precheckSwitch(tool, currentProfile, result.Selected, quiet, spmCfg, db)
+}
+
+// precheckSwitch makes selected the Active Account through the shared
+// core, so the outgoing one is re-captured first; a switch that cannot
+// keep the vault fresh is not made, and the run continues on the current
+// account.
+func precheckSwitch(tool, currentProfile, selected string, quiet bool, spmCfg *config.SPMConfig, db *caamdb.DB) bool {
+	if err := switchForRun(tool, selected, spmCfg, db); err != nil {
+		if !quiet {
+			fmt.Fprintf(os.Stderr, "caam: precheck did not switch %s/%s -> %s/%s: %v\n", tool, currentProfile, tool, selected, err)
+		}
 		return false
 	}
-
 	if !quiet {
 		fmt.Fprintf(os.Stderr, "caam: precheck switched %s/%s -> %s/%s\n",
-			tool, currentProfile, tool, result.Selected)
+			tool, currentProfile, tool, selected)
 	}
-
 	return true
+}
+
+// switchForRun is `caam run`'s switch: the shared core, quietly.
+func switchForRun(tool, profile string, spmCfg *config.SPMConfig, db *caamdb.DB) error {
+	getFileSet, ok := tools[tool]
+	if !ok {
+		return fmt.Errorf("unknown tool: %s", tool)
+	}
+	if vault == nil {
+		vault = authfile.NewVault(authfile.DefaultVaultPath())
+	}
+	if spmCfg == nil {
+		spmCfg = config.DefaultSPMConfig()
+	}
+	var logDB *caamdb.DB
+	if spmCfg.Analytics.Enabled {
+		logDB = db
+	}
+	_, err := switcher.Switch(context.Background(), vault, getFileSet(), switcher.Options{
+		Profile: profile,
+		Config:  spmCfg,
+		DB:      logDB,
+		Source:  "run",
+	})
+	return err
 }
