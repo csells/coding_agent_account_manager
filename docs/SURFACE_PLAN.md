@@ -323,13 +323,21 @@ resume pause is `Config.ResumeDelay` (1.5 s); `wezterm switch-all` uses
 the same pause. Kimi has a resume command but no rate-limit pattern in
 the coordinator yet, so only the handoff and switch-all cover it.
 
-## R4 — One word for the thing with accounts: "agent"
+## R4 — One word for the thing with accounts: "agent" (done)
 
 `CONTEXT.md` says Agent and lists "provider" under words to avoid. Every
 string a person reads in the dashboard and in CLI help says agent
 ("Agents (5)", "←/→ agent", "Log in to which agent?", `caam add <agent>`
 in help). Flag and subcommand names (`--tool`, `provider`) stay: they are
 the CLI's contract. One test per surface pins the wording.
+
+Status: landed 2026-09-14 across the dashboard (`internal/tui`), the CLI
+(50 files under `cmd/caam/cmd`) and the README's dashboard section; pinned
+by `TestDashboardCallsTheThingWithAccountsAnAgent` and
+`TestHelpCallsTheThingWithAccountsAnAgent`. Left alone on purpose: flag
+names, JSON keys, the HTTP API's "unknown tool", and "tool" where it means
+gum, MCP tools or caam itself. The wider README still says "tool" outside
+the dashboard section.
 
 ## R5 — The handoff document (done)
 

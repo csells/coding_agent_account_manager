@@ -29,16 +29,16 @@ your target tool, reducing manual repetition across many sessions.`,
 }
 
 var weztermLoginAllCmd = &cobra.Command{
-	Use:   "login-all <tool>",
+	Use:   "login-all <agent>",
 	Short: "Send /login to all matching WezTerm panes",
-	Long: `Send /login to all matching WezTerm panes for the specified tool.
+	Long: `Send /login to all matching WezTerm panes for the specified agent.
 
 Prefer "caam wezterm switch-all": it switches the account under the panes and
 resumes them with no login. Use login-all only when there is no other vaulted
 account to switch to. The signed-in account is captured first, since a login
 is a logout first.
 
-By default, panes are matched by scanning recent output for a tool-specific
+By default, panes are matched by scanning recent output for a agent-specific
 pattern. Use --all to broadcast to every pane.
 
 Examples:
@@ -51,11 +51,11 @@ Examples:
 }
 
 var weztermSwitchAllCmd = &cobra.Command{
-	Use:   "switch-all <tool>",
-	Short: "Switch the tool's account and resume every rate-limited WezTerm pane on its history",
-	Long: `Switch the tool to its next vaulted account (through the switch core, so the
+	Use:   "switch-all <agent>",
+	Short: "Switch the agent's account and resume every rate-limited WezTerm pane on its history",
+	Long: `Switch the agent to its next vaulted account (through the switch core, so the
 outgoing account is re-captured first), then end each rate-limited pane's
-session and reopen it on its history with the tool's resume command
+session and reopen it on its history with the agent's resume command
 (claude --continue, codex resume --last, gemini --resume latest). No login is
 run: a login is a logout first. With only one vaulted account there is nothing
 to switch to; use login-all then.
@@ -69,7 +69,7 @@ Examples:
 }
 
 var weztermOAuthReportCmd = &cobra.Command{
-	Use:   "oauth-urls <tool>",
+	Use:   "oauth-urls <agent>",
 	Short: "Report OAuth URLs found in WezTerm panes",
 	Long: `Scan WezTerm panes for OAuth URLs and print a copy-friendly report.
 
