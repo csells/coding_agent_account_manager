@@ -152,6 +152,12 @@ func (d *DB) GetEvents(provider, profile string, since time.Time, limit int) ([]
 	}
 	defer rows.Close()
 
+	return scanEvents(rows)
+}
+
+// scanEvents drains an activity_log result set selected as
+// (timestamp, event_type, provider, profile_name, details, duration_seconds).
+func scanEvents(rows *sql.Rows) ([]Event, error) {
 	var out []Event
 	for rows.Next() {
 		var tsStr string
@@ -211,39 +217,7 @@ func (d *DB) ListRecentEvents(limit int) ([]Event, error) {
 	}
 	defer rows.Close()
 
-	var out []Event
-	for rows.Next() {
-		var tsStr string
-		var e Event
-		var details sql.NullString
-		var durationSeconds sql.NullInt64
-		if err := rows.Scan(&tsStr, &e.Type, &e.Provider, &e.ProfileName, &details, &durationSeconds); err != nil {
-			return nil, fmt.Errorf("scan activity_log: %w", err)
-		}
-
-		ts, err := parseSQLiteTime(tsStr)
-		if err != nil {
-			return nil, fmt.Errorf("parse timestamp %q: %w", tsStr, err)
-		}
-		e.Timestamp = ts
-
-		if details.Valid && details.String != "" {
-			var m map[string]any
-			if err := json.Unmarshal([]byte(details.String), &m); err == nil {
-				e.Details = m
-			}
-		}
-
-		if durationSeconds.Valid && durationSeconds.Int64 > 0 {
-			e.Duration = time.Duration(durationSeconds.Int64) * time.Second
-		}
-
-		out = append(out, e)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate activity_log: %w", err)
-	}
-	return out, nil
+	return scanEvents(rows)
 }
 
 func (d *DB) GetStats(provider, profile string) (*ProfileStats, error) {
