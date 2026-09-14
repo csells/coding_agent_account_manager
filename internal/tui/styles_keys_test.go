@@ -444,7 +444,7 @@ func TestKeyBindingsHaveHelp(t *testing.T) {
 		{"Right", km.Right, "next provider"},
 		{"Tab", km.Tab, "cycle providers"},
 		{"Enter", km.Enter, "activate profile"},
-		{"Backup", km.Backup, "backup current auth"},
+		{"Backup", km.Backup, "re-capture the signed-in account"},
 		{"Delete", km.Delete, "delete profile"},
 		{"Edit", km.Edit, "edit profile"},
 		{"Login", km.Login, "login/refresh"},
