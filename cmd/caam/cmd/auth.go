@@ -61,20 +61,20 @@ Subcommands:
 }
 
 var authDetectCmd = &cobra.Command{
-	Use:   "detect [tool]",
+	Use:   "detect [agent]",
 	Short: "Detect existing auth files",
 	Long: `Detect existing authentication files in standard system locations.
 
-This scans for existing auth files from direct CLI tool usage:
+This scans for existing auth files from direct agent usage:
   - Claude: ~/.claude.json, ~/.config/claude-code/auth.json, $CLAUDE_CONFIG_DIR/auth.json
   - Codex: ~/.codex/auth.json
   - Gemini: ~/.gemini/settings.json, ~/.gemini/.env, gcloud ADC
 
-If a tool argument is provided, only that tool is checked.
-Otherwise, all supported tools are scanned.
+If an agent argument is provided, only that agent is checked.
+Otherwise, all supported agents are scanned.
 
 Examples:
-  caam auth detect           # Detect all providers
+  caam auth detect           # Detect all agents
   caam auth detect claude    # Detect Claude auth only
   caam auth detect --json    # Output as JSON
 
@@ -90,7 +90,7 @@ This is useful for first-run experience to discover and import existing credenti
 			tool := strings.ToLower(args[0])
 			p, ok := registry.Get(tool)
 			if !ok {
-				return fmt.Errorf("unknown tool: %s (supported: claude, codex, gemini)", tool)
+				return fmt.Errorf("unknown agent: %s (supported: claude, codex, gemini)", tool)
 			}
 			providersToCheck = append(providersToCheck, p)
 		} else {
@@ -126,14 +126,14 @@ type AuthImportResult struct {
 }
 
 var authImportCmd = &cobra.Command{
-	Use:   "import <tool>",
+	Use:   "import <agent>",
 	Short: "Import detected auth into a profile",
 	Long: `Import existing authentication files into a new caam profile.
 
 This detects existing auth credentials and imports them into a new profile,
 allowing you to manage multiple accounts without re-authenticating.
 
-The tool argument is required and specifies which CLI tool:
+The agent argument is required and specifies which agent:
   - claude  - Claude Code (Anthropic)
   - codex   - Codex CLI (OpenAI)
   - gemini  - Gemini CLI (Google)
@@ -288,13 +288,13 @@ func printAuthDetectReport(report *AuthDetectReport) {
 	}
 
 	// Summary
-	fmt.Printf("Summary: %d provider(s) checked, %d with auth, %d without\n",
+	fmt.Printf("Summary: %d agent(s) checked, %d with auth, %d without\n",
 		report.Summary.TotalProviders,
 		report.Summary.FoundCount,
 		report.Summary.NotFoundCount)
 
 	if report.Summary.FoundCount > 0 {
-		fmt.Println("\nRun 'caam auth import <tool>' to import detected credentials into a profile.")
+		fmt.Println("\nRun 'caam auth import <agent>' to import detected credentials into a profile.")
 	}
 }
 
@@ -377,7 +377,7 @@ func runAuthImport(cmd *cobra.Command, args []string) error {
 	// Validate provider
 	prov, ok := registry.Get(tool)
 	if !ok {
-		return fmt.Errorf("unknown tool: %s (supported: claude, codex, gemini)", tool)
+		return fmt.Errorf("unknown agent: %s (supported: claude, codex, gemini)", tool)
 	}
 
 	// Check if profile exists
@@ -498,7 +498,7 @@ func runAuthImport(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("\n")
 	fmt.Printf("Next steps:\n")
-	fmt.Printf("  Run your CLI with: caam exec %s %s -- <your command>\n", tool, name)
+	fmt.Printf("  Run the agent with: caam exec %s %s -- <your command>\n", tool, name)
 	fmt.Printf("  Or activate profile: eval \"$(caam env %s %s)\"\n", tool, name)
 
 	return nil

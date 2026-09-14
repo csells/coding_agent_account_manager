@@ -30,7 +30,7 @@ Examples:
 
 func init() {
 	rootCmd.AddCommand(usageCmd)
-	usageCmd.Flags().StringP("profile", "p", "", "profile to show (provider/name)")
+	usageCmd.Flags().StringP("profile", "p", "", "profile to show (agent/name)")
 	usageCmd.Flags().Bool("detailed", false, "show detailed session history (requires --profile)")
 	usageCmd.Flags().Int("days", 7, "number of days to include")
 	usageCmd.Flags().String("since", "", "start date (YYYY-MM-DD)")
@@ -299,12 +299,12 @@ func parseSince(days int, since string) (time.Time, error) {
 func splitProviderProfile(input string) (string, string, error) {
 	parts := strings.SplitN(strings.TrimSpace(input), "/", 2)
 	if len(parts) != 2 {
-		return "", "", fmt.Errorf("profile must be in provider/name format")
+		return "", "", fmt.Errorf("profile must be in agent/name format")
 	}
 	provider := strings.TrimSpace(parts[0])
 	profile := strings.TrimSpace(parts[1])
 	if provider == "" || profile == "" {
-		return "", "", fmt.Errorf("profile must be in provider/name format")
+		return "", "", fmt.Errorf("profile must be in agent/name format")
 	}
 	return provider, profile, nil
 }

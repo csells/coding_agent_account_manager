@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +34,60 @@ func captureOutput(t *testing.T, cmd *cobra.Command, args []string) (stdout, std
 // createTestCmd creates a fresh root command for testing.
 func createTestCmd() *cobra.Command {
 	return rootCmd
+}
+
+// helpOutput returns what `caam <args> --help` prints, and puts the
+// command's help flag back so later tests can run the command for real.
+func helpOutput(t *testing.T, args ...string) string {
+	t.Helper()
+	out, _, err := captureOutput(t, rootCmd, append(append([]string{}, args...), "--help"))
+	if err != nil {
+		t.Fatalf("caam %s --help: %v", strings.Join(args, " "), err)
+	}
+	if sub, _, findErr := rootCmd.Find(args); findErr == nil {
+		if f := sub.Flags().Lookup("help"); f != nil {
+			_ = f.Value.Set("false")
+		}
+	}
+	return out
+}
+
+// The thing with accounts is an "agent" in every string a person reads:
+// help text names the argument <agent>, and an unknown name is an
+// "unknown agent". Flag and subcommand names are the CLI's contract and
+// keep their spelling; this is about prose.
+func TestHelpCallsTheThingWithAccountsAnAgent(t *testing.T) {
+	toolWord := regexp.MustCompile(`\btools?\b`)
+	for _, args := range [][]string{{"add"}, {"activate"}, {"ls"}, {"backup"}, {"limits"}, {"use"}} {
+		out := helpOutput(t, args...)
+		if !strings.Contains(out, "<agent>") && !strings.Contains(out, "[agent]") {
+			t.Errorf("caam %s --help should name the argument agent:\n%s", args[0], out)
+		}
+		lower := strings.ToLower(out)
+		if strings.Contains(lower, "provider") || toolWord.MatchString(lower) {
+			t.Errorf("caam %s --help still says provider or tool:\n%s", args[0], out)
+		}
+	}
+	root := helpOutput(t)
+	if !strings.Contains(root, "Supported agents:") {
+		t.Errorf("caam --help should list supported agents:\n%s", root)
+	}
+
+	for _, tc := range []struct {
+		name string
+		cmd  *cobra.Command
+		args []string
+	}{
+		{"backup", backupCmd, []string{"nope", "x"}},
+		{"activate", activateCmd, []string{"nope", "x"}},
+		{"use", useCmd, []string{"nope", "x"}},
+		{"ls", lsCmd, []string{"nope"}},
+	} {
+		err := tc.cmd.RunE(tc.cmd, tc.args)
+		if err == nil || !strings.Contains(err.Error(), "unknown agent: nope") {
+			t.Errorf("caam %s nope: want an unknown agent error, got %v", tc.name, err)
+		}
+	}
 }
 
 // TestRootCommand tests the root command exists and has correct metadata.
@@ -127,7 +182,7 @@ func TestVersionCommand(t *testing.T) {
 
 // TestBackupCommandFlags tests the backup command has correct arg requirements.
 func TestBackupCommandFlags(t *testing.T) {
-	if backupCmd.Use != "backup <tool> <profile-name>" {
+	if backupCmd.Use != "backup <agent> <profile-name>" {
 		t.Errorf("Unexpected Use: %q", backupCmd.Use)
 	}
 
@@ -160,7 +215,7 @@ func TestBackupCommandFlags(t *testing.T) {
 
 // TestActivateCommandFlags tests the activate command flags and aliases.
 func TestActivateCommandFlags(t *testing.T) {
-	if activateCmd.Use != "activate <tool> [profile-name]" {
+	if activateCmd.Use != "activate <agent> [profile-name]" {
 		t.Errorf("Unexpected Use: %q", activateCmd.Use)
 	}
 
@@ -196,7 +251,7 @@ func TestActivateCommandFlags(t *testing.T) {
 
 // TestStatusCommandArgs tests the status command accepts optional tool argument.
 func TestStatusCommandArgs(t *testing.T) {
-	if statusCmd.Use != "status [tool]" {
+	if statusCmd.Use != "status [agent]" {
 		t.Errorf("Unexpected Use: %q", statusCmd.Use)
 	}
 
@@ -219,7 +274,7 @@ func TestStatusCommandArgs(t *testing.T) {
 
 // TestLsCommandAliases tests the ls command has the list alias.
 func TestLsCommandAliases(t *testing.T) {
-	if lsCmd.Use != "ls [tool]" {
+	if lsCmd.Use != "ls [agent]" {
 		t.Errorf("Unexpected Use: %q", lsCmd.Use)
 	}
 
@@ -237,7 +292,7 @@ func TestLsCommandAliases(t *testing.T) {
 
 // TestDeleteCommandFlags tests the delete command flags.
 func TestDeleteCommandFlags(t *testing.T) {
-	if deleteCmd.Use != "delete <tool> <profile-name>" {
+	if deleteCmd.Use != "delete <agent> <profile-name>" {
 		t.Errorf("Unexpected Use: %q", deleteCmd.Use)
 	}
 
@@ -262,7 +317,7 @@ func TestDeleteCommandFlags(t *testing.T) {
 
 // TestClearCommandFlags tests the clear command flags.
 func TestClearCommandFlags(t *testing.T) {
-	if clearCmd.Use != "clear <tool>" {
+	if clearCmd.Use != "clear <agent>" {
 		t.Errorf("Unexpected Use: %q", clearCmd.Use)
 	}
 
@@ -275,7 +330,7 @@ func TestClearCommandFlags(t *testing.T) {
 
 // TestPathsCommandArgs tests the paths command args.
 func TestPathsCommandArgs(t *testing.T) {
-	if pathsCmd.Use != "paths [tool]" {
+	if pathsCmd.Use != "paths [agent]" {
 		t.Errorf("Unexpected Use: %q", pathsCmd.Use)
 	}
 
@@ -345,7 +400,7 @@ func TestProfileUnlockFlags(t *testing.T) {
 
 // TestLoginCommandArgs tests the login command requires 2 args.
 func TestLoginCommandArgs(t *testing.T) {
-	if loginCmd.Use != "login <tool> <profile>" {
+	if loginCmd.Use != "login <agent> <profile>" {
 		t.Errorf("Unexpected Use: %q", loginCmd.Use)
 	}
 
@@ -524,16 +579,16 @@ func TestCommandUsageStrings(t *testing.T) {
 		cmd      *cobra.Command
 		expected string
 	}{
-		{backupCmd, "backup <tool> <profile-name>"},
-		{activateCmd, "activate <tool> [profile-name]"},
-		{statusCmd, "status [tool]"},
-		{lsCmd, "ls [tool]"},
-		{deleteCmd, "delete <tool> <profile-name>"},
-		{pathsCmd, "paths [tool]"},
-		{clearCmd, "clear <tool>"},
-		{loginCmd, "login <tool> <profile>"},
+		{backupCmd, "backup <agent> <profile-name>"},
+		{activateCmd, "activate <agent> [profile-name]"},
+		{statusCmd, "status [agent]"},
+		{lsCmd, "ls [agent]"},
+		{deleteCmd, "delete <agent> <profile-name>"},
+		{pathsCmd, "paths [agent]"},
+		{clearCmd, "clear <agent>"},
+		{loginCmd, "login <agent> <profile>"},
 		{reloadCmd, "reload"},
-		{refreshCmd, "refresh [tool] [profile]"},
+		{refreshCmd, "refresh [agent] [profile]"},
 	}
 
 	for _, tc := range commands {

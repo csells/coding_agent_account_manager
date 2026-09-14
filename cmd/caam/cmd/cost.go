@@ -33,7 +33,7 @@ This command tracks costs based on wrap session durations and configurable rates
 Costs are estimated based on session time, not actual API usage.
 
 Examples:
-  caam cost                        # Show cost summary for all providers
+  caam cost                        # Show cost summary for all agents
   caam cost --provider claude      # Show costs for Claude only
   caam cost --since 7d             # Show costs from last 7 days
   caam cost --json                 # Output as JSON
@@ -62,7 +62,7 @@ Examples:
 var costRatesCmd = &cobra.Command{
 	Use:   "rates",
 	Short: "View or set cost rates",
-	Long: `View or configure cost rates per provider.
+	Long: `View or configure cost rates per agent.
 
 Rates are specified in cents. Costs are calculated as:
   estimated_cost = cents_per_session + (cents_per_minute * session_minutes)
@@ -77,7 +77,7 @@ Examples:
 }
 
 var costTokensCmd = &cobra.Command{
-	Use:   "tokens [provider]",
+	Use:   "tokens [agent]",
 	Short: "Analyze token costs from CLI logs",
 	Long: `Analyze token costs by scanning CLI logs and comparing to API pricing.
 
@@ -85,10 +85,10 @@ This command scans local CLI logs to calculate actual token usage and estimates
 what the equivalent API cost would be. This helps you understand the value
 you're getting from your subscription.
 
-Token-cost analysis is available for providers with log scanners (claude, codex, gemini).
+Token-cost analysis is available for agents with log scanners (claude, codex, gemini).
 
 Examples:
-  caam cost tokens                    # Show costs for providers with log scanners (claude, codex, gemini)
+  caam cost tokens                    # Show costs for agents with log scanners (claude, codex, gemini)
   caam cost tokens claude             # Show Claude costs only
   caam cost tokens --last 168h        # Show costs for last 7 days (168 hours)
   caam cost tokens --last 24h         # Show costs for last 24 hours
@@ -111,19 +111,19 @@ func init() {
 	costCmd.AddCommand(costTokensCmd)
 
 	// Cost summary flags
-	costCmd.Flags().String("provider", "", "filter by provider (claude, codex, gemini)")
+	costCmd.Flags().String("provider", "", "filter by agent (claude, codex, gemini)")
 	costCmd.Flags().String("since", "", "filter by time range (e.g., '24h', '7d', '30d')")
 	costCmd.Flags().Bool("json", false, "output as JSON")
 
 	// Sessions flags
 	costSessionsCmd.Flags().IntP("limit", "n", 20, "maximum number of sessions to show")
-	costSessionsCmd.Flags().String("provider", "", "filter by provider")
+	costSessionsCmd.Flags().String("provider", "", "filter by agent")
 	costSessionsCmd.Flags().String("since", "", "filter sessions newer than duration")
 	costSessionsCmd.Flags().Bool("json", false, "output as JSON")
 
 	// Rates flags
 	costRatesCmd.Flags().Bool("json", false, "output as JSON")
-	costRatesCmd.Flags().String("set", "", "set rates for provider (requires --per-minute or --per-session)")
+	costRatesCmd.Flags().String("set", "", "set rates for an agent (requires --per-minute or --per-session)")
 	costRatesCmd.Flags().Int("per-minute", -1, "cents per minute (use with --set)")
 	costRatesCmd.Flags().Int("per-session", -1, "cents per session (use with --set)")
 
@@ -194,7 +194,7 @@ func runCostSessions(cmd *cobra.Command, args []string) error {
 			return renderSessionsJSON(cmd.OutOrStdout(), nil)
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), "No wrap sessions found.")
-		fmt.Fprintln(cmd.OutOrStdout(), "\nSessions are recorded when using: caam wrap <provider> <command>")
+		fmt.Fprintln(cmd.OutOrStdout(), "\nSessions are recorded when using: caam wrap <agent> <command>")
 		return nil
 	}
 
@@ -333,7 +333,7 @@ func renderCostSummaryJSON(w io.Writer, summaries []caamdb.CostSummary, since ti
 func renderCostSummary(w io.Writer, summaries []caamdb.CostSummary, since time.Time) error {
 	if len(summaries) == 0 {
 		fmt.Fprintln(w, "No cost data available.")
-		fmt.Fprintln(w, "\nCosts are tracked when using: caam wrap <provider> <command>")
+		fmt.Fprintln(w, "\nCosts are tracked when using: caam wrap <agent> <command>")
 		return nil
 	}
 
@@ -345,7 +345,7 @@ func renderCostSummary(w io.Writer, summaries []caamdb.CostSummary, since time.T
 	fmt.Fprintln(w)
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "PROVIDER\tSESSIONS\tTIME\tEST. COST\tRATE LIMITS")
+	_, _ = fmt.Fprintln(tw, "AGENT\tSESSIONS\tTIME\tEST. COST\tRATE LIMITS")
 
 	var totalCents int
 	for _, s := range summaries {
@@ -396,7 +396,7 @@ func renderSessionsJSON(w io.Writer, sessions []caamdb.WrapSession) error {
 
 func renderSessions(w io.Writer, sessions []caamdb.WrapSession) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "TIME\tPROVIDER\tPROFILE\tDURATION\tCOST\tSTATUS")
+	_, _ = fmt.Fprintln(tw, "TIME\tAGENT\tPROFILE\tDURATION\tCOST\tSTATUS")
 
 	for _, s := range sessions {
 		status := fmt.Sprintf("exit %d", s.ExitCode)
@@ -443,7 +443,7 @@ func renderRates(w io.Writer, rates []caamdb.CostRate) error {
 	fmt.Fprintln(w)
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "PROVIDER\tPER MINUTE\tPER SESSION\tLAST UPDATED")
+	_, _ = fmt.Fprintln(tw, "AGENT\tPER MINUTE\tPER SESSION\tLAST UPDATED")
 
 	for _, r := range rates {
 		_, _ = fmt.Fprintf(tw, "%s\t%d¢\t%d¢\t%s\n",
@@ -456,7 +456,7 @@ func renderRates(w io.Writer, rates []caamdb.CostRate) error {
 	_ = tw.Flush()
 
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "To update rates: caam cost rates --set <provider> --per-minute <cents>")
+	fmt.Fprintln(w, "To update rates: caam cost rates --set <agent> --per-minute <cents>")
 
 	return nil
 }
@@ -532,7 +532,7 @@ func runCostTokens(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		p := strings.ToLower(args[0])
 		if !isTokenCostProvider(p) {
-			return fmt.Errorf("token cost analysis not supported for provider: %s (supported: %s)", p, strings.Join(tokenCostProviders, ", "))
+			return fmt.Errorf("token cost analysis not supported for agent: %s (supported: %s)", p, strings.Join(tokenCostProviders, ", "))
 		}
 		providers = []string{p}
 	} else {

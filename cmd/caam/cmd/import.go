@@ -24,7 +24,7 @@ Examples:
 }
 
 func init() {
-	importCmd.Flags().String("as", "", "import single-profile archive under a new tool/profile (e.g. codex/server-work)")
+	importCmd.Flags().String("as", "", "import single-profile archive under a new agent/profile (e.g. codex/server-work)")
 	importCmd.Flags().Bool("force", false, "overwrite existing profile(s) if they already exist")
 }
 

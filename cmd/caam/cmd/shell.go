@@ -23,7 +23,7 @@ Use 'caam shell-init' to set up automatic profile management.`,
 var shellInitCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Output shell initialization code",
-	Long: `Outputs shell initialization code that wraps AI CLI commands.
+	Long: `Outputs shell initialization code that wraps agent commands.
 
 Add this to your shell's rc file:
 
@@ -41,7 +41,7 @@ This creates wrapper functions for claude, codex, and gemini that:
 - Handle rate limits transparently
 - Record usage for analytics
 
-After setup, just use the tools normally:
+After setup, just use the agents normally:
   claude "explain this code"
   codex "write tests"
   gemini "summarize this file"
@@ -55,8 +55,8 @@ func init() {
 	shellInitCmd.Flags().Bool("bash", false, "output bash syntax (default)")
 	shellInitCmd.Flags().Bool("zsh", false, "output zsh syntax")
 	shellInitCmd.Flags().Bool("posix", false, "output POSIX shell syntax")
-	shellInitCmd.Flags().Bool("no-wrap", false, "disable tool wrapping (only completions)")
-	shellInitCmd.Flags().String("tools", "claude,codex,gemini", "comma-separated list of tools to wrap")
+	shellInitCmd.Flags().Bool("no-wrap", false, "disable agent wrapping (only completions)")
+	shellInitCmd.Flags().String("tools", "claude,codex,gemini", "comma-separated list of agents to wrap")
 
 	shellCmd.AddCommand(shellInitCmd)
 	rootCmd.AddCommand(shellCmd)
@@ -283,7 +283,7 @@ complete -c caam -n "__fish_use_subcommand" -a "shell" -d "Shell integration"
 complete -c caam -n "__fish_use_subcommand" -a "status" -d "Show current status"
 complete -c caam -n "__fish_use_subcommand" -a "tui" -d "Open terminal UI"
 
-# Tool completion
+# Agent completion
 complete -c caam -n "__fish_seen_subcommand_from activate backup clear delete ls paths status" -a "claude codex gemini"
 
 # Profile completion for activate

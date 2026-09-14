@@ -9,8 +9,8 @@ import (
 // =============================================================================
 
 func TestExportCommand(t *testing.T) {
-	if exportCmd.Use != "export [tool/profile] [tool profile]" {
-		t.Errorf("Expected Use 'export [tool/profile] [tool profile]', got %q", exportCmd.Use)
+	if exportCmd.Use != "export [agent/profile] [agent profile]" {
+		t.Errorf("Expected Use 'export [agent/profile] [agent profile]', got %q", exportCmd.Use)
 	}
 
 	if exportCmd.Short == "" {

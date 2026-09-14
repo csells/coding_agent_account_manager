@@ -630,7 +630,7 @@ func printDetectReport(report *DetectReport, verbose bool) {
 				case "cursor":
 					fmt.Printf("  %s: Run 'cursor' and sign in\n", agent.Name)
 				default:
-					fmt.Printf("  %s: See tool documentation for login\n", agent.Name)
+					fmt.Printf("  %s: See the agent's documentation for login\n", agent.Name)
 				}
 			}
 		}
@@ -638,7 +638,7 @@ func printDetectReport(report *DetectReport, verbose bool) {
 
 	if report.Summary.Ready > 0 {
 		fmt.Println("\nTo manage profiles with caam:")
-		fmt.Println("  caam backup <tool> <profile-name>  # Save current auth")
-		fmt.Println("  caam activate <tool> <profile>     # Switch profiles")
+		fmt.Println("  caam backup <agent> <profile-name>  # Save current auth")
+		fmt.Println("  caam activate <agent> <profile>     # Switch profiles")
 	}
 }

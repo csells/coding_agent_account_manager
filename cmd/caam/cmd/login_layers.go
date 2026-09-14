@@ -170,7 +170,7 @@ func printStaleLoginLayers(w io.Writer, tool, name string, prof *profile.Profile
 	for _, s := range stale {
 		note := "differs from this login"
 		if s.Replaced {
-			note = "holds the generation this login replaced; the provider has likely revoked it"
+			note = "holds the generation this login replaced; the agent's service has likely revoked it"
 		}
 		fmt.Fprintf(&b, "  %-8s %-24s %s\n           (%s)\n", s.Kind, s.Label, s.Path, note)
 	}

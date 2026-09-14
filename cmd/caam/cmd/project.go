@@ -14,7 +14,7 @@ import (
 var projectCmd = &cobra.Command{
 	Use:   "project",
 	Short: "Manage project-profile associations",
-	Long: `Project associations let you pin a provider profile to a directory.
+	Long: `Project associations let you pin an agent's profile to a directory.
 
 This enables workflows like:
   - Different accounts per client repo
@@ -49,7 +49,7 @@ func init() {
 }
 
 var projectSetCmd = &cobra.Command{
-	Use:   "set <tool> <profile>",
+	Use:   "set <agent> <profile>",
 	Short: "Associate current directory with a profile",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -57,7 +57,7 @@ var projectSetCmd = &cobra.Command{
 		profileName := args[1]
 
 		if _, ok := tools[tool]; !ok {
-			return fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList())
+			return fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList())
 		}
 		if projectStore == nil {
 			return fmt.Errorf("project store not initialized")
@@ -177,9 +177,9 @@ type ProjectShowOutput struct {
 }
 
 var projectShowCmd = &cobra.Command{
-	Use: "show [tool]",
+	Use: "show [agent]",
 	// "get" is documented in the README; expose it as an alias so the documented
-	// `caam project get [tool]` resolves to the implemented show behavior.
+	// `caam project get [agent]` resolves to the implemented show behavior.
 	Aliases: []string{"get"},
 	Short:   "Show resolved associations for current directory",
 	Args:    cobra.MaximumNArgs(1),
@@ -190,7 +190,7 @@ var projectShowCmd = &cobra.Command{
 		if len(args) == 1 {
 			toolFilter = strings.ToLower(args[0])
 			if _, ok := tools[toolFilter]; !ok {
-				return fmt.Errorf("unknown tool: %s (supported: %s)", toolFilter, supportedToolsList())
+				return fmt.Errorf("unknown agent: %s (supported: %s)", toolFilter, supportedToolsList())
 			}
 		}
 
@@ -261,13 +261,13 @@ var projectShowCmd = &cobra.Command{
 }
 
 var projectRemoveCmd = &cobra.Command{
-	Use:   "remove <tool>",
+	Use:   "remove <agent>",
 	Short: "Remove a single association for the current directory",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		tool := strings.ToLower(args[0])
 		if _, ok := tools[tool]; !ok {
-			return fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList())
+			return fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList())
 		}
 		if projectStore == nil {
 			return fmt.Errorf("project store not initialized")

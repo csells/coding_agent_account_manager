@@ -61,7 +61,7 @@ Encryption:
   Encrypted bundles have .enc.zip extension and require the password to import.
 
 Filtering:
-  --provider: Only include specific providers (claude, codex, gemini)
+  --provider: Only include specific agents (claude, codex, gemini)
   --profiles: Only include profiles matching patterns (e.g., "work", "alice")
 
 Optional content (included by default, can be excluded):
@@ -96,7 +96,7 @@ func init() {
 	bundleExportCmd.Flags().StringP("password", "p", "", "encryption password (prompted if not provided)")
 
 	// Filtering options
-	bundleExportCmd.Flags().StringSlice("provider", nil, "only include specific providers (claude,codex,gemini)")
+	bundleExportCmd.Flags().StringSlice("provider", nil, "only include specific agents (claude,codex,gemini)")
 	bundleExportCmd.Flags().StringSlice("profiles", nil, "only include profiles matching patterns")
 
 	// Content inclusion options (defaults match bundle.DefaultExportOptions)

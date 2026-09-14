@@ -124,7 +124,7 @@ func liveAccountIdentity(ctx context.Context, provider string) string {
 func captureLiveAccount(provider, name string) error {
 	get, ok := tools[provider]
 	if !ok {
-		return fmt.Errorf("unknown provider %s", provider)
+		return fmt.Errorf("unknown agent %s", provider)
 	}
 	if vault == nil {
 		vault = authfile.NewVault(authfile.DefaultVaultPath())
@@ -149,7 +149,7 @@ func captureLiveAccount(provider, name string) error {
 func captureSignedInAccount(tool string) error {
 	get, ok := tools[tool]
 	if !ok {
-		return fmt.Errorf("unknown provider %s", tool)
+		return fmt.Errorf("unknown agent %s", tool)
 	}
 	if vault == nil {
 		vault = authfile.NewVault(authfile.DefaultVaultPath())

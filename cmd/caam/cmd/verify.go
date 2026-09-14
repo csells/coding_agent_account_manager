@@ -54,7 +54,7 @@ type VerifySummary struct {
 }
 
 var verifyCmd = &cobra.Command{
-	Use:   "verify [tool]",
+	Use:   "verify [agent]",
 	Short: "Validate all profile tokens",
 	Long: `Check the health and validity of all saved profile tokens.
 
@@ -86,7 +86,7 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		toolFilter = strings.ToLower(args[0])
 		if _, ok := tools[toolFilter]; !ok {
-			return fmt.Errorf("unknown tool: %s (supported: %s)", toolFilter, supportedToolsList())
+			return fmt.Errorf("unknown agent: %s (supported: %s)", toolFilter, supportedToolsList())
 		}
 	}
 

@@ -20,7 +20,7 @@ import (
 var errPickCanceled = errors.New("pick canceled")
 
 var pickCmd = &cobra.Command{
-	Use:   "pick [tool]",
+	Use:   "pick [agent]",
 	Short: "Pick a profile interactively and activate it",
 	Long: `Pick a profile interactively and activate it.
 
@@ -57,13 +57,13 @@ func runPick(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if inferred == "" {
-			return fmt.Errorf("tool required (available: %s)", strings.Join(providers, ", "))
+			return fmt.Errorf("agent required (available: %s)", strings.Join(providers, ", "))
 		}
 		tool = inferred
 	}
 
 	if _, ok := tools[tool]; !ok {
-		return fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList())
+		return fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList())
 	}
 
 	if vault == nil {

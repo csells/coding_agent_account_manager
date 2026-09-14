@@ -385,10 +385,10 @@ func TestLimitsRankRequiresAProvider(t *testing.T) {
 
 	err := runLimits(limitsCmd, nil)
 	if err == nil {
-		t.Fatal("want an error when --rank is used without a provider")
+		t.Fatal("want an error when --rank is used without an agent")
 	}
-	if !strings.Contains(err.Error(), "--rank needs a provider") {
-		t.Errorf("error = %q, want it to ask for a provider", err)
+	if !strings.Contains(err.Error(), "--rank needs an agent") {
+		t.Errorf("error = %q, want it to ask for an agent", err)
 	}
 	for _, p := range []string{"claude", "codex"} {
 		if !strings.Contains(err.Error(), p) {

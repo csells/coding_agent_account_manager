@@ -11,7 +11,7 @@ import (
 )
 
 var renameCmd = &cobra.Command{
-	Use:   "rename <tool> <old-name> <new-name>",
+	Use:   "rename <agent> <old-name> <new-name>",
 	Short: "Rename a profile (non-destructive copy)",
 	Long: `Rename a profile by creating a copy with a new name.
 
@@ -50,7 +50,7 @@ func runRename(cmd *cobra.Command, args []string) error {
 
 	// Validate tool
 	if _, ok := tools[tool]; !ok {
-		return fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList())
+		return fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList())
 	}
 
 	// Initialize vault if needed

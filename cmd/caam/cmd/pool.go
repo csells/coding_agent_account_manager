@@ -40,7 +40,7 @@ var poolStatusCmd = &cobra.Command{
 }
 
 var poolRefreshCmd = &cobra.Command{
-	Use:   "refresh [provider/profile]",
+	Use:   "refresh [agent/profile]",
 	Short: "Refresh a profile, or with --all every profile whose token has expired",
 	RunE:  runPoolRefresh,
 }
@@ -67,7 +67,7 @@ func init() {
 	// List flags
 	poolListCmd.Flags().Bool("json", false, "output as JSON")
 	poolListCmd.Flags().String("status", "", "filter by status (ready, refreshing, expired, cooldown, error)")
-	poolListCmd.Flags().String("provider", "", "filter by provider")
+	poolListCmd.Flags().String("provider", "", "filter by agent")
 }
 
 func getPool() (*authpool.AuthPool, error) {
@@ -113,7 +113,7 @@ func runPoolStatus(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Error: %d\n", summary.ErrorCount)
 
 	if len(summary.ByProvider) > 0 {
-		fmt.Printf("\nBy Provider:\n")
+		fmt.Printf("\nBy agent:\n")
 		for provider, count := range summary.ByProvider {
 			fmt.Printf("  %s: %d\n", provider, count)
 		}
@@ -134,7 +134,7 @@ func runPoolRefresh(cmd *cobra.Command, args []string) error {
 	timeout, _ := cmd.Flags().GetDuration("timeout")
 
 	if !refreshAll && len(args) == 0 {
-		return fmt.Errorf("specify a profile (provider/name) or use --all")
+		return fmt.Errorf("specify a profile (agent/name) or use --all")
 	}
 
 	vault := authfile.NewVault(authfile.DefaultVaultPath())
@@ -216,8 +216,8 @@ func runPoolList(cmd *cobra.Command, args []string) error {
 	}
 
 	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "PROVIDER\tPROFILE\tSTATUS\tEXPIRY")
-	_, _ = fmt.Fprintln(tw, "--------\t-------\t------\t------")
+	_, _ = fmt.Fprintln(tw, "AGENT\tPROFILE\tSTATUS\tEXPIRY")
+	_, _ = fmt.Fprintln(tw, "-----\t-------\t------\t------")
 
 	for _, p := range profiles {
 		expiry := "-"
@@ -242,10 +242,10 @@ func parseProfileArg(arg string) (provider, profile string, err error) {
 	for i := 0; i < len(arg); i++ {
 		if arg[i] == '/' {
 			if i == 0 || i == len(arg)-1 {
-				return "", "", fmt.Errorf("invalid format: %q (expected provider/profile)", arg)
+				return "", "", fmt.Errorf("invalid format: %q (expected agent/profile)", arg)
 			}
 			return arg[:i], arg[i+1:], nil
 		}
 	}
-	return "", "", fmt.Errorf("invalid format: %q (expected provider/profile)", arg)
+	return "", "", fmt.Errorf("invalid format: %q (expected agent/profile)", arg)
 }

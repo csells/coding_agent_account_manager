@@ -24,17 +24,17 @@ import (
 var execCommand = exec.CommandContext
 
 var addCmd = &cobra.Command{
-	Use:   "add <tool> [profile-name]",
+	Use:   "add <agent> [profile-name]",
 	Short: "Add a new account with one command",
-	Long: `Add a new account by running the tool's login — the command-line
+	Long: `Add a new account by running the agent's login — the command-line
 form of the dashboard's n key. A login is a logout first, so the order
 matters:
   1. Captures the signed-in account into the vault (its newest tokens),
      or files an unknown live credential as a backup
-  2. Clears the live credential, so the tool's login has nothing to revoke
-  3. Runs the tool's login and waits for you to complete it
+  2. Clears the live credential, so the agent's login has nothing to revoke
+  3. Runs the agent's login and waits for you to complete it
   4. Files the new session under the account that signed in (or asks for
-     a name when the tool's credential names nobody)
+     a name when the agent's credential names nobody)
 
 The account that just logged in is the live one; there is nothing to
 activate. --no-activate is accepted for compatibility and does nothing.
@@ -65,7 +65,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 
 	getFileSet, ok := tools[tool]
 	if !ok {
-		return fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList())
+		return fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList())
 	}
 
 	// Initialize vault
@@ -228,7 +228,7 @@ func runToolLogin(ctx context.Context, tool string, deviceCode bool) error {
 	case "cursor":
 		cmd = execCommand(ctx, "cursor")
 	default:
-		return fmt.Errorf("unsupported tool: %s", tool)
+		return fmt.Errorf("unsupported agent: %s", tool)
 	}
 
 	cmd.Stdin = os.Stdin

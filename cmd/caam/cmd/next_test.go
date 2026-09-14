@@ -233,8 +233,8 @@ func TestNext_UnknownTool_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("runNext(unknown tool) should return error")
 	}
-	if !contains(err.Error(), "unknown tool") {
-		t.Fatalf("error should mention 'unknown tool': %v", err)
+	if !contains(err.Error(), "unknown agent") {
+		t.Fatalf("error should mention 'unknown agent': %v", err)
 	}
 }
 

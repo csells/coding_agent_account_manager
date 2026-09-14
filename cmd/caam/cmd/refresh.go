@@ -16,7 +16,7 @@ import (
 )
 
 var refreshCmd = &cobra.Command{
-	Use:   "refresh [tool] [profile]",
+	Use:   "refresh [agent] [profile]",
 	Short: "Refresh an expired OAuth token (Codex, Gemini)",
 	Long: `Refresh the OAuth token of a vaulted account whose token has expired.
 
@@ -52,7 +52,7 @@ func runRefresh(cmd *cobra.Command, args []string) error {
 
 	if all {
 		if force && !dryRun {
-			return fmt.Errorf("refusing --all with --force: a refresh consumes each account's refresh token, and forcing every vaulted account at once spends them all for no reason; force one profile (caam refresh <tool> <profile> --force), or run --all without --force to refresh only what has expired")
+			return fmt.Errorf("refusing --all with --force: a refresh consumes each account's refresh token, and forcing every vaulted account at once spends them all for no reason; force one profile (caam refresh <agent> <profile> --force), or run --all without --force to refresh only what has expired")
 		}
 		return refreshAll(ctx, dryRun, force, quiet)
 	}
@@ -64,7 +64,7 @@ func runRefresh(cmd *cobra.Command, args []string) error {
 
 	tool := strings.ToLower(args[0])
 	if _, ok := tools[tool]; !ok {
-		return fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList())
+		return fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList())
 	}
 
 	if len(args) == 1 {
@@ -267,7 +267,7 @@ func refreshSingle(ctx context.Context, tool, profile string, dryRun, force, qui
 
 func shouldRefreshProfile(tool, profile string, force bool) (bool, string, error) {
 	if _, ok := tools[tool]; !ok {
-		return false, "", fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList())
+		return false, "", fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList())
 	}
 
 	// Ensure profile exists.
@@ -321,7 +321,7 @@ func loadExpiryInfo(tool, profile string) (*health.ExpiryInfo, error) {
 		// No token expiry parsing for opencode/cursor/grok yet
 		return nil, nil
 	default:
-		return nil, fmt.Errorf("refresh not supported for tool: %s", tool)
+		return nil, fmt.Errorf("refresh not supported for agent: %s", tool)
 	}
 }
 

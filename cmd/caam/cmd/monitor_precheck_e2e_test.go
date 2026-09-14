@@ -382,7 +382,7 @@ func TestE2E_PrecheckUnknownProvider(t *testing.T) {
 	_, err := executePrecheckCommand("unknown-provider")
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown provider")
+	assert.Contains(t, err.Error(), "unknown agent")
 }
 
 func TestE2E_PrecheckNoProfiles(t *testing.T) {

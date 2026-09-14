@@ -20,7 +20,7 @@ import (
 func addLimitsRankFlags(cmd *cobra.Command) {
 	cmd.Flags().String("rank", "", "rank profiles for new work: earliest-reset-headroom (spend soonest-refreshing included quota first) or availability (idlest first, as --best)")
 	cmd.Flags().Int("headroom", usage.DefaultHeadroomCeiling, "percent-used ceiling below which an included allowance still counts as usable (1-100); defaults to stealth.rotation.drain_headroom_ceiling")
-	cmd.Flags().Bool("require-model-window", false, "with --rank and --model, require each profile to publish that model's own allowance; an omitted row is reported as unknown, never as capacity (default: on when the provider publishes per-model allowances)")
+	cmd.Flags().Bool("require-model-window", false, "with --rank and --model, require each profile to publish that model's own allowance; an omitted row is reported as unknown, never as capacity (default: on when the agent's service publishes per-model allowances)")
 }
 
 // rankOptionsFromFlags reads the rank-related flags off `caam limits`.
@@ -144,7 +144,7 @@ func renderRankTable(w io.Writer, result *usage.RankResult, now time.Time) error
 		fmt.Fprintln(w, "No profiles found.")
 	} else {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "#\tPROVIDER\tPROFILE\tTIER\tLEFT\tRESETS\tWHY")
+		fmt.Fprintln(tw, "#\tAGENT\tPROFILE\tTIER\tLEFT\tRESETS\tWHY")
 		for _, p := range result.Profiles {
 			pos := "-"
 			if p.Rank > 0 {

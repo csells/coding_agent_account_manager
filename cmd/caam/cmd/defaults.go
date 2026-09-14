@@ -12,11 +12,11 @@ import (
 
 // useCmd sets the default profile for a provider.
 var useCmd = &cobra.Command{
-	Use:   "use <provider> <profile>",
-	Short: "Set default profile for a provider",
-	Long: `Sets the default profile for a provider in the configuration.
+	Use:   "use <agent> <profile>",
+	Short: "Set default profile for an agent",
+	Long: `Sets the default profile for an agent in the configuration.
 
-After setting a default, commands that operate on a provider's profile
+After setting a default, commands that operate on an agent's profile
 will use the default when no profile is explicitly specified.
 
 Examples:
@@ -31,7 +31,7 @@ Use 'caam which' to see current defaults.`,
 
 		// Validate provider
 		if _, ok := tools[provider]; !ok {
-			return fmt.Errorf("unknown provider: %s (supported: %s)", provider, supportedToolsList())
+			return fmt.Errorf("unknown agent: %s (supported: %s)", provider, supportedToolsList())
 		}
 
 		// Check if vault profile exists
@@ -81,17 +81,17 @@ Use 'caam which' to see current defaults.`,
 
 // whichCmd shows the default profiles.
 var whichCmd = &cobra.Command{
-	Use:   "which [provider]",
+	Use:   "which [agent]",
 	Short: "Show default profiles",
-	Long: `Shows the default profile for each provider (or a specific provider).
+	Long: `Shows the default profile for each agent (or a specific agent).
 
 The default profile is used when a command needs a profile but none is specified.
 
 Examples:
-  caam which           # Show defaults for all providers
+  caam which           # Show defaults for all agents
   caam which codex     # Show default for codex only
 
-Use 'caam use <provider> <profile>' to set defaults.`,
+Use 'caam use <agent> <profile>' to set defaults.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Every tool caam manages, in the dashboard strip's order; a default
@@ -101,7 +101,7 @@ Use 'caam use <provider> <profile>' to set defaults.`,
 		if len(args) > 0 {
 			id := strings.ToLower(args[0])
 			if _, ok := tools[id]; !ok {
-				return fmt.Errorf("unknown provider: %s", id)
+				return fmt.Errorf("unknown agent: %s", id)
 			}
 			providers = []string{id}
 		}
@@ -119,7 +119,7 @@ Use 'caam use <provider> <profile>' to set defaults.`,
 
 		if !hasDefaults && len(args) == 0 {
 			fmt.Println("\nNo defaults set.")
-			fmt.Println("Use 'caam use <provider> <profile>' to set a default.")
+			fmt.Println("Use 'caam use <agent> <profile>' to set a default.")
 		}
 
 		return nil

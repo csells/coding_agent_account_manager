@@ -108,7 +108,7 @@ func TestLimitsTable_SaysLeftAndResetClock(t *testing.T) {
 	out := b.String()
 
 	for _, want := range []string{
-		"PROVIDER", "PROFILE", "5-HOUR", "WEEKLY", "WEEKLY FABLE", "STATUS",
+		"AGENT", "PROFILE", "5-HOUR", "WEEKLY", "WEEKLY FABLE", "STATUS",
 		"Claude Code", "work",
 		"88% left · " + usage.LocalReset(rows[0].Usage.PrimaryWindow.ResetsAt, now),
 		"50% left · " + usage.LocalReset(rows[0].Usage.SecondaryWindow.ResetsAt, now),

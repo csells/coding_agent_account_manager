@@ -84,7 +84,7 @@ func supportedTools() []string {
 }
 
 // supportedToolsList returns the comma-separated supported providers for use in
-// error messages such as "unknown tool: X (supported: ...)".
+// error messages such as "unknown agent: X (supported: ...)".
 func supportedToolsList() string {
 	return strings.Join(supportedTools(), ", ")
 }
@@ -110,19 +110,19 @@ var rootCmd = &cobra.Command{
 	Use:     "caam",
 	Version: version.Info(),
 	Short:   "Coding Agent Account Manager - instant auth switching",
-	Long: `caam (Coding Agent Account Manager) manages auth files for AI coding CLIs
+	Long: `caam (Coding Agent Account Manager) manages auth files for coding agents
 to enable instant account switching for "all you can eat" subscription plans
 (GPT Pro, Claude Max, Gemini Ultra).
 
 When you hit usage limits on one account, switch to another in under a second:
 
-  1. Login to each account once (using the tool's normal login flow)
+  1. Login to each account once (using the agent's normal login flow)
   2. Backup the auth: caam backup claude my-account-1
   3. Later, switch instantly: caam activate claude my-account-2
 
 No browser flows, no waiting. Just instant auth file swapping.
 
-Supported tools:
+Supported agents:
   - codex    (OpenAI Codex CLI / GPT Pro)
   - claude   (Anthropic Claude Code / Claude Max)
   - gemini   (Google Gemini CLI / Gemini Ultra)
@@ -816,16 +816,16 @@ type backupOutput struct {
 
 // backupCmd saves current auth files to the vault.
 var backupCmd = &cobra.Command{
-	Use:   "backup <tool> <profile-name>",
+	Use:   "backup <agent> <profile-name>",
 	Short: "Backup current auth to vault",
-	Long: `Saves the current auth files for a tool to the vault with the given profile name.
+	Long: `Saves the current auth files for an agent to the vault with the given profile name.
 
-Use this after logging in to an account through the tool's normal login flow:
+Use this after logging in to an account through the agent's normal login flow:
   1. Run: codex login (or claude with /login, or gemini)
   2. Run: caam backup codex my-gptpro-account-1
 
-The auth files are copied to $CAAM_HOME/data/vault/<tool>/<profile>/ (if CAAM_HOME is set)
-or ~/.local/share/caam/vault/<tool>/<profile>/
+The auth files are copied to $CAAM_HOME/data/vault/<agent>/<profile>/ (if CAAM_HOME is set)
+or ~/.local/share/caam/vault/<agent>/<profile>/
 
 Examples:
   caam backup codex work-account
@@ -884,14 +884,14 @@ func runBackup(cmd *cobra.Command, args []string) error {
 
 	getFileSet, ok := tools[tool]
 	if !ok {
-		return emitJSONError(fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList()))
+		return emitJSONError(fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList()))
 	}
 
 	fileSet := getFileSet()
 
 	// Check if auth files exist
 	if !authfile.HasAuthFiles(fileSet) {
-		return emitJSONError(fmt.Errorf("no auth files found for %s - login first using the tool's login command", tool))
+		return emitJSONError(fmt.Errorf("no auth files found for %s - login first using the agent's login command", tool))
 	}
 
 	// Backup to vault
@@ -1022,13 +1022,13 @@ func statusTools() []string {
 
 // statusCmd shows which profile is currently active.
 var statusCmd = &cobra.Command{
-	Use:   "status [tool]",
+	Use:   "status [agent]",
 	Short: "Show active profiles with health status",
-	Long: `Shows which vault profile (if any) matches the current auth state for each tool,
+	Long: `Shows which vault profile (if any) matches the current auth state for each agent,
 along with health status indicators and recommendations.
 
 Examples:
-  caam status           # Show all tools
+  caam status           # Show all agents
   caam status claude    # Show just Claude
   caam status --no-color  # Without colors
   caam status --json      # Output as JSON`,
@@ -1050,7 +1050,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		tool := strings.ToLower(args[0])
 		if _, ok := tools[tool]; !ok {
-			return fmt.Errorf("unknown tool: %s", tool)
+			return fmt.Errorf("unknown agent: %s", tool)
 		}
 		toolsToCheck = []string{tool}
 	}
@@ -1065,7 +1065,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	if !jsonOutput {
 		fmt.Println("Active Profiles")
 		fmt.Println("───────────────────────────────────────────────────")
-		fmt.Printf("%-12s  %-20s  %-24s  %-10s  %s\n", "TOOL", "PROFILE", "EMAIL", "PLAN", "STATUS")
+		fmt.Printf("%-12s  %-20s  %-24s  %-10s  %s\n", "AGENT", "PROFILE", "EMAIL", "PLAN", "STATUS")
 	}
 
 	for _, tool := range toolsToCheck {
@@ -1329,7 +1329,7 @@ type lsHealth struct {
 
 // lsCmd lists all stored profiles.
 var lsCmd = &cobra.Command{
-	Use:     "ls [tool]",
+	Use:     "ls [agent]",
 	Aliases: []string{"list"},
 	Short:   "List saved profiles",
 	Long: `Lists all profiles stored in the vault with health status.
@@ -1377,7 +1377,7 @@ func runLs(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		tool := strings.ToLower(args[0])
 		if _, ok := tools[tool]; !ok {
-			return fmt.Errorf("unknown tool: %s", tool)
+			return fmt.Errorf("unknown agent: %s", tool)
 		}
 
 		profiles, err := vault.List(tool)
@@ -1499,8 +1499,8 @@ func runLs(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Println("No profiles saved yet.")
 			fmt.Println("\nTo save your first profile:")
-			fmt.Println("  1. Login using the tool's command (codex login, /login in claude)")
-			fmt.Println("  2. Run: caam backup <tool> <profile-name>")
+			fmt.Println("  1. Login using the agent's command (codex login, /login in claude)")
+			fmt.Println("  2. Run: caam backup <agent> <profile-name>")
 		}
 		return nil
 	}
@@ -1577,7 +1577,7 @@ func encodeLsJSON(cmd *cobra.Command, output lsOutput) error {
 
 // deleteCmd removes a profile from the vault.
 var deleteCmd = &cobra.Command{
-	Use:     "delete <tool> <profile-name>",
+	Use:     "delete <agent> <profile-name>",
 	Aliases: []string{"rm", "remove"},
 	Short:   "Delete a saved profile",
 	Long: `Removes a profile from the vault. This does not affect the current auth state.
@@ -1590,7 +1590,7 @@ Examples:
 		profileName := args[1]
 
 		if _, ok := tools[tool]; !ok {
-			return fmt.Errorf("unknown tool: %s", tool)
+			return fmt.Errorf("unknown agent: %s", tool)
 		}
 
 		force, _ := cmd.Flags().GetBool("force")
@@ -1642,16 +1642,16 @@ type PathsToolRecord struct {
 
 // pathsCmd shows auth file paths for each tool.
 var pathsCmd = &cobra.Command{
-	Use:   "paths [tool]",
+	Use:   "paths [agent]",
 	Short: "Show auth file paths",
-	Long: `Shows where each tool stores its auth files.
+	Long: `Shows where each agent stores its auth files.
 
 Useful for understanding what caam is backing up and for manual troubleshooting.
 
 Examples:
-  caam paths           # Show all tools
+  caam paths           # Show all agents
   caam paths claude    # Show just Claude
-  caam paths agy --json # Machine-readable records for one tool`,
+  caam paths agy --json # Machine-readable records for one agent`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOutput, _ := cmd.Flags().GetBool("json")
@@ -1662,7 +1662,7 @@ Examples:
 		if len(args) > 0 {
 			tool := strings.ToLower(args[0])
 			if _, ok := tools[tool]; !ok {
-				return fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList())
+				return fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList())
 			}
 			toolsToShow = []string{tool}
 		}
@@ -1715,12 +1715,12 @@ Examples:
 
 // clearCmd removes auth files (logout).
 var clearCmd = &cobra.Command{
-	Use:   "clear <tool>",
+	Use:   "clear <agent>",
 	Short: "Clear auth files (logout)",
-	Long: `Removes the auth files for a tool, effectively logging out.
+	Long: `Removes the auth files for an agent, effectively logging out.
 
 This is useful if you want to start fresh or test the login flow.
-Consider backing up first: caam backup <tool> <name>
+Consider backing up first: caam backup <agent> <name>
 
 Examples:
   caam clear claude`,
@@ -1730,7 +1730,7 @@ Examples:
 
 		getFileSet, ok := tools[tool]
 		if !ok {
-			return fmt.Errorf("unknown tool: %s", tool)
+			return fmt.Errorf("unknown agent: %s", tool)
 		}
 
 		fileSet := getFileSet()
@@ -1787,7 +1787,7 @@ func init() {
 }
 
 var profileAddCmd = &cobra.Command{
-	Use:   "add <tool> <name> [--auth-mode oauth|api-key]",
+	Use:   "add <agent> <name> [--auth-mode oauth|api-key]",
 	Short: "Create a new isolated profile",
 	Long: `Create a new isolated profile for running multiple sessions simultaneously.
 
@@ -1809,7 +1809,7 @@ Examples:
 
 		prov, ok := registry.Get(tool)
 		if !ok {
-			return fmt.Errorf("unknown provider: %s", tool)
+			return fmt.Errorf("unknown agent: %s", tool)
 		}
 
 		authMode, _ := cmd.Flags().GetString("auth-mode")
@@ -1882,7 +1882,7 @@ func init() {
 }
 
 var profileLsCmd = &cobra.Command{
-	Use:     "ls [tool]",
+	Use:     "ls [agent]",
 	Aliases: []string{"list"},
 	Short:   "List isolated profiles",
 	Args:    cobra.MaximumNArgs(1),
@@ -1921,7 +1921,7 @@ var profileLsCmd = &cobra.Command{
 
 		if len(allProfiles) == 0 {
 			fmt.Println("No isolated profiles.")
-			fmt.Println("Use 'caam profile add <tool> <name>' to create one.")
+			fmt.Println("Use 'caam profile add <agent> <name>' to create one.")
 			return nil
 		}
 
@@ -1946,7 +1946,7 @@ var profileLsCmd = &cobra.Command{
 }
 
 var profileDeleteCmd = &cobra.Command{
-	Use:     "delete <tool> <name>",
+	Use:     "delete <agent> <name>",
 	Aliases: []string{"rm"},
 	Short:   "Delete an isolated profile",
 	Args:    cobra.ExactArgs(2),
@@ -1979,7 +1979,7 @@ func init() {
 }
 
 var profileStatusCmd = &cobra.Command{
-	Use:   "status <tool> <name>",
+	Use:   "status <agent> <name>",
 	Short: "Show profile status",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -1988,7 +1988,7 @@ var profileStatusCmd = &cobra.Command{
 
 		prov, ok := registry.Get(tool)
 		if !ok {
-			return fmt.Errorf("unknown provider: %s", tool)
+			return fmt.Errorf("unknown agent: %s", tool)
 		}
 
 		prof, err := profileStore.Load(tool, name)
@@ -2022,7 +2022,7 @@ var profileStatusCmd = &cobra.Command{
 }
 
 var profileUnlockCmd = &cobra.Command{
-	Use:   "unlock <tool> <name>",
+	Use:   "unlock <agent> <name>",
 	Short: "Unlock a locked profile",
 	Long: `Forcibly removes a lock file from a profile.
 
@@ -2110,7 +2110,7 @@ func init() {
 }
 
 var profileDescribeCmd = &cobra.Command{
-	Use:   "describe <tool> <name> [description]",
+	Use:   "describe <agent> <name> [description]",
 	Short: "Set or show profile description",
 	Long: `Set or show the description for an isolated profile.
 
@@ -2167,7 +2167,7 @@ func init() {
 }
 
 var profileCloneCmd = &cobra.Command{
-	Use:   "clone <tool> <source-profile> <target-profile>",
+	Use:   "clone <agent> <source-profile> <target-profile>",
 	Short: "Clone an existing profile",
 	Long: `Clone an existing profile to create a new one with similar configuration.
 
@@ -2253,11 +2253,11 @@ func init() {
 
 // loginCmd initiates login for an isolated profile.
 var loginCmd = &cobra.Command{
-	Use:   "login <tool> <profile>",
+	Use:   "login <agent> <profile>",
 	Short: "Login to an isolated profile",
 	Long: `Initiates the login flow for an isolated profile.
 
-This runs the tool's native login command with the profile's isolated environment,
+This runs the agent's native login command with the profile's isolated environment,
 so the auth credentials are stored in the profile's directory.
 
 Not supported for claude: Claude Code's OAuth flow cannot be driven externally.
@@ -2279,7 +2279,7 @@ Examples:
 		// Claude Code's own built-in /login flow. Return a clear, provider-
 		// specific message up front instead of the generic failure path.
 		if tool == "claude" {
-			return fmt.Errorf("caam login is not supported for the claude provider — " +
+			return fmt.Errorf("caam login is not supported for the claude agent — " +
 				"use Claude Code's built-in /login flow instead. For an isolated profile: " +
 				"`caam profile add claude <name>`, then `caam exec claude <name>` and run " +
 				"/login inside the session; the credentials land in the profile automatically")
@@ -2287,7 +2287,7 @@ Examples:
 
 		prov, ok := registry.Get(tool)
 		if !ok {
-			return fmt.Errorf("unknown provider: %s", tool)
+			return fmt.Errorf("unknown agent: %s", tool)
 		}
 
 		prof, err := profileStore.Load(tool, name)
@@ -2350,12 +2350,12 @@ func init() {
 
 // execCmd runs the CLI with an isolated profile.
 var execCmd = &cobra.Command{
-	Use:   "exec <tool> <profile> [-- args...]",
-	Short: "Run CLI with isolated profile",
-	Long: `Runs the AI CLI tool with the specified isolated profile's environment.
+	Use:   "exec <agent> <profile> [-- args...]",
+	Short: "Run an agent with an isolated profile",
+	Long: `Runs the coding agent with the specified isolated profile's environment.
 
 This sets up HOME/CODEX_HOME/etc to use the profile's directory, then runs
-the tool with any additional arguments.
+the agent with any additional arguments.
 
 Examples:
   caam exec codex work                        # Interactive session
@@ -2374,7 +2374,7 @@ Examples:
 
 		prov, ok := registry.Get(tool)
 		if !ok {
-			return fmt.Errorf("unknown provider: %s", tool)
+			return fmt.Errorf("unknown agent: %s", tool)
 		}
 
 		prof, err := profileStore.Load(tool, name)
@@ -2410,7 +2410,7 @@ Examples:
 			if exitErr.NeedsTTY {
 				fmt.Fprintf(cmd.ErrOrStderr(),
 					"\ncaam: %q exited %d because it needs an interactive terminal, but stdin\n"+
-						"is not a TTY here. To run non-interactively, use the tool's non-interactive\n"+
+						"is not a TTY here. To run non-interactively, use the agent's non-interactive\n"+
 						"form, for example:\n\n  %s\n",
 					tool, exitErr.Code, nonInteractiveExecExample(tool, name, toolArgs))
 			}

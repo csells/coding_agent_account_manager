@@ -30,11 +30,11 @@ var getWd = os.Getwd
 
 // runCmd wraps AI CLI execution with automatic rate limit handling.
 var runCmd = &cobra.Command{
-	Use:   "run <tool> [-- args...]",
-	Short: "Run AI CLI with automatic account switching",
-	Long: `Wraps AI CLI execution with transparent rate limit detection and automatic
+	Use:   "run <agent> [-- args...]",
+	Short: "Run an agent with automatic account switching",
+	Long: `Wraps a coding agent with transparent rate limit detection and automatic
 profile switching. This is the "zero friction" mode - just use caam run instead
-of calling the CLI directly.
+of calling the agent directly.
 
 When a rate limit is detected:
 1. The current profile is put into cooldown
@@ -82,14 +82,14 @@ func init() {
 
 func runWrap(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("tool name required")
+		return fmt.Errorf("agent name required")
 	}
 
 	tool := strings.ToLower(args[0])
 
 	// Validate tool
 	if _, ok := tools[tool]; !ok {
-		return fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList())
+		return fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList())
 	}
 
 	// Parse CLI args (everything after the tool name)
@@ -212,7 +212,7 @@ func runWrap(cmd *cobra.Command, args []string) error {
 	// Get provider
 	prov, ok := registry.Get(tool)
 	if !ok {
-		return fmt.Errorf("provider %s not found in registry", tool)
+		return fmt.Errorf("agent %s not found in registry", tool)
 	}
 
 	// Get active profile
@@ -412,7 +412,7 @@ func precheckSwitch(tool, currentProfile, selected string, quiet bool, spmCfg *c
 func switchForRun(tool, profile string, spmCfg *config.SPMConfig, db *caamdb.DB) error {
 	getFileSet, ok := tools[tool]
 	if !ok {
-		return fmt.Errorf("unknown tool: %s", tool)
+		return fmt.Errorf("unknown agent: %s", tool)
 	}
 	if vault == nil {
 		vault = authfile.NewVault(authfile.DefaultVaultPath())

@@ -34,7 +34,7 @@ func init() {
 }
 
 var cooldownSetCmd = &cobra.Command{
-	Use:   "set <provider/profile|provider> [--minutes N] [--notes TEXT]",
+	Use:   "set <agent/profile|agent> [--minutes N] [--notes TEXT]",
 	Short: "Set a cooldown for a profile",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runCooldownSet,
@@ -87,7 +87,7 @@ func runCooldownSet(cmd *cobra.Command, args []string) error {
 }
 
 var cooldownClearCmd = &cobra.Command{
-	Use:   "clear [provider/profile|provider] [--all]",
+	Use:   "clear [agent/profile|agent] [--all]",
 	Short: "Clear a cooldown (or all cooldowns)",
 	Args:  cobra.MaximumNArgs(1),
 	RunE:  runCooldownClear,
@@ -121,7 +121,7 @@ func runCooldownClear(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(args) != 1 {
-		return fmt.Errorf("provide a provider/profile (or use --all)")
+		return fmt.Errorf("provide an agent/profile (or use --all)")
 	}
 
 	provider, profile, err := resolveProviderProfile(strings.TrimSpace(args[0]))
@@ -241,12 +241,12 @@ func resolveProviderProfile(input string) (provider string, profile string, err 
 	if strings.Contains(input, "/") {
 		parts := strings.SplitN(input, "/", 2)
 		if len(parts) != 2 {
-			return "", "", fmt.Errorf("profile must be in provider/name format")
+			return "", "", fmt.Errorf("profile must be in agent/name format")
 		}
 		provider = strings.TrimSpace(parts[0])
 		profile = strings.TrimSpace(parts[1])
 		if provider == "" || profile == "" {
-			return "", "", fmt.Errorf("profile must be in provider/name format")
+			return "", "", fmt.Errorf("profile must be in agent/name format")
 		}
 		return provider, profile, nil
 	}
@@ -255,7 +255,7 @@ func resolveProviderProfile(input string) (provider string, profile string, err 
 	tool := strings.ToLower(input)
 	getFileSet, ok := tools[tool]
 	if !ok {
-		return "", "", fmt.Errorf("unknown provider: %s (expected provider/name or supported provider)", input)
+		return "", "", fmt.Errorf("unknown agent: %s (expected agent/name or a supported agent)", input)
 	}
 
 	fileSet := getFileSet()
@@ -264,7 +264,7 @@ func resolveProviderProfile(input string) (provider string, profile string, err 
 		return "", "", fmt.Errorf("detect active profile for %s: %w", tool, err)
 	}
 	if strings.TrimSpace(active) == "" {
-		return "", "", fmt.Errorf("no active profile detected for %s; provide provider/name or run 'caam activate %s <profile>'", tool, tool)
+		return "", "", fmt.Errorf("no active profile detected for %s; provide agent/name or run 'caam activate %s <profile>'", tool, tool)
 	}
 	return tool, active, nil
 }

@@ -23,21 +23,21 @@ import (
 )
 
 var limitsCmd = &cobra.Command{
-	Use:   "limits [provider]",
-	Short: "Fetch real-time rate limit usage from provider APIs",
-	Long: `Fetch real-time rate limit and usage data from provider APIs.
+	Use:   "limits [agent]",
+	Short: "Fetch each account's rate-limit state from the agent's service",
+	Long: `Fetch real-time rate limit and usage data from each agent's service.
 
-This command queries the provider's API to get current rate limit utilization,
+This command queries the agent's service to get current rate limit utilization,
 which is useful for deciding when to switch accounts. It also parses local logs
 to estimate token burn rate and predict when limits will be hit.
 
-Live limit fetching is available for providers with usage APIs (claude, codex,
+Live limit fetching is available for agents with usage APIs (claude, codex,
 agy, kimi, zcode, and opencode when its store holds a Zen API key; an
 OpenCode login without one is listed with "no limits API" rather than as
 idle).
 
 Examples:
-  caam limits                     # Show limits for every provider with a usage API
+  caam limits                     # Show limits for every agent with a usage API
   caam limits claude              # Show Claude limits only
   caam limits codex               # Show Codex limits only
   caam limits agy                 # Show Antigravity per-model quota
@@ -62,9 +62,9 @@ Credential namespaces (--source)
 One profile name can exist in three unrelated stores: the "vault" (the
 backup/activate store), an "isolated" profile (its own HOME and XDG config
 dir, which is where an in-app /login under "caam exec" writes), and a
-"shallow" HOME. A fourth namespace, "live", is the credential the tool is
+"shallow" HOME. A fourth namespace, "live", is the credential the agent is
 using right now; only the active profile has one, and it is read first for
-that profile because the tool rotates it in place while the vault copy stays
+that profile because the agent rotates it in place while the vault copy stays
 frozen. --profile reads live-then-vault by default; output always names the
 namespace and path it read, lists the other namespaces holding the same
 name, and refuses to report a verdict when an unselected namespace holds a
@@ -162,7 +162,7 @@ func runLimits(cmd *cobra.Command, args []string) error {
 		// mixed pool has no meaningful order. Require the provider.
 		if len(args) == 0 {
 			cmd.SilenceUsage = true
-			return fmt.Errorf("--rank needs a provider (%s): seats of different providers are not interchangeable, so ranking them together has no meaning",
+			return fmt.Errorf("--rank needs an agent (%s): seats of different agents are not interchangeable, so ranking them together has no meaning",
 				strings.Join(limitsProviders, " or "))
 		}
 		var err error
@@ -180,7 +180,7 @@ func runLimits(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		p := strings.ToLower(args[0])
 		if !isLimitsProvider(p) {
-			return fmt.Errorf("limits not supported for provider: %s (supported: %s)", p, strings.Join(limitsProviders, ", "))
+			return fmt.Errorf("limits not supported for agent: %s (supported: %s)", p, strings.Join(limitsProviders, ", "))
 		}
 		providers = []string{p}
 	} else {
@@ -519,7 +519,7 @@ func renderLimits(w io.Writer, format string, results []usage.ProfileUsage, now 
 		columns := limitsWindowColumns(results)
 
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		header := "PROVIDER\tPROFILE"
+		header := "AGENT\tPROFILE"
 		for _, c := range columns {
 			header += "\t" + c
 		}

@@ -182,7 +182,7 @@ Run 'caam robot' with no arguments for a quick-start guide.`,
 }
 
 var robotStatusCmd = &cobra.Command{
-	Use:   "status [provider]",
+	Use:   "status [agent]",
 	Short: "Full system status overview",
 	Long: `Returns comprehensive status information in JSON format.
 
@@ -194,16 +194,16 @@ Includes:
 - Coordinator status (if configured)
 - Actionable suggestions
 
-Use --provider to filter to a specific provider.
+Use --provider to filter to one agent.
 Use --compact for minimal output (IDs and status only).`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runRobotStatus,
 }
 
 var robotNextCmd = &cobra.Command{
-	Use:   "next <provider>",
+	Use:   "next <agent>",
 	Short: "Suggest best profile to use",
-	Long: `Analyzes all profiles for a provider and suggests the best one to use.
+	Long: `Analyzes all profiles for an agent and suggests the best one to use.
 
 Scoring factors:
 - Health status (healthy > warning > critical)
@@ -218,16 +218,16 @@ Returns the recommended profile with activation command.`,
 }
 
 var robotActCmd = &cobra.Command{
-	Use:   "act <action> <provider> [profile] [args...]",
+	Use:   "act <action> <agent> [profile] [args...]",
 	Short: "Execute an action",
 	Long: `Execute an action and return the result.
 
 Supported actions:
-  activate <provider> <profile>  - Activate a profile
-  cooldown <provider> <profile> [duration]  - Start cooldown
-  uncooldown <provider> <profile>  - Clear cooldown
-  refresh <provider> <profile>  - Refresh token
-  backup <provider> <profile>   - Backup current auth
+  activate <agent> <profile>  - Activate a profile
+  cooldown <agent> <profile> [duration]  - Start cooldown
+  uncooldown <agent> <profile>  - Clear cooldown
+  refresh <agent> <profile>  - Refresh token
+  backup <agent> <profile>   - Backup current auth
 
 All actions return structured results with success/failure status.`,
 	Args: cobra.MinimumNArgs(2),
@@ -262,7 +262,7 @@ Each line is a complete JSON object with the current status.
 Updates are emitted on changes or at the poll interval.
 
 Use --interval to set poll interval (default 5s).
-Use --provider to filter to a specific provider.`,
+Use --provider to filter to one agent.`,
 	RunE: runRobotWatch,
 }
 
@@ -304,8 +304,8 @@ func runRobotStatus(cmd *cobra.Command, args []string) error {
 		validProviders := map[string]bool{"codex": true, "claude": true, "gemini": true, "opencode": true, "cursor": true}
 		if !validProviders[providerFilter] {
 			return robotError(cmd, "status", "INVALID_PROVIDER",
-				fmt.Sprintf("unknown provider: %s", providerFilter),
-				"valid providers: codex, claude, gemini, opencode, cursor",
+				fmt.Sprintf("unknown agent: %s", providerFilter),
+				"valid agents: codex, claude, gemini, opencode, cursor",
 				[]string{"caam robot status claude", "caam robot status codex", "caam robot status gemini"})
 		}
 		providersToCheck = []string{providerFilter}
@@ -645,8 +645,8 @@ func runRobotNext(cmd *cobra.Command, args []string) error {
 
 	if _, ok := tools[provider]; !ok {
 		return robotError(cmd, "next", "INVALID_PROVIDER",
-			fmt.Sprintf("unknown provider: %s", provider),
-			"valid providers: "+supportedToolsList(),
+			fmt.Sprintf("unknown agent: %s", provider),
+			"valid agents: "+supportedToolsList(),
 			nil)
 	}
 
@@ -844,8 +844,8 @@ func runRobotAct(cmd *cobra.Command, args []string) error {
 
 	if _, ok := tools[provider]; !ok {
 		return robotError(cmd, "act", "INVALID_PROVIDER",
-			fmt.Sprintf("unknown provider: %s", provider),
-			"valid providers: codex, claude, gemini",
+			fmt.Sprintf("unknown agent: %s", provider),
+			"valid agents: codex, claude, gemini",
 			nil)
 	}
 
@@ -858,7 +858,7 @@ func runRobotAct(cmd *cobra.Command, args []string) error {
 		if len(args) < 3 {
 			return robotError(cmd, "act", "MISSING_PROFILE",
 				"profile name required for activate",
-				"usage: caam robot act activate <provider> <profile>",
+				"usage: caam robot act activate <agent> <profile>",
 				nil)
 		}
 		profile := args[2]
@@ -887,7 +887,7 @@ func runRobotAct(cmd *cobra.Command, args []string) error {
 		if len(args) < 3 {
 			return robotError(cmd, "act", "MISSING_PROFILE",
 				"profile name required for cooldown",
-				"usage: caam robot act cooldown <provider> <profile> [duration]",
+				"usage: caam robot act cooldown <agent> <profile> [duration]",
 				nil)
 		}
 		profile := args[2]
@@ -925,7 +925,7 @@ func runRobotAct(cmd *cobra.Command, args []string) error {
 		if len(args) < 3 {
 			return robotError(cmd, "act", "MISSING_PROFILE",
 				"profile name required for uncooldown",
-				"usage: caam robot act uncooldown <provider> <profile>",
+				"usage: caam robot act uncooldown <agent> <profile>",
 				nil)
 		}
 		profile := args[2]
@@ -955,7 +955,7 @@ func runRobotAct(cmd *cobra.Command, args []string) error {
 		if !authfile.HasAuthFiles(fileSet) {
 			return robotError(cmd, "act", "NO_AUTH",
 				fmt.Sprintf("no auth files found for %s", provider),
-				"login first using the tool's login command",
+				"log in first with the agent's own login command",
 				nil)
 		}
 
@@ -980,10 +980,10 @@ func runRobotAct(cmd *cobra.Command, args []string) error {
 			fmt.Sprintf("unknown action: %s", action),
 			"valid actions: activate, cooldown, uncooldown, backup",
 			[]string{
-				"caam robot act activate <provider> <profile>",
-				"caam robot act cooldown <provider> <profile> [duration]",
-				"caam robot act uncooldown <provider> <profile>",
-				"caam robot act backup <provider> [profile]",
+				"caam robot act activate <agent> <profile>",
+				"caam robot act cooldown <agent> <profile> [duration]",
+				"caam robot act uncooldown <agent> <profile>",
+				"caam robot act backup <agent> [profile]",
 			})
 	}
 
@@ -1131,8 +1131,8 @@ func runRobotWatch(cmd *cobra.Command, args []string) error {
 		providerFilter = strings.ToLower(providerFilter)
 		if _, ok := tools[providerFilter]; !ok {
 			return robotError(cmd, "watch", "INVALID_PROVIDER",
-				fmt.Sprintf("unknown provider: %s", providerFilter),
-				"valid providers: codex, claude, gemini",
+				fmt.Sprintf("unknown agent: %s", providerFilter),
+				"valid agents: codex, claude, gemini",
 				nil)
 		}
 	}
@@ -1197,7 +1197,7 @@ func runRobotQuickStart(cmd *cobra.Command, args []string) error {
 ## Core Commands (JSON output)
 ` + "```" + `
 caam robot status              # Full system overview
-caam robot status claude       # Single provider
+caam robot status claude       # One agent
 caam robot next claude         # Best profile recommendation
 caam robot limits claude       # Rate limits + burn rate
 caam robot precheck claude     # Session planner
@@ -1243,8 +1243,8 @@ All commands return:
 ` + "```" + `
 
 ## Error Codes
-- INVALID_PROVIDER: Unknown provider (use: claude, codex, gemini)
-- NO_PROFILES: No profiles exist for provider
+- INVALID_PROVIDER: Unknown agent (use: claude, codex, gemini)
+- NO_PROFILES: No profiles exist for the agent
 - ALL_BLOCKED: All profiles in cooldown/unhealthy
 - MISSING_PROFILE: Profile name required
 - VAULT_ERROR: Cannot access profile storage
@@ -1266,9 +1266,9 @@ All commands return:
 // ============================================================================
 
 var robotLimitsCmd = &cobra.Command{
-	Use:   "limits <provider>",
+	Use:   "limits <agent>",
 	Short: "Fetch rate limits and burn rate",
-	Long: `Fetches real-time rate limit data from provider APIs.
+	Long: `Fetches real-time rate limit data from the agent's service.
 
 Returns usage percentages, reset times, burn rates, and depletion forecasts.
 Useful for deciding when to switch profiles.`,
@@ -1277,7 +1277,7 @@ Useful for deciding when to switch profiles.`,
 }
 
 var robotPrecheckCmd = &cobra.Command{
-	Use:   "precheck <provider>",
+	Use:   "precheck <agent>",
 	Short: "Session planner with recommendations",
 	Long: `Comprehensive session planner showing:
 - Recommended profile with score breakdown
@@ -1290,13 +1290,13 @@ var robotPrecheckCmd = &cobra.Command{
 }
 
 var robotValidateCmd = &cobra.Command{
-	Use:   "validate [provider] [profile]",
+	Use:   "validate [agent] [profile]",
 	Short: "Validate auth tokens",
 	Long: `Validates authentication tokens.
 
 Without arguments, validates all profiles.
-With provider, validates all profiles for that provider.
-With provider and profile, validates that specific profile.`,
+With an agent, validates all profiles for that agent.
+With an agent and profile, validates that specific profile.`,
 	Args: cobra.MaximumNArgs(2),
 	RunE: runRobotValidate,
 }
@@ -1305,7 +1305,7 @@ var robotDoctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Full system diagnostics",
 	Long: `Runs comprehensive diagnostic checks:
-- CLI tools installation
+- Agent CLI installation
 - Directory permissions
 - Config validation
 - Profile integrity
@@ -1317,7 +1317,7 @@ var robotDoctorCmd = &cobra.Command{
 var robotPathsCmd = &cobra.Command{
 	Use:   "paths",
 	Short: "Show all auth file paths",
-	Long:  `Returns all auth file paths for all providers, with existence status.`,
+	Long:  `Returns all auth file paths for all agents, with existence status.`,
 	RunE:  runRobotPaths,
 }
 
@@ -1357,7 +1357,7 @@ func init() {
 	robotCmd.AddCommand(robotConfigCmd)
 
 	// Status flags
-	robotStatusCmd.Flags().String("provider", "", "filter to specific provider")
+	robotStatusCmd.Flags().String("provider", "", "filter to one agent")
 	robotStatusCmd.Flags().Bool("compact", false, "minimal output")
 	robotStatusCmd.Flags().Bool("include-coordinators", false, "check coordinator status")
 
@@ -1367,7 +1367,7 @@ func init() {
 
 	// Watch flags
 	robotWatchCmd.Flags().Int("interval", 5, "poll interval in seconds")
-	robotWatchCmd.Flags().String("provider", "", "filter to specific provider")
+	robotWatchCmd.Flags().String("provider", "", "filter to one agent")
 
 	// Limits flags
 	robotLimitsCmd.Flags().Bool("forecast", false, "include depletion forecasts")
@@ -1386,7 +1386,7 @@ func init() {
 	// History flags
 	robotHistoryCmd.Flags().Int("days", 7, "number of days of history")
 	robotHistoryCmd.Flags().Int("limit", 50, "max events to return")
-	robotHistoryCmd.Flags().String("provider", "", "filter to specific provider")
+	robotHistoryCmd.Flags().String("provider", "", "filter to one agent")
 }
 
 // RobotLimitsData contains rate limit information.
@@ -1424,8 +1424,8 @@ func runRobotLimits(cmd *cobra.Command, args []string) error {
 
 	if _, ok := tools[provider]; !ok {
 		return robotError(cmd, "limits", "INVALID_PROVIDER",
-			fmt.Sprintf("unknown provider: %s", provider),
-			"valid providers: "+supportedToolsList(),
+			fmt.Sprintf("unknown agent: %s", provider),
+			"valid agents: "+supportedToolsList(),
 			nil)
 	}
 
@@ -1581,8 +1581,8 @@ func runRobotPrecheck(cmd *cobra.Command, args []string) error {
 
 	if _, ok := tools[provider]; !ok {
 		return robotError(cmd, "precheck", "INVALID_PROVIDER",
-			fmt.Sprintf("unknown provider: %s", provider),
-			"valid providers: codex, claude, gemini",
+			fmt.Sprintf("unknown agent: %s", provider),
+			"valid agents: codex, claude, gemini",
 			nil)
 	}
 
@@ -1765,8 +1765,8 @@ func runRobotValidate(cmd *cobra.Command, args []string) error {
 		provider := strings.ToLower(args[0])
 		if _, ok := tools[provider]; !ok {
 			return robotError(cmd, "validate", "INVALID_PROVIDER",
-				fmt.Sprintf("unknown provider: %s", provider),
-				"valid providers: codex, claude, gemini",
+				fmt.Sprintf("unknown agent: %s", provider),
+				"valid agents: codex, claude, gemini",
 				nil)
 		}
 		providersToCheck = []string{provider}

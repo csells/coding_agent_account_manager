@@ -19,7 +19,7 @@ var workspaceCmd = &cobra.Command{
 	Short: "Manage profile workspaces",
 	Long: `Switch between workspaces or manage workspace definitions.
 
-A workspace is a named set of profiles (one per tool) that can be activated together.
+A workspace is a named set of profiles (one per agent) that can be activated together.
 This is useful for switching contexts (e.g., work vs personal) with a single command.
 
 Examples:
@@ -35,7 +35,7 @@ Examples:
 var workspaceCreateCmd = &cobra.Command{
 	Use:   "create <name>",
 	Short: "Create a new workspace",
-	Long: `Create a workspace with profile mappings for each tool.
+	Long: `Create a workspace with profile mappings for each agent.
 
 Examples:
   caam workspace create work --claude=work-claude --codex=work-codex --gemini=work-gemini
@@ -302,7 +302,7 @@ func switchWorkspace(cfg *config.Config, workspaceName string) error {
 		profile := profiles[tool]
 		getFileSet, ok := tools[tool]
 		if !ok {
-			fmt.Printf("  Warning: unknown tool '%s', skipping\n", tool)
+			fmt.Printf("  Warning: unknown agent '%s', skipping\n", tool)
 			continue
 		}
 

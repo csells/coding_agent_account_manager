@@ -12,7 +12,7 @@ import (
 )
 
 var aliasCmd = &cobra.Command{
-	Use:   "alias [tool] [profile] [alias]",
+	Use:   "alias [agent] [profile] [alias]",
 	Short: "Manage profile aliases",
 	Long: `Create and manage short aliases for profiles.
 
@@ -57,7 +57,7 @@ func runAlias(cmd *cobra.Command, args []string) error {
 
 	// Need at least tool and profile to add or show aliases
 	if len(args) < 2 {
-		return fmt.Errorf("usage: caam alias <tool> <profile> [alias]")
+		return fmt.Errorf("usage: caam alias <agent> <profile> [alias]")
 	}
 
 	tool := args[0]
@@ -65,7 +65,7 @@ func runAlias(cmd *cobra.Command, args []string) error {
 
 	// Validate tool
 	if _, ok := tools[tool]; !ok {
-		return fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList())
+		return fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList())
 	}
 
 	// Validate profile exists
@@ -219,9 +219,9 @@ func addAlias(cfg *config.Config, tool, profile, alias string, jsonOutput bool) 
 
 // favoriteCmd manages favorite profiles.
 var favoriteCmd = &cobra.Command{
-	Use:   "favorite <tool> [profiles...]",
-	Short: "Set favorite profiles for a tool",
-	Long: `Set the favorite profiles for a tool. Favorites are used in priority
+	Use:   "favorite <agent> [profiles...]",
+	Short: "Set favorite profiles for an agent",
+	Long: `Set the favorite profiles for an agent. Favorites are used in priority
 order when rotating profiles.
 
 Examples:
@@ -235,7 +235,7 @@ Examples:
 func init() {
 	rootCmd.AddCommand(favoriteCmd)
 	favoriteCmd.Flags().Bool("list", false, "list all favorites")
-	favoriteCmd.Flags().Bool("clear", false, "clear favorites for the tool")
+	favoriteCmd.Flags().Bool("clear", false, "clear favorites for the agent")
 	favoriteCmd.Flags().Bool("json", false, "output in JSON format")
 }
 
@@ -255,12 +255,12 @@ func runFavorite(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(args) < 1 {
-		return fmt.Errorf("usage: caam favorite <tool> [profiles...]")
+		return fmt.Errorf("usage: caam favorite <agent> [profiles...]")
 	}
 
 	tool := args[0]
 	if _, ok := tools[tool]; !ok {
-		return fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList())
+		return fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList())
 	}
 
 	// Clear favorites

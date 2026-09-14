@@ -72,7 +72,7 @@ func init() {
 	bundleImportCmd.Flags().Bool("skip-sync", false, "Don't import sync configuration")
 
 	// Filtering
-	bundleImportCmd.Flags().StringSlice("provider", nil, "Only import specific providers (claude,codex,gemini)")
+	bundleImportCmd.Flags().StringSlice("provider", nil, "Only import specific agents (claude,codex,gemini)")
 	bundleImportCmd.Flags().StringSlice("profiles", nil, "Only import profiles matching patterns")
 
 	// Output

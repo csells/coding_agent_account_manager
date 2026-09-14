@@ -43,10 +43,10 @@ This enables N parallel sessions, each pinned to a different account, while
 preserving shared state (shell history, git config, ssh keys, conversation
 history). Unlike 'caam profile add' which gives each profile a blank,
 fully-isolated HOME, shallow profiles only isolate what MUST differ (the
-provider's identity files).
+agent's identity files).
 
-Supported providers (--tool, or inferred from --from-vault): claude, codex, agy.
-Each provider keeps only its own identity files real and private; everything
+Supported agents (--tool, or inferred from --from-vault): claude, codex, agy.
+Each agent keeps only its own identity files real and private; everything
 else symlinks back to your real HOME.
 
 Layout under ~/orch-homes/<name>/ (claude shown):
@@ -63,11 +63,11 @@ Layout under ~/orch-homes/<name>/ (claude shown):
 
 Spawn under a shallow identity with:
 
-  caam shallow-spawn <name>            # runs the profile's own provider CLI
+  caam shallow-spawn <name>            # runs the profile's own agent
   caam shallow-spawn <name> -- <cmd>   # runs any other command
 
 which sets HOME=~/orch-homes/<name> (plus CODEX_HOME/GEMINI_HOME for those
-providers) and execs the command.`,
+agents) and execs the command.`,
 }
 
 func init() {
@@ -85,17 +85,17 @@ var shallowProfileCreateCmd = &cobra.Command{
 	Use:   "create <name>",
 	Short: "Create a new shallow profile",
 	Long: `Create a new shallow profile. Provisions the symlink farm and copies the
-provider's primary credential into the shallow HOME (claude .credentials.json,
+agent's primary credential into the shallow HOME (claude .credentials.json,
 codex auth.json, or the agy antigravity-oauth-token).
 
-Provider:
+Agent:
   --tool claude|codex|agy   Selects the layout. Inferred from --from-vault.
                             Defaults to claude when neither is given.
 
 Credential source (one of):
-  --from-vault <tool>/<profile>   Use an existing caam vault profile (infers --tool)
+  --from-vault <agent>/<profile>  Use an existing caam vault profile (infers --tool)
   --from-file <path>              Copy the primary auth file from a path (needs --tool
-                                  for non-claude providers)
+                                  for non-claude agents)
   (none)                          Leave the credential empty; populate later via login
 
 Examples:
@@ -111,9 +111,9 @@ Examples:
 }
 
 func init() {
-	shallowProfileCreateCmd.Flags().String("tool", "", "provider for this shallow profile: claude (default), codex, or agy. Inferred from --from-vault <tool>/<profile>.")
-	shallowProfileCreateCmd.Flags().String("from-vault", "", "credential source: <tool>/<profile> from caam's vault (e.g. claude/alice@example.com, codex/bob, agy/carol)")
-	shallowProfileCreateCmd.Flags().String("from-file", "", "credential source: arbitrary path to the provider's primary auth file (requires --tool for non-claude)")
+	shallowProfileCreateCmd.Flags().String("tool", "", "agent for this shallow profile: claude (default), codex, or agy. Inferred from --from-vault <agent>/<profile>.")
+	shallowProfileCreateCmd.Flags().String("from-vault", "", "credential source: <agent>/<profile> from caam's vault (e.g. claude/alice@example.com, codex/bob, agy/carol)")
+	shallowProfileCreateCmd.Flags().String("from-file", "", "credential source: arbitrary path to the agent's primary auth file (requires --tool for non-claude)")
 	shallowProfileCreateCmd.Flags().String("from-claude-json", "", "optional path to copy as <home>/.claude.json (claude only; defaults to ~/.claude.json)")
 	shallowProfileCreateCmd.Flags().Bool("force", false, "overwrite an existing shallow profile")
 	shallowProfileCreateCmd.Flags().Bool("json", false, "output as JSON")
@@ -176,7 +176,7 @@ func runShallowProfileCreate(cmd *cobra.Command, args []string) error {
 			return emit(err)
 		}
 		if tool != "" && tool != vaultProvider {
-			return emit(fmt.Errorf("--tool %q conflicts with --from-vault tool %q", tool, vaultProvider))
+			return emit(fmt.Errorf("--tool %q conflicts with --from-vault agent %q", tool, vaultProvider))
 		}
 		provider = vaultProvider
 		opts.CredentialSource = primary
@@ -232,7 +232,7 @@ func runShallowProfileCreate(cmd *cobra.Command, args []string) error {
 		return enc.Encode(output)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Created shallow profile %q (provider: %s)\n", name, provider)
+	fmt.Fprintf(cmd.OutOrStdout(), "Created shallow profile %q (agent: %s)\n", name, provider)
 	fmt.Fprintf(cmd.OutOrStdout(), "  Path: %s\n", home)
 	if opts.CredentialFromLabel != "" {
 		fmt.Fprintf(cmd.OutOrStdout(), "  Credentials: %s\n", opts.CredentialFromLabel)
@@ -256,7 +256,7 @@ func shallowSpawnHintBin(provider string) string {
 	}
 }
 
-// resolveVaultProvider parses a "<tool>/<profile>" --from-vault spec and returns
+// resolveVaultProvider parses an "<agent>/<profile>" --from-vault spec and returns
 // the provider id, the absolute path to the profile's PRIMARY credential file,
 // a map of optional extra source files (dest-relpath -> source-path) for
 // multi-file providers, the path to the vault profile's saved .claude.json
@@ -266,11 +266,11 @@ func shallowSpawnHintBin(provider string) string {
 func resolveVaultProvider(spec string) (provider, primary string, extras map[string]string, claudeState, label string, err error) {
 	spec = strings.TrimSpace(spec)
 	if spec == "" {
-		return "", "", nil, "", "", fmt.Errorf("--from-vault requires <tool>/<profile>")
+		return "", "", nil, "", "", fmt.Errorf("--from-vault requires <agent>/<profile>")
 	}
 	parts := strings.SplitN(spec, "/", 2)
 	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
-		return "", "", nil, "", "", fmt.Errorf("--from-vault must be in the form <tool>/<profile>, got %q", spec)
+		return "", "", nil, "", "", fmt.Errorf("--from-vault must be in the form <agent>/<profile>, got %q", spec)
 	}
 	tool := strings.ToLower(strings.TrimSpace(parts[0]))
 	prof := strings.TrimSpace(parts[1])
@@ -318,7 +318,7 @@ func resolveVaultProvider(spec string) (provider, primary string, extras map[str
 			}
 		}
 	default:
-		return "", "", nil, "", "", fmt.Errorf("--from-vault does not support tool %q for shallow profiles (supported: %s)", tool, strings.Join(shallow.SupportedProviders(), ", "))
+		return "", "", nil, "", "", fmt.Errorf("--from-vault does not support agent %q for shallow profiles (supported: %s)", tool, strings.Join(shallow.SupportedProviders(), ", "))
 	}
 	return tool, primary, extras, claudeState, label, nil
 }
@@ -494,12 +494,12 @@ func runShallowProfileDelete(cmd *cobra.Command, args []string) error {
 // shallowSpawnCmd sets HOME=<orch-homes>/<name> and execs the requested command.
 var shallowSpawnCmd = &cobra.Command{
 	Use:   "shallow-spawn <name> [-- <cmd> [args...]]",
-	Short: "Open a shallow profile's provider CLI (or any command) under its HOME",
+	Short: "Open a shallow profile's agent (or any command) under its HOME",
 	Long: `Set HOME (and SHALLOW_PROFILE) to the named shallow profile and exec a
 command under it. Concurrent invocations under different names hit
 independent .credentials.json files and can run truly in parallel.
 
-With no '-- <cmd>' section the profile's own provider CLI is run (claude for
+With no '-- <cmd>' section the profile's own agent is run (claude for
 a claude profile, codex for codex, agy for agy), so "open Claude as alice in
 this terminal" is just 'caam shallow-spawn alice'. Pass '-- <cmd> [args...]'
 to run anything else under the profile instead.
@@ -568,7 +568,7 @@ func init() {
 	shallowSpawnCmd.Flags().String("effort", "", "for codex: model reasoning effort (e.g. minimal|low|medium|high|xhigh), injected as '-c model_reasoning_effort=<effort>' since codex has no --effort flag")
 	shallowSpawnCmd.Flags().Bool("no-sync-config", false, "for claude: do not refresh shared preferences (theme, editor mode, notification channel, user/project MCP servers, project trust and tool approvals) in the profile's .claude.json from your real ~/.claude.json before exec")
 	shallowSpawnCmd.Flags().Bool("create", false, "create the shallow profile (with EMPTY credentials) if it does not exist yet, then start the session; without this a name that does not exist is an error, so a typo cannot silently become a new identity")
-	shallowSpawnCmd.Flags().String("tool", "", "provider layout to use with --create: claude (default), codex, or agy. On an existing profile of a different provider it is an error, not a no-op.")
+	shallowSpawnCmd.Flags().String("tool", "", "agent layout to use with --create: claude (default), codex, or agy. On an existing profile of a different agent it is an error, not a no-op.")
 	shallowSpawnCmd.Flags().Bool("allow-agent-view", false, "for claude: keep Claude Code's Agent View / background supervisor enabled instead of injecting CLAUDE_CODE_DISABLE_AGENT_VIEW=1 (opts back into Agent View, accepting that its cross-session supervisor daemon can bypass per-identity auth isolation — see issue #49)")
 }
 
@@ -580,15 +580,15 @@ var shallowProfileSyncConfigCmd = &cobra.Command{
 	Long: `Reconcile the SHARED settings of a shallow profile with your real HOME's,
 without touching its credentials or its own runtime state.
 
-A shallow profile's provider configuration is a real, private file — it has to
-be, because the provider writes identity and per-home state into it — so it
+A shallow profile's agent configuration is a real, private file — it has to
+be, because the agent writes identity and per-home state into it — so it
 diverges from your real HOME the moment you change something there. The most
 common casualty is an MCP server: change a real-home entry from the stdio
 transport to streamable HTTP and every codex profile keeps the old command/args
 block, after which codex refuses to parse its config at all
 ("url is not supported for stdio in mcp_servers.<name>").
 
-What is refreshed, per provider:
+What is refreshed, per agent:
 
   claude (<home>/.claude.json)
       preferences (theme, editor mode, notification channel, autoUpdates …),
@@ -925,7 +925,7 @@ func runShallowSpawn(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Short form: no '-- <cmd>' means "open this profile's own provider CLI".
+	// Short form: no '-- <cmd>' means "open this profile's own agent".
 	if len(rest) == 0 {
 		rest = []string{shallowSpawnHintBin(provider)}
 	}

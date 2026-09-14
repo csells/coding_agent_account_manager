@@ -10,7 +10,7 @@ import (
 )
 
 var resumeCmd = &cobra.Command{
-	Use:   "resume <tool> <profile> [prompt...]",
+	Use:   "resume <agent> <profile> [prompt...]",
 	Short: "Resume a Codex session for a profile",
 	Long: `Resumes a Codex chat session using an isolated profile.
 
@@ -32,7 +32,7 @@ Examples:
 
 		prov, ok := registry.Get(tool)
 		if !ok {
-			return fmt.Errorf("unknown provider: %s", tool)
+			return fmt.Errorf("unknown agent: %s", tool)
 		}
 
 		prof, err := profileStore.Load(tool, name)
