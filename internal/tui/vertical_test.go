@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -454,6 +455,52 @@ func TestVerticalLayout_NoLineExceedsTheTerminal(t *testing.T) {
 			}
 			updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 			m = updated.(Model)
+		}
+	}
+}
+
+// A per-model provider can report more windows than the table has columns
+// for. The columns that do not fit are dropped from the table, and the
+// expansion lists exactly those under the selected account, so nothing the
+// API reported is unreachable.
+func TestVerticalLayout_ExpansionListsTheWindowsWithoutAColumn(t *testing.T) {
+	info := &usage.UsageInfo{Provider: "agy", ModelWindows: map[string]*usage.UsageWindow{}}
+	for i := 0; i < 12; i++ {
+		name := fmt.Sprintf("gemini-model-%02d", i)
+		info.ModelWindows[name] = &usage.UsageWindow{Label: name, Kind: "model_quota", UsedPercent: i}
+	}
+	info.PrimaryWindow = info.ModelWindows["gemini-model-11"]
+	m := modelWithTwoClaudeProfiles(Hooks{Limits: (&limitsRecorder{info: info}).fetch})
+	m.width, m.height = 160, 40
+	for _, name := range []string{"a@example.com", "b@example.com"} {
+		m.applyLimitsLoaded(limitsLoadedMsg{provider: "claude", profile: name, info: info})
+	}
+	view := ansi.Strip(m.View())
+
+	// The primary window leads the columns even though it sorts last by name.
+	iPrimary, iFirst := strings.Index(view, "GEMINI-MODEL-11"), strings.Index(view, "GEMINI-MODEL-00")
+	if iPrimary < 0 || (iFirst >= 0 && iFirst < iPrimary) {
+		t.Fatalf("the primary window should be the first window column:\n%s", view)
+	}
+	inTable, inTree := 0, 0
+	for i := 0; i < 12; i++ {
+		name := fmt.Sprintf("gemini-model-%02d", i)
+		if strings.Contains(view, strings.ToUpper(name)) {
+			inTable++
+		}
+		if strings.Contains(view, "├─ "+name) || strings.Contains(view, "└─ "+name) {
+			inTree++
+		}
+	}
+	if inTable == 12 || inTable == 0 {
+		t.Fatalf("expected some but not all windows to fit as columns, got %d:\n%s", inTable, view)
+	}
+	if inTable+inTree != 12 {
+		t.Fatalf("columns (%d) + tree lines (%d) must cover every window:\n%s", inTable, inTree, view)
+	}
+	for _, line := range strings.Split(m.View(), "\n") {
+		if lipgloss.Width(line) > 160 {
+			t.Fatalf("line wider than the terminal (%d): %q", lipgloss.Width(line), ansi.Strip(line))
 		}
 	}
 }

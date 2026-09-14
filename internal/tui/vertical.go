@@ -556,6 +556,12 @@ func (m Model) renderAccountsPane(g paneGeometry, height int) string {
 		tableRows = 1
 	}
 	cols := m.accountColumns(provider, profiles, tier, inner, now)
+	columnsShown := make(map[string]bool, len(cols))
+	for _, c := range cols {
+		if c.window != "" {
+			columnsShown[c.window] = true
+		}
+	}
 	headerCells := make([]string, len(cols))
 	for i, c := range cols {
 		headerCells[i] = padRight(truncateWithEllipsis(c.header, c.width), c.width)
@@ -592,7 +598,7 @@ func (m Model) renderAccountsPane(g paneGeometry, height int) string {
 		row := strings.Join(cells, rowStyle.Render(" "))
 		blocks[i] = []string{padStyled(row, inner, rowStyle.GetBackground())}
 		if i == sel {
-			blocks[i] = append(blocks[i], m.expandedLines(provider, &profiles[i], inner, tier, now)...)
+			blocks[i] = append(blocks[i], m.expandedLines(provider, &profiles[i], inner, tier, now, columnsShown)...)
 		}
 	}
 
@@ -795,11 +801,11 @@ func (m Model) tightestCell(provider, profile string, now time.Time) (string, li
 }
 
 // expandedLines is the tree of detail lines under the selected account:
-// what its row does not say — the outcome of the last action on it, its
-// windows where the row shows only the tightest, auth and token, where it
-// lives, and what the keys do. Each line hangs off the row with a tree
-// glyph; the last uses └.
-func (m Model) expandedLines(provider string, info *ProfileInfo, inner int, tier layoutTier, now time.Time) []string {
+// what its row does not say — the outcome of the last action on it, the
+// windows the table has no column for (columnsShown names the ones it has),
+// auth and token, where it lives, and what the keys do. Each line hangs
+// off the row with a tree glyph; the last uses └.
+func (m Model) expandedLines(provider string, info *ProfileInfo, inner int, tier layoutTier, now time.Time, columnsShown map[string]bool) []string {
 	muted := m.styles.StatusText
 	sep := muted.Render(" · ")
 	statusStyle := m.profilesPanel.styles.StatusStyle
@@ -819,8 +825,11 @@ func (m Model) expandedLines(provider string, info *ProfileInfo, inner int, tier
 	if e, ok := m.limits[limitsKey(provider, info.Name)]; ok && m.hooks.Limits != nil {
 		cells := usage.WindowsOf(e.info)
 		switch {
-		case !tier.allWindowColumns && len(cells) > 0:
+		case len(cells) > 0:
 			for _, c := range cells {
+				if tier.allWindowColumns && columnsShown[c.Column] {
+					continue
+				}
 				left := usage.PercentLeft(c.Window)
 				line := muted.Render(padRight(c.Label, 14)) + m.percentStyle(left).Render(fmt.Sprintf("%3d%% left", left))
 				if !c.Window.ResetsAt.IsZero() {

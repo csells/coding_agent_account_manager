@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -78,5 +79,35 @@ func TestWindowLeftText_LocalResetPhrasing(t *testing.T) {
 	}
 	if WindowLeftText(nil, now) != "-" {
 		t.Errorf("nil window should render as -")
+	}
+}
+
+// Per-model providers (agy) name every window by its model. The pro and
+// flash picks are the primary and secondary windows: they lead the list,
+// once each, ahead of the alphabetical rest.
+func TestWindowsOf_ModelSlotsLeadOnceAndTheRestFollowByName(t *testing.T) {
+	pro := &UsageWindow{Label: "gemini-3-pro", Kind: "model_quota"}
+	flash := &UsageWindow{Label: "gemini-3-flash", Kind: "model_quota"}
+	u := &UsageInfo{
+		PrimaryWindow:   pro,
+		SecondaryWindow: flash,
+		ModelWindows: map[string]*UsageWindow{
+			"claude-sonnet-4-6":   {Label: "claude-sonnet-4-6", Kind: "model_quota"},
+			"gemini-3-flash":      flash,
+			"gemini-3-flash-lite": {Label: "gemini-3-flash-lite", Kind: "model_quota"},
+			"gemini-3-pro":        pro,
+		},
+	}
+	var got []string
+	for _, c := range WindowsOf(u) {
+		got = append(got, c.Label)
+	}
+	want := []string{"gemini-3-pro", "gemini-3-flash", "claude-sonnet-4-6", "gemini-3-flash-lite"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("labels = %v, want %v", got, want)
+	}
+	cells := WindowsOf(u)
+	if !(cells[0].Rank < cells[1].Rank && cells[1].Rank < cells[2].Rank && cells[2].Rank == cells[3].Rank) {
+		t.Fatalf("ranks = %d %d %d %d, want the slots ahead of an equal-ranked rest", cells[0].Rank, cells[1].Rank, cells[2].Rank, cells[3].Rank)
 	}
 }

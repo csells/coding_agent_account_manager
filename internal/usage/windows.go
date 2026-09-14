@@ -25,16 +25,23 @@ func WindowsOf(u *UsageInfo) []WindowCell {
 		return nil
 	}
 	var cells []WindowCell
-	add := func(w *UsageWindow, fallback string) {
-		if w == nil {
+	seen := make(map[*UsageWindow]bool)
+	add := func(w *UsageWindow, fallback string, slot int) {
+		if w == nil || seen[w] {
 			return
 		}
+		seen[w] = true
 		column, label, rank := windowNames(w, fallback)
+		if slot >= 0 && rank >= modelOnlyRank {
+			// A slot window named only by its model (the agy pro/flash
+			// picks) leads the per-model list rather than sorting into it.
+			rank = modelOnlyRank - 5 + slot
+		}
 		cells = append(cells, WindowCell{Column: column, Label: label, Rank: rank, Window: w})
 	}
-	add(u.PrimaryWindow, "Primary")
-	add(u.SecondaryWindow, "Secondary")
-	add(u.TertiaryWindow, "Tertiary")
+	add(u.PrimaryWindow, "Primary", 0)
+	add(u.SecondaryWindow, "Secondary", 1)
+	add(u.TertiaryWindow, "Tertiary", 2)
 
 	keys := make([]string, 0, len(u.ModelWindows))
 	for key := range u.ModelWindows {
@@ -52,10 +59,13 @@ func WindowsOf(u *UsageInfo) []WindowCell {
 			cp.Label = key
 			w = &cp
 		}
-		add(w, key)
+		add(w, key, -1)
 	}
 	return cells
 }
+
+// modelOnlyRank is the rank of a window named by nothing but its model.
+const modelOnlyRank = 60
 
 // WindowColumn names the table column a window belongs in and its rank.
 func WindowColumn(w *UsageWindow, fallback string) (string, int) {
@@ -90,7 +100,7 @@ func windowNames(w *UsageWindow, fallback string) (column, label string, rank in
 	}
 	switch {
 	case w.Label != "" && base == "":
-		return strings.ToUpper(w.Label), w.Label, 60
+		return strings.ToUpper(w.Label), w.Label, modelOnlyRank
 	case w.Label != "":
 		return strings.ToUpper(base + " " + w.Label), base + " " + w.Label, rank + 5
 	case base == "":
