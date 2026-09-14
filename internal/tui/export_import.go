@@ -179,7 +179,7 @@ func (m Model) handleImportBundle() (tea.Model, tea.Cmd) {
 	dialog.SetStyles(m.styles)
 	dialog.SetPlaceholder("~/backup.zip or /path/to/bundle.zip")
 	dialog.SetWidth(m.dialogWidth(60))
-	m.backupDialog = dialog // Reuse backup dialog field
+	m.importPathDialog = dialog
 	m.state = stateImportPath
 	m.statusMsg = ""
 	return m, nil
@@ -187,24 +187,24 @@ func (m Model) handleImportBundle() (tea.Model, tea.Cmd) {
 
 // handleImportPathKeys handles key input for the import path dialog.
 func (m Model) handleImportPathKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.backupDialog == nil {
+	if m.importPathDialog == nil {
 		m.state = stateList
 		return m, nil
 	}
 
 	// Update the dialog with the key press
 	var cmd tea.Cmd
-	m.backupDialog, cmd = m.backupDialog.Update(msg)
+	m.importPathDialog, cmd = m.importPathDialog.Update(msg)
 
 	// Check dialog result
-	switch m.backupDialog.Result() {
+	switch m.importPathDialog.Result() {
 	case DialogResultSubmit:
-		bundlePath := m.backupDialog.Value()
-		m.backupDialog = nil
+		bundlePath := m.importPathDialog.Value()
+		m.importPathDialog = nil
 		return m.validateAndPreviewImport(bundlePath)
 
 	case DialogResultCancel:
-		m.backupDialog = nil
+		m.importPathDialog = nil
 		m.state = stateList
 		m.statusMsg = "Import cancelled"
 		return m, nil

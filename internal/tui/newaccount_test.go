@@ -191,13 +191,85 @@ func TestNewAccount_WithoutAnIdentityAsksForAName(t *testing.T) {
 	h := &newAccountHooks{identity: ""}
 	m := modelWithTwoClaudeProfiles(h.hooks(t))
 	m.width, m.height = 170, 40
-	// openBackupNameDialog needs live auth files to exist for the provider;
-	// the isolated test HOME has none, so it reports that instead of a
-	// dialog — the message still tells the user what happened.
+	// openNameDialog needs a signed-in account to exist for the provider;
+	// the isolated test HOME has none, so it reports that in a dialog
+	// instead — the message still tells the user what happened.
 	updated, _ := m.Update(newAccountIdentifiedMsg{provider: "claude", name: ""})
 	m = updated.(Model)
-	if m.state != stateBackupDialog && !strings.Contains(m.statusMsg, "nothing to backup") {
-		t.Fatalf("no identity should lead to naming the profile, got state=%v status=%q", m.state, m.statusMsg)
+	if m.state != stateNameDialog && !strings.Contains(ansi.Strip(m.View()), "Nothing to name") {
+		t.Fatalf("no identity should lead to naming the account, got state=%v status=%q", m.state, m.statusMsg)
+	}
+}
+
+// When a login leaves no identity the dashboard asks for a name. The
+// dialog and everything it says afterwards speak of the login that just
+// happened, never of a backup: esc reports the login as cancelled, a name
+// captures the new account through the same path as an identified login,
+// and the outcome says who is logged in to what.
+func TestNameDialog_SpeaksOfLogin(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(`{"tokens":{"access_token":"SYNTHETIC-N","refresh_token":"SYNTHETIC-N"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := &newAccountHooks{identity: ""}
+	m := modelWithTwoClaudeProfiles(h.hooks(t))
+	m.width, m.height = 170, 40
+
+	updated, _ := m.Update(newAccountIdentifiedMsg{provider: "codex", name: ""})
+	m = updated.(Model)
+	if m.state != stateNameDialog || m.nameDialog == nil {
+		t.Fatalf("no identity should open the name dialog, state=%v", m.state)
+	}
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"Logged in to Codex", "Name this account"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("name dialog lacks %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(strings.ToLower(view), "backup") {
+		t.Errorf("name dialog speaks of a backup:\n%s", view)
+	}
+
+	// Esc: nothing is captured, and the status says what was given up.
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = updated.(Model)
+	if m.state != stateList || !strings.Contains(m.statusMsg, "Login cancelled") || len(h.captured) != 0 {
+		t.Fatalf("esc should cancel the login without capturing: state=%v status=%q captured=%v", m.state, m.statusMsg, h.captured)
+	}
+
+	// Again, naming it this time.
+	updated, _ = m.Update(newAccountIdentifiedMsg{provider: "codex", name: ""})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("work")})
+	m = updated.(Model)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if len(h.captured) != 1 || h.captured[0] != "codex/work" {
+		t.Fatalf("captured = %v, want the new codex account under the typed name", h.captured)
+	}
+	if m.state != stateMessage {
+		t.Fatalf("the outcome should be a dialog, state=%v", m.state)
+	}
+	view = ansi.Strip(m.View())
+	if !strings.Contains(view, "Logged in to Codex as work") {
+		t.Errorf("outcome lacks \"Logged in to Codex as work\":\n%s", view)
+	}
+	if strings.Contains(strings.ToLower(view), "backed up") {
+		t.Errorf("outcome speaks of a backup:\n%s", view)
+	}
+	if m.selectedProfileName != "work" || cmd == nil {
+		t.Fatalf("the new account should be selected and the list reloaded: selected=%q cmd=%v", m.selectedProfileName, cmd)
+	}
+	// The login is the account's first use on record.
+	db, err := caamdb.Open()
+	if err != nil {
+		t.Fatalf("open activity log: %v", err)
+	}
+	defer db.Close()
+	used, err := db.LastUsed()
+	if err != nil || used["codex"]["work"].IsZero() {
+		t.Fatalf("a named login should be in the activity log: used=%v err=%v", used, err)
 	}
 }
 

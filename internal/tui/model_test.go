@@ -884,8 +884,8 @@ func TestHandleImportBundle(t *testing.T) {
 	if updated.state != stateImportPath {
 		t.Errorf("expected stateImportPath, got %v", updated.state)
 	}
-	if updated.backupDialog == nil {
-		t.Error("expected backupDialog to be set")
+	if updated.importPathDialog == nil {
+		t.Error("expected importPathDialog to be set")
 	}
 }
 
@@ -949,7 +949,7 @@ func TestHandleExportConfirmKeysNilDialog(t *testing.T) {
 func TestHandleImportPathKeysNilDialog(t *testing.T) {
 	m := New()
 	m.state = stateImportPath
-	m.backupDialog = nil
+	m.importPathDialog = nil
 
 	result, _ := m.handleImportPathKeys(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := result.(Model)

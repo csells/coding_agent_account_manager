@@ -275,12 +275,7 @@ func (m Model) newAccountLoggedIn(msg newAccountLoginDoneMsg) (tea.Model, tea.Cm
 // selects the new profile; without an identity it asks for a name.
 func (m Model) newAccountIdentified(msg newAccountIdentifiedMsg) (tea.Model, tea.Cmd) {
 	if msg.name == "" {
-		model, cmd := m.openBackupNameDialog(msg.provider)
-		if next, ok := model.(Model); ok && next.state == stateBackupDialog {
-			next.statusMsg = "Logged in. Name the new profile:"
-			return next, cmd
-		}
-		return model, cmd
+		return m.openNameDialog(msg.provider)
 	}
 	if err := m.captureLive(msg.provider, msg.name); err != nil {
 		m.setNotice(msg.provider, msg.name, "Logged in as "+msg.name+", but capturing it failed: "+err.Error(), true)

@@ -48,7 +48,7 @@ const (
 	stateConfirm
 	stateSearch
 	stateHelp
-	stateBackupDialog
+	stateNameDialog
 	stateConfirmOverwrite
 	stateExportConfirm
 	stateImportPath
@@ -153,12 +153,15 @@ type Model struct {
 	pendingAction confirmAction
 	searchQuery   string
 
-	// Dialog state for backup flow
-	backupDialog *TextInputDialog
-	// backupProvider is the provider the name dialog captures for; it can
+	// nameDialog is the n fallback: it asks what to call the account a
+	// login just signed in as when its identity could not be read.
+	nameDialog *TextInputDialog
+	// nameProvider is the provider the name dialog captures for; it can
 	// differ from the selected one when the login came from the picker.
-	backupProvider string
-	providerPicker *ProviderPickerDialog
+	nameProvider string
+	// importPathDialog asks for the bundle I imports.
+	importPathDialog *TextInputDialog
+	providerPicker   *ProviderPickerDialog
 	// messageDialog reports an outcome in the middle of the screen.
 	messageDialog *MessageDialog
 	// pendingRelogin is the provider a confirmed re-login starts for.
@@ -1086,8 +1089,8 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Any key returns to list
 		m.state = stateList
 		return m, nil
-	case stateBackupDialog:
-		return m.handleBackupDialogKeys(msg)
+	case stateNameDialog:
+		return m.handleNameDialogKeys(msg)
 	case stateConfirmOverwrite:
 		return m.handleConfirmOverwriteKeys(msg)
 	case stateExportConfirm:
@@ -1438,133 +1441,122 @@ func (m Model) handleDeleteProfile() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// openBackupNameDialog asks for a profile name to capture provider's live
-// credential under; used when a login's identity could not be read.
-func (m Model) openBackupNameDialog(provider string) (tea.Model, tea.Cmd) {
+// openNameDialog is the n fallback: the login finished but the identity
+// of the account it signed in as could not be read, so the dashboard asks
+// what to file it under.
+func (m Model) openNameDialog(provider string) (tea.Model, tea.Cmd) {
 	fileSet, ok := authFileSetForProvider(provider)
 	if !ok {
 		m.statusMsg = fmt.Sprintf("Unknown provider: %s", provider)
 		return m, nil
 	}
 	if !authfile.HasAuthFiles(fileSet) {
-		m.statusMsg = fmt.Sprintf("No auth files found for %s - nothing to backup", provider)
+		m.showMessage(StatusError, "Nothing to name", "The login finished, but %s has no signed-in account to capture.", providerLabel(provider))
 		return m, nil
 	}
 
-	m.backupProvider = provider
-	m.backupDialog = NewTextInputDialog(
-		fmt.Sprintf("Capture %s account", providerLabel(provider)),
-		"Enter profile name (alphanumeric, underscore, hyphen, or period):",
+	m.nameProvider = provider
+	m.nameDialog = NewTextInputDialog(
+		fmt.Sprintf("Logged in to %s", providerLabel(provider)),
+		"Who it is signed in as could not be read.\n\nName this account (letters, numbers, _ - . only):",
 	)
-	m.backupDialog.SetStyles(m.styles)
-	m.backupDialog.SetPlaceholder("work-main")
-	m.backupDialog.SetWidth(m.dialogWidth(50))
-	m.state = stateBackupDialog
+	m.nameDialog.SetStyles(m.styles)
+	m.nameDialog.SetPlaceholder("work-main")
+	m.nameDialog.SetWidth(m.dialogWidth(60))
+	m.state = stateNameDialog
 	m.statusMsg = ""
 	return m, nil
 }
 
-// backupDialogProvider is the provider the open name dialog is for.
-func (m Model) backupDialogProvider() string {
-	if m.backupProvider != "" {
-		return m.backupProvider
+// nameDialogProvider is the provider the open name dialog is for.
+func (m Model) nameDialogProvider() string {
+	if m.nameProvider != "" {
+		return m.nameProvider
 	}
 	return m.currentProvider()
 }
 
-// handleBackupDialogKeys handles key input for the backup dialog.
-func (m Model) handleBackupDialogKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.backupDialog == nil {
+// handleNameDialogKeys handles key input for the name dialog.
+func (m Model) handleNameDialogKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.nameDialog == nil {
 		m.state = stateList
 		return m, nil
 	}
 
-	// Update the dialog with the key press
 	var cmd tea.Cmd
-	m.backupDialog, cmd = m.backupDialog.Update(msg)
+	m.nameDialog, cmd = m.nameDialog.Update(msg)
 
-	// Check dialog result
-	switch m.backupDialog.Result() {
+	switch m.nameDialog.Result() {
 	case DialogResultSubmit:
-		profileName := m.backupDialog.Value()
-		return m.processBackupSubmit(profileName)
+		return m.processNameSubmit(m.nameDialog.Value())
 
 	case DialogResultCancel:
-		m.backupDialog = nil
+		m.nameDialog = nil
+		m.nameProvider = ""
 		m.state = stateList
-		m.statusMsg = "Backup cancelled"
+		m.statusMsg = "Login cancelled: the new account stays signed in, but is not in the vault"
 		return m, nil
 	}
 
 	return m, cmd
 }
 
-// processBackupSubmit validates the profile name and initiates backup.
-func (m Model) processBackupSubmit(profileName string) (tea.Model, tea.Cmd) {
-	provider := m.backupDialogProvider()
+// processNameSubmit validates the typed name and captures the account
+// under it, asking first when the name is already in the vault.
+func (m Model) processNameSubmit(name string) (tea.Model, tea.Cmd) {
+	provider := m.nameDialogProvider()
 
-	// Validate profile name
-	profileName = strings.TrimSpace(profileName)
-	if profileName == "" {
-		m.statusMsg = "Profile name cannot be empty"
-		m.backupDialog.Reset()
+	name = strings.TrimSpace(name)
+	if name == "" {
+		m.statusMsg = "The name cannot be empty"
+		m.nameDialog.Reset()
 		return m, nil
 	}
 
-	// Check for reserved names
-	if profileName == "." || profileName == ".." {
-		m.statusMsg = "Profile name cannot be '.' or '..'"
-		m.backupDialog.Reset()
+	if name == "." || name == ".." {
+		m.statusMsg = "The name cannot be '.' or '..'"
+		m.nameDialog.Reset()
 		return m, nil
 	}
 
-	// Only allow alphanumeric, underscore, hyphen, and period
-	// This matches the vault validation in authfile.go and profile.go
-	// to prevent shell injection and filesystem issues
-	for _, r := range profileName {
+	// Only letters, numbers, underscore, hyphen and period: the vault's own
+	// rule (authfile.go, profile.go), which keeps names out of shell and
+	// filesystem trouble.
+	for _, r := range name {
 		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
 			(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.') {
-			m.statusMsg = "Profile name can only contain letters, numbers, underscore, hyphen, and period"
-			m.backupDialog.Reset()
+			m.statusMsg = "The name can only contain letters, numbers, underscore, hyphen, and period"
+			m.nameDialog.Reset()
 			return m, nil
 		}
 	}
 
-	// Check if profile already exists
 	vault := authfile.NewVault(m.vaultPath)
 	profiles, err := vault.List(provider)
 	if err != nil {
-		m.statusMsg = fmt.Sprintf("Error listing profiles: %v", err)
-		m.backupDialog = nil
+		m.nameDialog = nil
 		m.state = stateList
+		m.showError(err, "List accounts")
 		return m, nil
 	}
 
-	profileExists := false
 	for _, p := range profiles {
-		if p == profileName {
-			profileExists = true
-			break
+		if p == name {
+			m.nameDialog = nil
+			m.pendingProfile = name
+			m.confirmDialog = NewConfirmDialog(
+				"Account exists",
+				fmt.Sprintf("%s is already in the vault. Replace its credential with the one just logged in?", name),
+			)
+			m.confirmDialog.SetStyles(m.styles)
+			m.confirmDialog.SetLabels("Replace", "Cancel")
+			m.confirmDialog.SetWidth(m.dialogWidth(56))
+			m.state = stateConfirmOverwrite
+			return m, nil
 		}
 	}
 
-	if profileExists {
-		// Show overwrite confirmation dialog
-		m.backupDialog = nil
-		m.pendingProfile = profileName
-		m.confirmDialog = NewConfirmDialog(
-			"Profile Exists",
-			fmt.Sprintf("Profile '%s' already exists. Overwrite?", profileName),
-		)
-		m.confirmDialog.SetStyles(m.styles)
-		m.confirmDialog.SetLabels("Overwrite", "Cancel")
-		m.confirmDialog.SetWidth(m.dialogWidth(50))
-		m.state = stateConfirmOverwrite
-		return m, nil
-	}
-
-	// Execute backup
-	return m.executeBackup(profileName)
+	return m.captureNamed(name)
 }
 
 // handleConfirmOverwriteKeys handles key input for the overwrite confirmation dialog.
@@ -1582,23 +1574,25 @@ func (m Model) handleConfirmOverwriteKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.confirmDialog.Result() {
 	case DialogResultSubmit:
 		if m.confirmDialog.Confirmed() {
-			profileName := m.pendingProfile
+			name := m.pendingProfile
 			m.confirmDialog = nil
 			m.pendingProfile = ""
-			return m.executeBackup(profileName)
+			return m.captureNamed(name)
 		}
 		// User selected "No" - cancel overwrite
 		m.confirmDialog = nil
 		m.pendingProfile = ""
+		m.nameProvider = ""
 		m.state = stateList
-		m.statusMsg = "Backup cancelled"
+		m.statusMsg = "Login cancelled: the new account stays signed in, but is not in the vault"
 		return m, nil
 
 	case DialogResultCancel:
 		m.confirmDialog = nil
 		m.pendingProfile = ""
+		m.nameProvider = ""
 		m.state = stateList
-		m.statusMsg = "Backup cancelled"
+		m.statusMsg = "Login cancelled: the new account stays signed in, but is not in the vault"
 		return m, nil
 	}
 
@@ -1673,29 +1667,26 @@ func (m Model) handleSyncPanelKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// executeBackup performs the actual backup operation.
-func (m Model) executeBackup(profileName string) (tea.Model, tea.Cmd) {
-	provider := m.backupDialogProvider()
-	fileSet, ok := authFileSetForProvider(provider)
-	if !ok {
-		m.state = stateList
-		m.statusMsg = fmt.Sprintf("Unknown provider: %s", provider)
-		return m, nil
-	}
-
-	vault := authfile.NewVault(m.vaultPath)
-	if err := vault.Backup(fileSet, profileName); err != nil {
-		m.state = stateList
-		m.statusMsg = fmt.Sprintf("Backup failed: %v", err)
-		return m, nil
-	}
-
+// captureNamed files the account the login signed in as under the typed
+// name, the same way an identified login is filed: captured through the
+// command layer, logged as the account's first use, selected.
+func (m Model) captureNamed(name string) (tea.Model, tea.Cmd) {
+	provider := m.nameDialogProvider()
 	m.state = stateList
-	m.backupProvider = ""
-	m.statusMsg = fmt.Sprintf("Backed up %s auth to '%s'", provider, profileName)
+	m.nameDialog = nil
+	m.nameProvider = ""
 
-	// Reload profiles to show the new backup, and select it.
-	return m, m.refreshProfiles(refreshContext{provider: provider, selectedProfile: profileName})
+	if err := m.captureLive(provider, name); err != nil {
+		m.setNotice(provider, name, "Logged in as "+name+", but capturing it failed: "+err.Error(), true)
+		m.showMessage(StatusError, "Capture failed", "Logged in to %s as %s, but capturing it failed: %v", providerLabel(provider), name, err)
+		return m, nil
+	}
+	logLoginEvent(provider, name)
+	m.selectedProfileName = name
+	delete(m.limits, limitsKey(provider, name))
+	m.setNotice(provider, name, "Logged in and captured "+name, false)
+	m.showMessage(StatusSuccess, "Logged in", "Logged in to %s as %s; its credential is in the vault.", providerLabel(provider), name)
+	return m, m.refreshProfiles(refreshContext{provider: provider, selectedProfile: name})
 }
 
 // handleRefresh (r) makes the selected account's figures fresh: the limits
@@ -2689,8 +2680,11 @@ func (m Model) View() string {
 	switch m.state {
 	case stateHelp:
 		return m.helpView()
-	case stateBackupDialog:
-		return m.dialogOverlayView(m.backupDialog.View())
+	case stateNameDialog:
+		if m.nameDialog != nil {
+			return m.dialogOverlayView(m.nameDialog.View())
+		}
+		return m.mainView()
 	case stateProviderPicker:
 		if m.providerPicker != nil {
 			return m.dialogOverlayView(m.providerPicker.View())
@@ -2719,8 +2713,8 @@ func (m Model) View() string {
 		}
 		return m.mainView()
 	case stateImportPath:
-		if m.backupDialog != nil {
-			return m.dialogOverlayView(m.backupDialog.View())
+		if m.importPathDialog != nil {
+			return m.dialogOverlayView(m.importPathDialog.View())
 		}
 		return m.mainView()
 	case stateImportConfirm:
@@ -3016,8 +3010,11 @@ func (m Model) dialogWidth(preferred int) int {
 }
 
 func (m *Model) clampDialogWidths() {
-	if m.backupDialog != nil {
-		m.backupDialog.SetWidth(m.dialogWidth(m.backupDialog.width))
+	if m.nameDialog != nil {
+		m.nameDialog.SetWidth(m.dialogWidth(m.nameDialog.width))
+	}
+	if m.importPathDialog != nil {
+		m.importPathDialog.SetWidth(m.dialogWidth(m.importPathDialog.width))
 	}
 	if m.confirmDialog != nil {
 		m.confirmDialog.SetWidth(m.dialogWidth(m.confirmDialog.width))

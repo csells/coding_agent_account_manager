@@ -132,7 +132,7 @@ func GetContextualHints(state viewState) []ContextualHint {
 			{"Any key", "Return"},
 		}
 
-	case stateBackupDialog:
+	case stateNameDialog:
 		return append([]ContextualHint{
 			{"Enter", "Save"},
 			{"Esc", "Cancel"},
