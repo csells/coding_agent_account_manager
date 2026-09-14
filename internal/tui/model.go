@@ -59,42 +59,9 @@ const (
 	stateCommandPalette
 )
 
-type layoutMode int
-
 const (
-	layoutFull layoutMode = iota
-	layoutCompact
-	layoutTiny
-)
-
-type layoutSpec struct {
-	Mode           layoutMode
-	ProviderWidth  int
-	ProfilesWidth  int
-	DetailWidth    int
-	Gap            int
-	ContentHeight  int
-	ProfilesHeight int
-	DetailHeight   int
-	ShowDetail     bool
-}
-
-const (
-	layoutGap                 = 2
-	minProviderWidth          = 18
-	maxProviderWidth          = 26
-	minProfilesWidth          = 40
-	maxProfilesWidth          = 90
-	minDetailWidth            = 32
-	maxDetailWidth            = 48
-	minFullHeight             = 24
-	minTinyWidth              = 64
-	minTinyHeight             = 16
-	minCompactDetailHeight    = 14
-	minCompactProfilesHeight  = 6
-	minCompactDetailMinHeight = 7
-	dialogMinWidth            = 24
-	dialogMargin              = 4
+	dialogMinWidth = 24
+	dialogMargin   = 4
 )
 
 // confirmAction represents the action being confirmed.
@@ -144,7 +111,7 @@ type Model struct {
 	// UI components
 	keys          keyMap
 	styles        Styles
-	providerPanel *ProviderPanel
+	stripStyles   ProviderPanelStyles
 	profilesPanel *ProfilesPanel
 	detailPanel   *DetailPanel
 	usagePanel    *UsagePanel
@@ -221,6 +188,10 @@ type Model struct {
 	// showDetailCard overlays the full detail card for the selected
 	// account (the `i` key); ↑/↓ move the selection underneath it.
 	showDetailCard bool
+
+	// stripOffset is the first provider slot the strip shows. It moves
+	// only when the selection leaves the visible window (settleStrip).
+	stripOffset int
 }
 
 // computeHealthMap builds the health verdict for every listed profile. With
@@ -340,7 +311,7 @@ func NewWithProvidersAndConfig(providers []string, cfg *config.SPMConfig) Model 
 		state:           stateList,
 		keys:            defaultKeyMap(),
 		styles:          NewStyles(theme),
-		providerPanel:   NewProviderPanelWithTheme(providers, theme),
+		stripStyles:     NewProviderPanelStyles(theme),
 		profilesPanel:   profilesPanel,
 		detailPanel:     NewDetailPanelWithTheme(theme),
 		usagePanel:      NewUsagePanelWithTheme(theme),
@@ -879,8 +850,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				next.notice = ""
 				next.noticeKey = ""
 			}
-			if fetch := next.limitsPrefetchCmd(); fetch != nil {
-				return next, tea.Batch(cmd, fetch)
+			next.settleStrip()
+			// Only the list itself reads limits; keys typed into search
+			// or a dialog must not start fetches.
+			if next.state == stateList {
+				if fetch := next.limitsPrefetchCmd(); fetch != nil {
+					return next, tea.Batch(cmd, fetch)
+				}
 			}
 			return next, cmd
 		}
@@ -894,6 +870,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.clampDialogWidths()
+		m.settleStrip()
 		return m, nil
 
 	case profilesLoadedMsg:
@@ -910,14 +887,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.vaultMeta = msg.vaultMeta
 		} else {
 			m.vaultMeta = make(map[string]map[string]vaultProfileMeta)
-		}
-		// Update provider panel counts
-		if m.providerPanel != nil {
-			counts := make(map[string]int)
-			for provider, profiles := range m.profiles {
-				counts[provider] = len(profiles)
-			}
-			m.providerPanel.SetProfileCounts(counts)
 		}
 		// Update profiles panel with current provider's profiles
 		m.syncProfilesPanel()
@@ -941,14 +910,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Restore selection intelligently based on context
 		m.restoreSelection(msg.ctx)
-		// Update provider panel counts
-		if m.providerPanel != nil {
-			counts := make(map[string]int)
-			for provider, profiles := range m.profiles {
-				counts[provider] = len(profiles)
-			}
-			m.providerPanel.SetProfileCounts(counts)
-		}
 		// Update profiles panel with current provider's profiles
 		m.syncProfilesPanel()
 		fetch := m.limitsPrefetchCmd()
@@ -1081,6 +1042,8 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// else closes it (and, for i/esc/q, does nothing more).
 	if m.showDetailCard {
 		switch {
+		case msg.String() == "ctrl+c":
+			// Quit is quit; the card does not swallow it.
 		case key.Matches(msg, m.keys.Up), key.Matches(msg, m.keys.Down):
 			// fall through to the list handling below
 		case key.Matches(msg, m.keys.Detail), key.Matches(msg, m.keys.Cancel), key.Matches(msg, m.keys.Quit):
@@ -1148,8 +1111,9 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.Left):
-		if m.activeProvider > 0 {
-			m.activeProvider--
+		// ←/→ walk the provider strip and wrap at its ends, like tab.
+		if n := len(m.providers); n > 0 {
+			m.activeProvider = (m.activeProvider + n - 1) % n
 			m.selected = 0
 			m.selectedProfileName = ""
 			m.syncProfilesPanel()
@@ -1157,8 +1121,8 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.Right):
-		if m.activeProvider < len(m.providers)-1 {
-			m.activeProvider++
+		if n := len(m.providers); n > 0 {
+			m.activeProvider = (m.activeProvider + 1) % n
 			m.selected = 0
 			m.selectedProfileName = ""
 			m.syncProfilesPanel()
@@ -2333,20 +2297,6 @@ func (m Model) buildProfileInfo(provider string, p Profile, projectDefault strin
 	}
 }
 
-// updateProviderCounts updates the provider panel with current profile counts.
-func (m *Model) updateProviderCounts() {
-	counts := make(map[string]int)
-	for provider, profiles := range m.profiles {
-		counts[provider] = len(profiles)
-	}
-	m.providerPanel.SetProfileCounts(counts)
-}
-
-// syncProviderPanel syncs the provider panel state with the model.
-func (m *Model) syncProviderPanel() {
-	m.providerPanel.SetActiveProvider(m.activeProvider)
-}
-
 // syncProfilesPanel syncs the profiles panel with the current provider's profiles.
 func (m *Model) syncProfilesPanel() {
 	if m.profilesPanel == nil {
@@ -2687,13 +2637,12 @@ func trimLeftANSI(s string, left int) string {
 // mainView renders the main list view.
 func (m Model) mainView() string {
 	// Header
-	headerLines := []string{m.styles.Header.Render("caam - Coding Agent Account Manager")}
+	headerLines := []string{m.styles.Header.MarginBottom(0).Render("caam - Coding Agent Account Manager")}
 	if projectLine := m.projectContextLine(); projectLine != "" {
-		if m.width > 1 {
+		if m.width > 0 {
 			// A long project path must not widen the whole frame past the
-			// terminal (JoinVertical pads every line to the widest one), and
-			// visible text stops short of the last column (see verticalPanels).
-			projectLine = truncateWithEllipsis(projectLine, m.width-1)
+			// terminal: JoinVertical pads every line to the widest one.
+			projectLine = truncateWithEllipsis(projectLine, m.width)
 		}
 		headerLines = append(headerLines, m.styles.StatusText.Render(projectLine))
 	}
@@ -2707,43 +2656,40 @@ func (m Model) mainView() string {
 	}
 
 	headerHeight := lipgloss.Height(header)
-	contentHeight := m.height - headerHeight - searchBarHeight - 2
+	status := m.renderStatusBar()
+	statusHeight := lipgloss.Height(status)
+
+	// A blank line separates the header from the panels when the terminal
+	// can spare it; a short one gives that row to the accounts pane.
+	gap := 1
+	if searchBar != "" || m.height < 16 {
+		gap = 0
+	}
+	contentHeight := m.height - headerHeight - searchBarHeight - gap - statusHeight
 	if contentHeight < 0 {
 		contentHeight = 0
 	}
 
 	// Providers across the top, the selected provider's accounts below.
-	layout := layoutSpec{Mode: m.layoutMode(), ContentHeight: contentHeight}
 	panels := m.verticalPanels(contentHeight)
-
-	// Status bar
-	status := m.renderStatusBar(layout)
-	statusHeight := lipgloss.Height(status)
 
 	// The panels get whatever is left between the header and the status
 	// bar, never more: a detail card taller than a short window used to
 	// push the header, the provider list and the status bar off the top of
 	// the terminal.
-	if maxPanels := m.height - headerHeight - searchBarHeight - 1 - statusHeight; maxPanels > 0 {
-		panels = clampLines(panels, maxPanels)
+	if contentHeight > 0 {
+		panels = clampLines(panels, contentHeight)
 	}
 
 	// Combine header, search bar (if active), panels, and status
 	var content string
-	if searchBar != "" {
-		content = lipgloss.JoinVertical(
-			lipgloss.Left,
-			header,
-			searchBar,
-			panels,
-		)
-	} else {
-		content = lipgloss.JoinVertical(
-			lipgloss.Left,
-			header,
-			"",
-			panels,
-		)
+	switch {
+	case searchBar != "":
+		content = lipgloss.JoinVertical(lipgloss.Left, header, searchBar, panels)
+	case gap == 1:
+		content = lipgloss.JoinVertical(lipgloss.Left, header, "", panels)
+	default:
+		content = lipgloss.JoinVertical(lipgloss.Left, header, panels)
 	}
 
 	// Add status bar at bottom
@@ -2775,144 +2721,20 @@ func clampLines(s string, n int) string {
 	return strings.Join(lines[:n], "\n")
 }
 
-func (m Model) isCompactLayout() bool {
-	return m.layoutMode() != layoutFull
-}
-
-func (m Model) layoutMode() layoutMode {
-	if m.width <= 0 || m.height <= 0 {
-		return layoutFull
-	}
-	if m.width < minFullWidth() || m.height < minFullHeight {
-		if m.width < minTinyWidth || m.height < minTinyHeight {
-			return layoutTiny
-		}
-		return layoutCompact
-	}
-	return layoutFull
-}
-
-func minFullWidth() int {
-	return minProviderWidth + minProfilesWidth + minDetailWidth + (layoutGap * 2)
-}
-
-func (m Model) fullLayoutSpec(contentHeight int) layoutSpec {
-	spec := layoutSpec{
-		Mode:          layoutFull,
-		Gap:           layoutGap,
-		ContentHeight: contentHeight,
-	}
-
-	if m.width <= 0 {
-		return spec
-	}
-
-	available := m.width - (layoutGap * 2)
-	if available < 0 {
-		available = 0
-	}
-
-	provider := minProviderWidth
-	detail := minDetailWidth
-	profiles := minProfilesWidth
-	extra := available - (provider + detail + profiles)
-	if extra < 0 {
-		extra = 0
-	}
-
-	// Give most extra width to profiles, then detail, then provider.
-	profilesBoost := min(extra, maxProfilesWidth-profiles)
-	profiles += profilesBoost
-	extra -= profilesBoost
-
-	detailBoost := min(extra, maxDetailWidth-detail)
-	detail += detailBoost
-	extra -= detailBoost
-
-	providerBoost := min(extra, maxProviderWidth-provider)
-	provider += providerBoost
-	extra -= providerBoost
-
-	profiles += extra
-
-	if provider < minProviderWidth {
-		provider = minProviderWidth
-	}
-	if detail < minDetailWidth {
-		detail = minDetailWidth
-	}
-	if profiles < minProfilesWidth {
-		profiles = minProfilesWidth
-	}
-
-	// Final safety check to avoid overflow.
-	total := provider + detail + profiles
-	if total > available && available > 0 {
-		overflow := total - available
-		if profiles-overflow >= minProfilesWidth {
-			profiles -= overflow
-		} else if detail-overflow >= minDetailWidth {
-			detail -= overflow
+// layoutDebugString names the layout in force, for CAAM_DEBUG.
+func (m Model) layoutDebugString() string {
+	kind := map[stripKind]string{stripTabs: "tabs", stripChips: "chips", stripCards: "cards"}[m.stripKind()]
+	tier := "narrow"
+	switch m.width {
+	case 0:
+	default:
+		if m.width >= wideCols {
+			tier = "wide"
+		} else if m.width >= mediumCols {
+			tier = "medium"
 		}
 	}
-
-	spec.ProviderWidth = provider
-	spec.DetailWidth = detail
-	spec.ProfilesWidth = max(0, profiles)
-	return spec
-}
-
-func (m Model) compactLayoutSpec(mode layoutMode, contentHeight, tabsHeight int) layoutSpec {
-	spec := layoutSpec{
-		Mode:          mode,
-		Gap:           layoutGap,
-		ContentHeight: contentHeight,
-	}
-	remainingHeight := contentHeight - tabsHeight - 1
-	if remainingHeight < 0 {
-		remainingHeight = 0
-	}
-
-	showDetail := remainingHeight >= minCompactDetailHeight
-	profilesHeight := remainingHeight
-	detailHeight := 0
-
-	if showDetail {
-		profilesHeight = remainingHeight * 6 / 10
-		if profilesHeight < minCompactProfilesHeight {
-			profilesHeight = minCompactProfilesHeight
-		}
-		detailHeight = remainingHeight - profilesHeight - 1
-		if detailHeight < minCompactDetailMinHeight {
-			detailHeight = minCompactDetailMinHeight
-			profilesHeight = remainingHeight - detailHeight - 1
-			if profilesHeight < minCompactProfilesHeight {
-				profilesHeight = minCompactProfilesHeight
-				if profilesHeight+detailHeight+1 > remainingHeight {
-					detailHeight = remainingHeight - profilesHeight - 1
-					if detailHeight < 0 {
-						detailHeight = 0
-					}
-				}
-			}
-		}
-	}
-
-	spec.ProfilesHeight = profilesHeight
-	spec.DetailHeight = detailHeight
-	spec.ShowDetail = showDetail && detailHeight > 0
-	return spec
-}
-
-func (m Model) layoutDebugString(spec layoutSpec) string {
-	if spec.Mode == layoutFull {
-		return fmt.Sprintf("layout=full w=%d h=%d p=%d pr=%d d=%d", m.width, m.height, spec.ProviderWidth, spec.ProfilesWidth, spec.DetailWidth)
-	}
-	mode := "compact"
-	if spec.Mode == layoutTiny {
-		mode = "tiny"
-	}
-	return fmt.Sprintf("layout=%s w=%d h=%d ph=%d dh=%d", mode, m.width, m.height, spec.ProfilesHeight, spec.DetailHeight)
+	return fmt.Sprintf("layout=%s strip=%s w=%d h=%d", tier, kind, m.width, m.height)
 }
 
 func (m Model) debugEnabled() bool {
@@ -3001,51 +2823,6 @@ func (m Model) providerCount(provider string) int {
 	return len(m.profiles[provider])
 }
 
-// renderProviderTabs renders the provider selection tabs.
-func (m Model) renderProviderTabs() string {
-	var tabs []string
-	for i, p := range m.providers {
-		label := providerLabel(p)
-		if m.width >= 80 {
-			if count := m.providerCount(p); count > 0 {
-				label = fmt.Sprintf("%s %d", label, count)
-			}
-		}
-		style := m.styles.Tab
-		if i == m.activeProvider {
-			style = m.styles.ActiveTab
-		}
-		tabs = append(tabs, style.Render(label))
-	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
-}
-
-// renderProfileList renders the list of profiles for the current provider.
-func (m Model) renderProfileList() string {
-	profiles := m.currentProfiles()
-	if len(profiles) == 0 {
-		return m.styles.Empty.Render(fmt.Sprintf("No profiles saved for %s\n\nUse 'caam backup %s <email>' to save a profile",
-			m.currentProvider(), m.currentProvider()))
-	}
-
-	var items []string
-	for i, p := range profiles {
-		style := m.styles.Item
-		if i == m.selected {
-			style = m.styles.SelectedItem
-		}
-
-		indicator := "  "
-		if p.IsActive {
-			indicator = m.styles.Active.Render("● ")
-		}
-
-		items = append(items, style.Render(indicator+p.Name))
-	}
-
-	return lipgloss.JoinVertical(lipgloss.Left, items...)
-}
-
 // renderSearchBar renders a visible search bar when in search mode.
 func (m Model) renderSearchBar() string {
 	if m.state != stateSearch {
@@ -3100,7 +2877,7 @@ func (m Model) renderSearchBar() string {
 
 // renderStatusBar renders the bottom status bar with 3 segments:
 // left (mode indicator), center (status/toast message), right (key hints).
-func (m Model) renderStatusBar(layout layoutSpec) string {
+func (m Model) renderStatusBar() string {
 	if m.width <= 0 {
 		return ""
 	}
@@ -3113,7 +2890,7 @@ func (m Model) renderStatusBar(layout layoutSpec) string {
 	left := m.statusModeIndicator()
 
 	// Right segment: key hints (always visible)
-	right := m.statusKeyHints(layout)
+	right := m.statusKeyHints()
 
 	// Center segment: status message or toast
 	center := m.statusCenterMessage()
@@ -3182,7 +2959,7 @@ func (m Model) statusModeIndicator() string {
 }
 
 // statusKeyHints returns the key hints for the status bar right segment.
-func (m Model) statusKeyHints(layout layoutSpec) string {
+func (m Model) statusKeyHints() string {
 	hint := func(key, action string) string {
 		return m.styles.StatusText.Render("[") +
 			m.styles.StatusKey.Render(key) +
@@ -3192,18 +2969,15 @@ func (m Model) statusKeyHints(layout layoutSpec) string {
 	var hints string
 	switch {
 	case m.width < 70:
-		hints = hint("tab", "provider")
+		hints = hint("←/→", "provider")
 	case m.width < 100:
-		hints = hint("tab", "provider") + " " + hint("/", "search")
+		hints = hint("←/→", "provider") + " " + hint("/", "search")
 	default:
-		hints = hint("tab", "provider") + " " + hint("enter", "activate") + " " + hint("/", "search")
+		hints = hint("←/→", "provider") + " " + hint("↑/↓", "account") + " " + hint("enter", "switch") + " " + hint("/", "search")
 	}
 
 	if m.debugEnabled() {
-		debugLine := m.layoutDebugString(layout)
-		if debugLine != "" {
-			hints += "  " + m.styles.StatusText.Render(debugLine)
-		}
+		hints += "  " + m.styles.StatusText.Render(m.layoutDebugString())
 	}
 
 	return hints

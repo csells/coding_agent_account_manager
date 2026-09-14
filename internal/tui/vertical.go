@@ -3,11 +3,12 @@ package tui
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
@@ -16,41 +17,48 @@ import (
 // The main screen is split top to bottom: a strip of providers across the
 // top, steered with ←/→, and the selected provider's accounts below,
 // steered with ↑/↓ — one row per account with each rate-limit window as a
-// column, with the selected account expanded in place — a tree of detail
-// lines hanging off its row — so ↓ walks the accounts and reads each one.
-// The strip's height is fixed by its content; the accounts pane takes the
-// rest and scrolls by account.
+// column, with the selected account expanded in place as a tree of detail
+// lines. The strip's height is fixed by its kind; the accounts pane takes
+// the rest and scrolls by account.
 //
-// Three width tiers:
-//   - wide (>= wideCols): provider cards three lines tall (name, active
-//     account, tightest windows); every window column; LAST USED.
-//   - medium (>= mediumCols): one-line provider chips that wrap; window
-//     columns keep the percentage and a short reset; no LAST USED.
-//   - narrow: a single row of provider tabs scrolled around the selected
-//     one; the table shows STATUS and the TIGHTEST window only, and the
-//     expansion lists every window.
-const (
-	wideCols          = 150
-	mediumCols        = 100
-	providerCardWidth = 30
-)
+// The strip is a tab strip: every provider has a slot, in key order, whose
+// position never depends on what is selected. Slots sit in ONE row that
+// scrolls horizontally; the scroll offset is kept on the model and moves
+// only when the selection leaves the visible window, and the edges show
+// how many providers are off-screen ("‹ 2", "3 ›").
 
-type widthTier int
-
-const (
-	tierNarrow widthTier = iota
-	tierMedium
-	tierWide
-)
-
-// paneWidth is the width a full-width pane's style is given: the border
-// adds two columns, and the last terminal column stays empty (see
-// verticalPanels).
-func paneWidth(termWidth int) int {
-	return termWidth - 3
+// layoutTier is what the terminal's width allows the accounts table to
+// show. One table, so a change to a tier is one edit.
+type layoutTier struct {
+	// longCells spells a window cell "53% left · 6:10 PM" rather than
+	// "53% · 6:10 PM".
+	longCells bool
+	// allWindowColumns gives every reported window its own column; else
+	// the table shows only the TIGHTEST one and the expansion lists them.
+	allWindowColumns bool
+	showLastUsed     bool
+	// actions are the keys the expansion's legend explains.
+	actions []string
 }
 
-func (m Model) widthTier() widthTier {
+const (
+	wideCols   = 150
+	mediumCols = 100
+)
+
+var (
+	tierWide   = layoutTier{longCells: true, allWindowColumns: true, showLastUsed: true, actions: []string{"enter", "b", "l", "e", "o", "d", "i", "r"}}
+	tierMedium = layoutTier{allWindowColumns: true, actions: []string{"enter", "b", "l", "e", "d", "i", "r"}}
+	tierNarrow = layoutTier{actions: []string{"enter", "b", "l", "i"}}
+)
+
+// actionLegend spells the expansion's key legend, in the tier's order.
+var actionLegend = map[string]string{
+	"enter": "switch to this account", "b": "re-capture", "l": "login/refresh",
+	"e": "edit", "o": "browser", "d": "delete", "i": "full card", "r": "refresh limits",
+}
+
+func (m Model) tier() layoutTier {
 	switch {
 	case m.width >= wideCols:
 		return tierWide
@@ -60,57 +68,115 @@ func (m Model) widthTier() widthTier {
 	return tierNarrow
 }
 
+// stripKind is how each provider's slot is drawn.
+type stripKind int
+
+const (
+	// stripTabs: one line, "Label n".
+	stripTabs stripKind = iota
+	// stripChips: one line, "Label n · 5h 53% · wk 44%".
+	stripChips
+	// stripCards: three lines — name, active account, windows.
+	stripCards
+)
+
+// stripKind picks the slot shape from the terminal's width and height:
+// cards want a wide terminal and room below them for the table.
+func (m Model) stripKind() stripKind {
+	switch {
+	case m.width >= wideCols && m.height >= 22:
+		return stripCards
+	case m.width >= mediumCols && m.height >= 14:
+		return stripChips
+	}
+	return stripTabs
+}
+
+func (k stripKind) lines() int {
+	if k == stripCards {
+		return 3
+	}
+	return 1
+}
+
+// Slot widths. A card's width is fixed so a wider terminal shows more
+// cards rather than wider ones.
+const (
+	providerCardWidth = 30
+	chipSummaryWidth  = 28
+	// Column bounds for the accounts table's NAME column.
+	maxNameWidth = 34
+	minNameWidth = 12
+	// minPaneHeight is border (2) + title (1) + a one-line header + one
+	// account row: what a 12-row terminal leaves the pane.
+	minPaneHeight = 5
+)
+
+// paneGeometry is the one place the pane widths come from: the terminal
+// width, the width handed to a bordered pane's style (the border adds two
+// columns), and the content width inside the border and its padding.
+type paneGeometry struct{ term, pane, inner int }
+
+func paneGeom(termWidth int) paneGeometry {
+	g := paneGeometry{term: termWidth, pane: termWidth - 2, inner: termWidth - 4}
+	if g.inner < 20 {
+		g.inner = 20
+	}
+	return g
+}
+
 // verticalPanels renders the provider strip and the accounts pane, sized
 // to exactly contentHeight lines.
 func (m Model) verticalPanels(contentHeight int) string {
-	// Pane border (2) and padding (2), and one column of slack: a line
-	// that reaches the terminal's last column puts the terminal into its
-	// pending-wrap state, after which the renderer's row accounting is
-	// off by one and lines it skips as unchanged stay where they were —
-	// rows of the strip interleaved with the row below them, as seen in
-	// Terminal.app. Nothing rendered here may fill the last column.
-	inner := m.width - 5
-	if inner < 20 {
-		inner = 20
-	}
-	strip := m.renderProviderStrip(inner)
+	g := paneGeom(m.width)
+	strip := m.renderProviderStrip(g)
 	stripHeight := lipgloss.Height(strip)
 
-	paneHeight := contentHeight - stripHeight - 1
-	if paneHeight < 6 {
-		paneHeight = 6
+	gap := 1
+	paneHeight := contentHeight - stripHeight - gap
+	if paneHeight < minPaneHeight {
+		gap = 0
+		paneHeight = contentHeight - stripHeight
 	}
-	accounts := m.renderAccountsPane(inner, paneHeight)
+	if paneHeight < 3 {
+		// Too short for a pane at all; draw the smallest frame and let
+		// the caller clamp. Nothing can make a 6-row terminal useful.
+		paneHeight = 3
+	}
+	accounts := m.renderAccountsPane(g, paneHeight)
+	if gap == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, strip, accounts)
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, strip, "", accounts)
 }
 
 // --- provider strip -------------------------------------------------------
 
-// providerCard is what the strip says about one provider.
-type providerCard struct {
+// stripItem is one provider's slot.
+type stripItem struct {
 	id       string
 	label    string
 	count    int
 	selected bool
 	active   string // active account, "" when none
-	summary  string // tightest windows, or why there are none (unstyled)
-	summaryS string // the same, styled
+	summary  string // tightest windows, or why there are none (plain)
+	summaryS string // the same, coloured
 }
 
-func (m Model) providerCards() []providerCard {
+func (m Model) stripItems() []stripItem {
 	now := time.Now()
-	cards := make([]providerCard, 0, len(m.providers))
+	items := make([]stripItem, 0, len(m.providers))
 	for i, id := range m.providers {
-		c := providerCard{id: id, label: providerLabel(id), count: len(m.profiles[id]), selected: i == m.activeProvider}
+		it := stripItem{id: id, label: providerLabel(id), count: len(m.profiles[id]), selected: i == m.activeProvider}
 		for _, p := range m.profiles[id] {
 			if p.IsActive {
-				c.active = p.Name
+				it.active = p.Name
 			}
 		}
-		c.summary, c.summaryS = m.providerSummary(id, c.active, now)
-		cards = append(cards, c)
+		it.summary, it.summaryS = m.providerSummary(id, it.active, now)
+		items = append(items, it)
 	}
-	return cards
+	return items
 }
 
 // providerSummary is the one-line window summary for a provider's active
@@ -119,7 +185,7 @@ func (m Model) providerSummary(provider, active string, now time.Time) (plain, s
 	muted := m.styles.StatusText
 	if active == "" {
 		if len(m.profiles[provider]) == 0 {
-			return "not logged in", muted.Render("not logged in")
+			return "no accounts yet", muted.Render("no accounts yet")
 		}
 		return "no active account", muted.Render("no active account")
 	}
@@ -141,12 +207,11 @@ func (m Model) providerSummary(provider, active string, now time.Time) (plain, s
 	var plainParts, styledParts []string
 	for _, c := range cells {
 		left := usage.PercentLeft(c.Window)
-		p := fmt.Sprintf("%s %d%%", shortWindowLabel(c.Label), left)
-		plainParts = append(plainParts, p)
-		styledParts = append(styledParts, muted.Render(shortWindowLabel(c.Label))+" "+m.percentStyle(left).Render(fmt.Sprintf("%d%%", left)))
+		short := shortWindowLabel(c.Label)
+		plainParts = append(plainParts, fmt.Sprintf("%s %d%%", short, left))
+		styledParts = append(styledParts, muted.Render(short)+" "+m.percentStyle(left).Render(fmt.Sprintf("%d%%", left)))
 	}
-	sep := muted.Render(" · ")
-	return strings.Join(plainParts, " · "), strings.Join(styledParts, sep)
+	return strings.Join(plainParts, " · "), strings.Join(styledParts, muted.Render(" · "))
 }
 
 // shortWindowLabel abbreviates a window label for the strip: "5-hour" to
@@ -181,243 +246,221 @@ func (m Model) percentStyle(left int) lipgloss.Style {
 	return lipgloss.NewStyle()
 }
 
-func (m Model) renderProviderStrip(inner int) string {
-	ps := m.providerPanel.styles
-	var body string
-	switch m.widthTier() {
-	case tierWide:
-		body = lipgloss.JoinVertical(lipgloss.Left, ps.Title.Render(fmt.Sprintf("Providers (%d)", len(m.providers))), m.renderProviderCards(inner))
-	case tierMedium:
-		body = m.renderProviderChips(inner)
+// slotWidth is a provider's slot width for a strip kind. It depends on
+// the item's text, never on whether it is selected, so slots keep their
+// place as the selection moves.
+func (m Model) slotWidth(kind stripKind, it stripItem, inner int) int {
+	frame := m.stripStyles.Item.GetHorizontalFrameSize()
+	switch kind {
+	case stripCards:
+		return min(providerCardWidth, inner)
+	case stripChips:
+		w := frame + 2 + lipgloss.Width(it.label) + 1 + len(strconv.Itoa(it.count))
+		if it.summary != "" && it.count > 0 {
+			w += 3 + min(lipgloss.Width(it.summary), chipSummaryWidth)
+		}
+		return min(w+1, inner)
 	default:
-		body = m.renderProviderTabRow(inner)
+		return min(frame+2+lipgloss.Width(it.label)+1+len(strconv.Itoa(it.count))+1, inner)
 	}
-	return ps.Border.Width(paneWidth(m.width)).Render(fitWidth(body, inner))
 }
 
-// renderProviderCards lays out three-line cards, wrapping into rows.
-// Providers with no accounts share one muted card unless selected.
-func (m Model) renderProviderCards(inner int) string {
-	ps := m.providerPanel.styles
-	cards := m.providerCards()
-
-	perRow := (inner + 1) / (providerCardWidth + 1)
-	if perRow < 1 {
-		perRow = 1
+// stripWindow decides which slots are visible: the scroll offset kept on
+// the model, moved only as far as needed to keep the selection in view,
+// and how many slots fit from there once the edge indicators have their
+// room.
+func (m Model) stripWindow(kind stripKind, items []stripItem, inner int) (offset, count int) {
+	n := len(items)
+	if n == 0 {
+		return 0, 0
 	}
-	cw := (inner - (perRow - 1)) / perRow
-	if cw < providerCardWidth {
-		cw = inner
-		perRow = 1
+	widths := make([]int, n)
+	for i, it := range items {
+		widths[i] = m.slotWidth(kind, it, inner)
+	}
+	indicator := func(hidden int) int {
+		if hidden <= 0 {
+			return 0
+		}
+		return lipgloss.Width("‹ ") + len(strconv.Itoa(hidden)) + 1 // "‹ 2 " / " 2 ›"
+	}
+	// fit reports how many slots from offset fit, with room for the
+	// indicators the result implies.
+	fit := func(offset int) int {
+		avail := inner - indicator(offset)
+		count, used := 0, 0
+		for i := offset; i < n; i++ {
+			need := widths[i]
+			if count > 0 {
+				need++
+			}
+			if used+need > avail {
+				break
+			}
+			used += need
+			count++
+		}
+		// The right indicator takes its room from the last slot(s).
+		for count > 1 && offset+count < n && used+indicator(n-offset-count) > avail {
+			used -= widths[offset+count-1] + 1
+			count--
+		}
+		if count == 0 {
+			count = 1
+		}
+		return count
 	}
 
-	// Each card is three plain lines cut to the card's text width, then
-	// painted in one style. The style's frame (padding, margins) counts
-	// against the card's width, and the painted line is measured and cut
-	// again if it still overshoots: a row even one column wider than the
-	// pane is soft-wrapped by the border style, which is what interleaved
-	// the second row of cards with the first.
-	paint := func(style lipgloss.Style, text string) string {
-		textW := cw - style.GetHorizontalFrameSize()
-		if textW < 6 {
-			textW = 6
-		}
-		out := style.Render(truncateWithEllipsis(text, textW))
-		for lipgloss.Width(out) > cw && textW > 6 {
-			textW--
-			out = style.Render(truncateWithEllipsis(text, textW))
-		}
-		return padStyled(out, cw, style)
+	sel := m.activeProvider
+	if sel < 0 || sel >= n {
+		sel = 0
 	}
-	textW := cw - ps.Item.GetHorizontalFrameSize()
+	offset = m.stripOffset
+	if offset < 0 || offset >= n {
+		offset = 0
+	}
+	if sel < offset {
+		offset = sel
+	}
+	for count = fit(offset); sel >= offset+count && offset < sel; count = fit(offset) {
+		offset++
+	}
+	// Do not leave slots hidden on the left while the row has room.
+	for offset > 0 && fit(offset-1) >= sel-offset+2 {
+		offset--
+		count = fit(offset)
+	}
+	return offset, count
+}
 
-	// Providers with no accounts are not cards: they go on one muted line
-	// under the grid, so they never read as part of the card above them.
-	var folded []string
-	var rendered []string
-	for _, c := range cards {
-		if c.count == 0 && !c.selected {
-			folded = append(folded, c.label)
-			continue
-		}
-		style := ps.Item
-		if c.selected {
-			style = ps.SelectedItem
-		}
-		// U+25B8, not U+25B6: the latter has an emoji presentation and some
-		// terminals draw it two cells wide, which on a line padded to the
-		// pane's width overflows it.
-		marker := "  "
-		if c.selected {
-			marker = "▸ "
-		}
-		l1 := paint(style, fmt.Sprintf("%s%s (%d)", marker, c.label, c.count))
-		var l2, l3 string
-		switch {
-		case c.count == 0:
-			l2 = paint(style, "no accounts yet")
-			l3 = paint(style, fmt.Sprintf("caam backup %s <email>", c.id))
-		case c.active == "":
-			l2 = paint(style, "no active account")
-			l3 = paint(style, c.summary)
-		default:
-			l2 = paint(style, "● "+c.active)
-			if c.selected || lipgloss.Width(c.summary) > textW {
-				l3 = paint(style, c.summary)
+// settleStrip records the scroll offset the strip will draw with, so it
+// persists across frames and moves only when the selection leaves it.
+func (m *Model) settleStrip() {
+	if m.width <= 0 {
+		return
+	}
+	m.stripOffset, _ = m.stripWindow(m.stripKind(), m.stripItems(), paneGeom(m.width).inner)
+}
+
+func (m Model) renderProviderStrip(g paneGeometry) string {
+	ss := m.stripStyles
+	kind := m.stripKind()
+	items := m.stripItems()
+	offset, count := m.stripWindow(kind, items, g.inner)
+	n := len(items)
+
+	// Slots, each a block of kind.lines() lines at its slot width.
+	blocks := make([][]string, 0, count)
+	for i := offset; i < offset+count && i < n; i++ {
+		blocks = append(blocks, m.renderSlot(kind, items[i], m.slotWidth(kind, items[i], g.inner)))
+	}
+
+	muted := m.styles.StatusText
+	left, right := "", ""
+	if offset > 0 {
+		left = muted.Render("‹ " + strconv.Itoa(offset) + " ")
+	}
+	if rest := n - offset - count; rest > 0 {
+		right = muted.Render(" " + strconv.Itoa(rest) + " ›")
+	}
+	// Indicators sit on the middle line of a card, the only line of a tab.
+	indicatorLine := kind.lines() / 2
+
+	lines := make([]string, kind.lines())
+	for row := range lines {
+		parts := make([]string, 0, 2*len(blocks)+2)
+		if left != "" {
+			if row == indicatorLine {
+				parts = append(parts, left)
 			} else {
-				l3 = padStyled(style.Render("")+c.summaryS, cw, style)
-				if lipgloss.Width(l3) > cw {
-					l3 = paint(style, c.summary)
-				}
+				parts = append(parts, strings.Repeat(" ", lipgloss.Width(left)))
 			}
 		}
-		rendered = append(rendered, lipgloss.JoinVertical(lipgloss.Left, l1, l2, l3))
-	}
-
-	var rows []string
-	for i := 0; i < len(rendered); i += perRow {
-		end := i + perRow
-		if end > len(rendered) {
-			end = len(rendered)
-		}
-		parts := make([]string, 0, 2*(end-i))
-		for j := i; j < end; j++ {
-			if j > i {
+		for j, b := range blocks {
+			if j > 0 {
 				parts = append(parts, " ")
 			}
-			parts = append(parts, rendered[j])
+			parts = append(parts, b[row])
 		}
-		rows = append(rows, fitWidth(lipgloss.JoinHorizontal(lipgloss.Top, parts...), inner))
-	}
-	if len(folded) > 0 {
-		muted := m.styles.StatusText
-		rows = append(rows, fitWidth(muted.Render(truncateWithEllipsis("  not logged in: "+strings.Join(folded, " · "), inner)), inner))
-	}
-	return lipgloss.JoinVertical(lipgloss.Left, rows...)
-}
-
-// fitWidth cuts every line of a block to width so a style with a fixed
-// Width never soft-wraps it. Lines already within width are untouched.
-func fitWidth(block string, width int) string {
-	lines := strings.Split(block, "\n")
-	for i, line := range lines {
-		if lipgloss.Width(line) > width {
-			lines[i] = truncateStyledWidth(line, width)
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-// renderProviderChips lays out one-line chips, wrapping by width.
-func (m Model) renderProviderChips(inner int) string {
-	ps := m.providerPanel.styles
-	var chips []string
-	var widths []int
-	for _, c := range m.providerCards() {
-		style := ps.Item
-		text := fmt.Sprintf("%s %d", c.label, c.count)
-		if c.count == 0 && !c.selected {
-			chips = append(chips, m.styles.StatusText.Render(" "+text+" "))
-			widths = append(widths, lipgloss.Width(text)+2)
-			continue
-		}
-		if c.selected {
-			style = ps.SelectedItem
-			text = "▸ " + text
-		}
-		var chip string
-		if c.summary != "" && c.count > 0 {
-			summary := c.summaryS
-			if c.selected || lipgloss.Width(c.summary) > 28 {
-				summary = style.Render(truncateWithEllipsis(c.summary, 28))
+		line := strings.Join(parts, "")
+		if right != "" && row == indicatorLine {
+			pad := g.inner - lipgloss.Width(line) - lipgloss.Width(right)
+			if pad < 0 {
+				pad = 0
 			}
-			chip = style.Render(" "+text+" ") + m.styles.StatusText.Inherit(style).Render("· ") + summary + style.Render(" ")
-		} else {
-			chip = style.Render(" " + text + " ")
+			line += strings.Repeat(" ", pad) + right
 		}
-		chips = append(chips, chip)
-		widths = append(widths, lipgloss.Width(chip))
+		lines[row] = ansi.Truncate(line, g.inner, "")
 	}
-	var rows []string
-	var row []string
-	used := 0
-	for i, chip := range chips {
-		w := widths[i]
-		if used > 0 && used+1+w > inner {
-			rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, row...))
-			row, used = nil, 0
-		}
-		if used > 0 {
-			row = append(row, " ")
-			used++
-		}
-		row = append(row, chip)
-		used += w
+	body := strings.Join(lines, "\n")
+	if kind == stripCards {
+		body = lipgloss.JoinVertical(lipgloss.Left, ss.Title.MarginBottom(0).Render(fmt.Sprintf("Providers (%d)", n)), body)
 	}
-	if len(row) > 0 {
-		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, row...))
-	}
-	return fitWidth(lipgloss.JoinVertical(lipgloss.Left, rows...), inner)
+	return ss.Border.Width(g.pane).Render(body)
 }
 
-// renderProviderTabRow is the narrow strip: one row of tabs, scrolled so
-// the selected one is visible, with ‹ › marking tabs off either edge.
-func (m Model) renderProviderTabRow(inner int) string {
-	ps := m.providerPanel.styles
-	cards := m.providerCards()
-	labels := make([]string, len(cards))
-	for i, c := range cards {
-		labels[i] = fmt.Sprintf("%s %d", c.label, c.count)
+// renderSlot draws one provider's slot: plain text cut to the slot's text
+// width, painted once in the slot's style, and padded to the slot width
+// in that style's background. Nothing styled is ever measured or cut.
+func (m Model) renderSlot(kind stripKind, it stripItem, width int) []string {
+	ss := m.stripStyles
+	// Every slot style carries Item's frame, so a slot's text starts at the
+	// same column whether it is selected, idle, or empty.
+	pad := ss.Item.GetPaddingLeft()
+	style := ss.Item
+	switch {
+	case it.selected:
+		style = ss.SelectedItem.PaddingLeft(pad)
+	case it.count == 0:
+		style = m.styles.StatusText.PaddingLeft(pad)
 	}
-	width := func(i int) int { return lipgloss.Width(labels[i]) + 2 }
+	textW := width - style.GetHorizontalFrameSize()
+	if textW < 4 {
+		textW = 4
+	}
+	paint := func(text string) string {
+		return padStyled(style.Render(truncateWithEllipsis(text, textW)), width, style.GetBackground())
+	}
+	marker := "  "
+	if it.selected {
+		// U+25B8, not U+25B6: the latter has an emoji presentation and some
+		// terminals draw it two cells wide.
+		marker = "▸ "
+	}
+	name := fmt.Sprintf("%s%s %d", marker, it.label, it.count)
 
-	// Grow a window around the selected tab until it no longer fits.
-	start, end := m.activeProvider, m.activeProvider+1
-	if start < 0 || start >= len(cards) {
-		start, end = 0, min(1, len(cards))
-	}
-	total := width(start) + 4
-	for {
-		grew := false
-		if end < len(cards) && total+1+width(end) <= inner {
-			total += 1 + width(end)
-			end++
-			grew = true
-		}
-		if start > 0 && total+1+width(start-1) <= inner {
-			total += 1 + width(start-1)
-			start--
-			grew = true
-		}
-		if !grew {
-			break
-		}
-	}
-
-	var parts []string
-	if start > 0 {
-		parts = append(parts, m.styles.StatusText.Render("‹ "))
-	} else {
-		parts = append(parts, "  ")
-	}
-	for i := start; i < end; i++ {
-		if i > start {
-			parts = append(parts, " ")
-		}
-		c := cards[i]
+	switch kind {
+	case stripCards:
+		l1 := paint(fmt.Sprintf("%s%s (%d)", marker, it.label, it.count))
+		var l2, l3 string
 		switch {
-		case c.selected:
-			parts = append(parts, ps.SelectedItem.Render(" ▸ "+labels[i]+" "))
-		case c.count == 0:
-			parts = append(parts, m.styles.StatusText.Render(" "+labels[i]+" "))
+		case it.count == 0:
+			l2 = paint("no accounts yet")
+			l3 = paint(fmt.Sprintf("caam backup %s <email>", it.id))
+		case it.active == "":
+			l2 = paint("no active account")
+			l3 = paint(it.summary)
 		default:
-			parts = append(parts, ps.Item.Render(" "+labels[i]+" "))
+			l2 = paint("● " + it.active)
+			if !it.selected && lipgloss.Width(it.summary) <= textW {
+				l3 = padStyled(style.Render("")+it.summaryS, width, style.GetBackground())
+			} else {
+				l3 = paint(it.summary)
+			}
 		}
+		return []string{l1, l2, l3}
+	case stripChips:
+		if it.summary != "" && it.count > 0 {
+			summary := truncateWithEllipsis(it.summary, chipSummaryWidth)
+			if !it.selected && lipgloss.Width(it.summary) <= chipSummaryWidth && lipgloss.Width(name)+3+lipgloss.Width(summary) <= textW {
+				return []string{padStyled(style.Render(name+" · ")+it.summaryS, width, style.GetBackground())}
+			}
+			return []string{paint(name + " · " + summary)}
+		}
+		return []string{paint(name)}
+	default:
+		return []string{paint(name)}
 	}
-	if end < len(cards) {
-		parts = append(parts, m.styles.StatusText.Render(" ›"))
-	}
-	return fitWidth(lipgloss.JoinHorizontal(lipgloss.Top, parts...), inner)
 }
 
 // --- accounts pane --------------------------------------------------------
@@ -430,20 +473,30 @@ type accountColumn struct {
 	styles []lipgloss.Style
 	// window is set for a rate-limit column (its usage column name).
 	window string
-	prio   int // drop order when the table is too wide: higher goes first
+	// prio is the drop order when the table is too wide: higher goes
+	// first; NAME and STATUS (prioKeep) never go.
+	prio int
 }
 
-func (m Model) renderAccountsPane(inner, height int) string {
+const (
+	prioKeep    = 0
+	prioWindow  = 1 // + column rank, so later windows go first
+	prioLastUse = 100
+)
+
+// renderAccountsPane draws the selected provider's accounts in exactly
+// height lines.
+func (m Model) renderAccountsPane(g paneGeometry, height int) string {
 	ps := m.profilesPanel.styles
-	title := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Palette.Accent)
+	inner := g.inner
 	muted := m.styles.StatusText
 	provider := m.currentProvider()
 	profiles := m.profilesPanel.profiles
-	tier := m.widthTier()
+	tier := m.tier()
 	now := time.Now()
 
 	// Title row: "<Provider> accounts" left, freshness right.
-	left := title.Render(providerLabel(provider) + " accounts")
+	left := ps.Title.MarginBottom(0).Render(providerLabel(provider) + " accounts")
 	right := ""
 	if m.hooks.Limits != nil && len(profiles) > 0 {
 		if info := m.selectedProfileInfo(); info != nil {
@@ -461,28 +514,35 @@ func (m Model) renderAccountsPane(inner, height int) string {
 	if gap < 1 {
 		gap = 1
 	}
-	titleRow := left + strings.Repeat(" ", gap) + right
+	titleRow := ansi.Truncate(left+strings.Repeat(" ", gap)+right, inner, "…")
 
+	frame := func(lines []string) string {
+		return ps.Border.Width(g.pane).Height(height - 2).Render(fitWidth(strings.Join(lines, "\n"), inner))
+	}
 	lines := []string{titleRow}
-	bodyHeight := height - 2 - 1 // border, title
 	if len(profiles) == 0 {
 		lines = append(lines, ps.Empty.Render(emptyProfilesMessage(provider)))
-		return ps.Border.Width(paneWidth(m.width)).Height(height - 2).Render(fitWidth(lipgloss.JoinVertical(lipgloss.Left, lines...), inner))
+		return frame(lines)
 	}
 
-	tableRows := bodyHeight - 1 // header
+	// The header and its rule take two lines; a pane too short for that
+	// and a row keeps the header and drops the rule.
+	header := ps.Header
+	headerLines := 2
+	if height-2-1-2 < 1 {
+		header = header.BorderBottom(false)
+		headerLines = 1
+	}
+	tableRows := height - 2 - 1 - headerLines
 	if tableRows < 1 {
 		tableRows = 1
 	}
-
 	cols := m.accountColumns(provider, profiles, tier, inner, now)
-
-	// Header.
 	headerCells := make([]string, len(cols))
 	for i, c := range cols {
 		headerCells[i] = padRight(truncateWithEllipsis(c.header, c.width), c.width)
 	}
-	lines = append(lines, ps.Header.Render(padRight(strings.Join(headerCells, " "), inner)))
+	lines = append(lines, header.Render(padRight(strings.Join(headerCells, " "), inner)))
 
 	// One block per account: its row, and — for the selected one — the
 	// tree of detail lines expanded beneath it. The list scrolls by
@@ -512,7 +572,7 @@ func (m Model) renderAccountsPane(inner, height int) string {
 			cells[j] = cellStyle.Inherit(rowStyle).Render(padRight(truncateWithEllipsis(cell, c.width), c.width))
 		}
 		row := strings.Join(cells, rowStyle.Render(" "))
-		blocks[i] = []string{padStyled(row, inner, rowStyle)}
+		blocks[i] = []string{padStyled(row, inner, rowStyle.GetBackground())}
 		if i == sel {
 			blocks[i] = append(blocks[i], m.expandedLines(provider, &profiles[i], inner, tier, now)...)
 		}
@@ -543,18 +603,18 @@ func (m Model) renderAccountsPane(inner, height int) string {
 	for ; shown < tableRows; shown++ {
 		lines = append(lines, "")
 	}
-
-	return ps.Border.Width(paneWidth(m.width)).Height(height - 2).Render(fitWidth(lipgloss.JoinVertical(lipgloss.Left, lines...), inner))
+	return frame(lines)
 }
 
 // accountColumns builds the table's columns for the tier and fits them to
-// inner by dropping the least important ones from the right.
-func (m Model) accountColumns(provider string, profiles []ProfileInfo, tier widthTier, inner int, now time.Time) []accountColumn {
+// inner by dropping the least important ones: LAST USED first, then the
+// per-model and longer windows from the right, then narrowing NAME.
+func (m Model) accountColumns(provider string, profiles []ProfileInfo, tier layoutTier, inner int, now time.Time) []accountColumn {
 	ps := m.profilesPanel.styles
 	n := len(profiles)
 
-	name := accountColumn{header: "NAME", cells: make([]string, n), styles: make([]lipgloss.Style, n), prio: 0}
-	status := accountColumn{header: "STATUS", cells: make([]string, n), styles: make([]lipgloss.Style, n), prio: 0}
+	name := accountColumn{header: "NAME", cells: make([]string, n), styles: make([]lipgloss.Style, n), prio: prioKeep}
+	status := accountColumn{header: "STATUS", cells: make([]string, n), styles: make([]lipgloss.Style, n), prio: prioKeep}
 	for i, p := range profiles {
 		mark := "  "
 		if p.IsActive {
@@ -571,24 +631,24 @@ func (m Model) accountColumns(provider string, profiles []ProfileInfo, tier widt
 	cols := []accountColumn{name, status}
 
 	if m.hooks.Limits != nil {
-		if tier == tierNarrow {
-			tight := accountColumn{header: "TIGHTEST", cells: make([]string, n), styles: make([]lipgloss.Style, n), prio: 1}
-			for i, p := range profiles {
-				tight.cells[i], tight.styles[i] = m.tightestCell(provider, p.Name, now)
-			}
-			cols = append(cols, tight)
-		} else {
+		if tier.allWindowColumns {
 			for k, col := range m.windowColumnsFor(provider, profiles) {
-				wc := accountColumn{header: col, window: col, cells: make([]string, n), styles: make([]lipgloss.Style, n), prio: 2 + k}
+				wc := accountColumn{header: col, window: col, cells: make([]string, n), styles: make([]lipgloss.Style, n), prio: prioWindow + k}
 				for i, p := range profiles {
 					wc.cells[i], wc.styles[i] = m.windowCell(provider, p.Name, col, tier, now)
 				}
 				cols = append(cols, wc)
 			}
+		} else {
+			tight := accountColumn{header: "TIGHTEST", cells: make([]string, n), styles: make([]lipgloss.Style, n), prio: prioWindow}
+			for i, p := range profiles {
+				tight.cells[i], tight.styles[i] = m.tightestCell(provider, p.Name, now)
+			}
+			cols = append(cols, tight)
 		}
 	}
-	if tier == tierWide {
-		lu := accountColumn{header: "LAST USED", cells: make([]string, n), styles: make([]lipgloss.Style, n), prio: 1}
+	if tier.showLastUsed {
+		lu := accountColumn{header: "LAST USED", cells: make([]string, n), styles: make([]lipgloss.Style, n), prio: prioLastUse}
 		for i, p := range profiles {
 			lu.cells[i] = formatRelativeTime(p.LastUsed)
 			lu.styles[i] = ps.RowMetadata
@@ -606,8 +666,8 @@ func (m Model) accountColumns(provider string, profiles []ProfileInfo, tier widt
 		}
 		cols[i].width = w
 	}
-	if cols[0].width > 34 {
-		cols[0].width = 34
+	if cols[0].width > maxNameWidth {
+		cols[0].width = maxNameWidth
 	}
 
 	total := func() int {
@@ -617,9 +677,8 @@ func (m Model) accountColumns(provider string, profiles []ProfileInfo, tier widt
 		}
 		return t
 	}
-	// Drop by priority (highest first, rightmost among equals) until it fits.
 	for total() > inner && len(cols) > 2 {
-		drop, best := -1, 0
+		drop, best := -1, prioKeep
 		for i := len(cols) - 1; i >= 2; i-- {
 			if cols[i].prio > best {
 				best, drop = cols[i].prio, i
@@ -630,8 +689,7 @@ func (m Model) accountColumns(provider string, profiles []ProfileInfo, tier widt
 		}
 		cols = append(cols[:drop], cols[drop+1:]...)
 	}
-	// Then narrow the name column, never below 12.
-	for total() > inner && cols[0].width > 12 {
+	for total() > inner && cols[0].width > minNameWidth {
 		cols[0].width--
 	}
 	return cols
@@ -666,7 +724,7 @@ func (m Model) windowColumnsFor(provider string, profiles []ProfileInfo) []strin
 }
 
 // windowCell renders one account's figure for a window column.
-func (m Model) windowCell(provider, profile, column string, tier widthTier, now time.Time) (string, lipgloss.Style) {
+func (m Model) windowCell(provider, profile, column string, tier layoutTier, now time.Time) (string, lipgloss.Style) {
 	e, ok := m.limits[limitsKey(provider, profile)]
 	if !ok || (e.loading && e.info == nil) {
 		return "…", m.styles.StatusText
@@ -677,7 +735,7 @@ func (m Model) windowCell(provider, profile, column string, tier widthTier, now 
 		}
 		left := usage.PercentLeft(c.Window)
 		text := fmt.Sprintf("%d%%", left)
-		if tier == tierWide {
+		if tier.longCells {
 			text += " left"
 		}
 		if !c.Window.ResetsAt.IsZero() {
@@ -720,13 +778,13 @@ func (m Model) tightestCell(provider, profile string, now time.Time) (string, li
 
 // expandedLines is the tree of detail lines under the selected account:
 // what its row does not say — the outcome of the last action on it, its
-// windows (narrow tier, where the row shows one), auth and token, where
-// it lives, and what the keys do. Each line hangs off the row with a
-// tree glyph; the last uses └.
-func (m Model) expandedLines(provider string, info *ProfileInfo, inner int, tier widthTier, now time.Time) []string {
+// windows where the row shows only the tightest, auth and token, where it
+// lives, and what the keys do. Each line hangs off the row with a tree
+// glyph; the last uses └.
+func (m Model) expandedLines(provider string, info *ProfileInfo, inner int, tier layoutTier, now time.Time) []string {
 	muted := m.styles.StatusText
-	key := func(k, what string) string { return m.styles.StatusKey.Render(k) + muted.Render(" "+what) }
 	sep := muted.Render(" · ")
+	statusStyle := m.profilesPanel.styles.StatusStyle
 	var items []string
 
 	if m.notice != "" && m.noticeKey == limitsKey(provider, info.Name) {
@@ -740,13 +798,10 @@ func (m Model) expandedLines(provider string, info *ProfileInfo, inner int, tier
 		items = append(items, m.styles.StatusError.Render(fmt.Sprintf("no credential captured — log in as this account, then: caam backup %s %s", provider, info.Name)))
 	}
 
-	// Windows: the narrow tier's row shows only the tightest one, so list
-	// them all here; wider tiers already have them as columns, and only
-	// note when the figures are stale or missing.
 	if e, ok := m.limits[limitsKey(provider, info.Name)]; ok && m.hooks.Limits != nil {
 		cells := usage.WindowsOf(e.info)
 		switch {
-		case tier == tierNarrow && len(cells) > 0:
+		case !tier.allWindowColumns && len(cells) > 0:
 			for _, c := range cells {
 				left := usage.PercentLeft(c.Window)
 				line := muted.Render(padRight(c.Label, 14)) + m.percentStyle(left).Render(fmt.Sprintf("%3d%% left", left))
@@ -771,7 +826,7 @@ func (m Model) expandedLines(provider string, info *ProfileInfo, inner int, tier
 		if h.PlanType != "" {
 			auth = append(auth, muted.Render(h.PlanType))
 		}
-		auth = append(auth, ps(m).StatusStyle(info.HealthStatus).Render(formatStatusLabel(info.HealthStatus)))
+		auth = append(auth, statusStyle(info.HealthStatus).Render(formatStatusLabel(info.HealthStatus)))
 		switch ttl := time.Until(h.TokenExpiresAt); {
 		case h.TokenExpiresAt.IsZero():
 		case ttl > 0:
@@ -782,28 +837,23 @@ func (m Model) expandedLines(provider string, info *ProfileInfo, inner int, tier
 			auth = append(auth, m.styles.StatusError.Render("token expired"))
 		}
 	} else {
-		auth = append(auth, ps(m).StatusStyle(info.HealthStatus).Render(formatStatusLabel(info.HealthStatus)))
+		auth = append(auth, statusStyle(info.HealthStatus).Render(formatStatusLabel(info.HealthStatus)))
 	}
 	items = append(items, strings.Join(auth, sep))
 
-	// Where it lives, and when it was last used (the wide tier's column
-	// already says; the others get it here).
 	if path := m.vaultPathFor(provider, info.Name); path != "" {
 		items = append(items, muted.Render(path))
 	}
-	if tier != tierWide {
+	if !tier.showLastUsed {
 		items = append(items, muted.Render("last used "+formatRelativeTime(info.LastUsed)))
 	}
 
-	// Actions.
-	switch tier {
-	case tierNarrow:
-		items = append(items, strings.Join([]string{key("enter", "switch"), key("b", "re-capture"), key("l", "login"), key("i", "card")}, "  "))
-	case tierMedium:
-		items = append(items, strings.Join([]string{key("enter", "switch"), key("b", "re-capture"), key("l", "login"), key("e", "edit"), key("d", "delete"), key("i", "card")}, "  "))
-	default:
-		items = append(items, strings.Join([]string{key("enter", "switch to this account"), key("b", "re-capture"), key("l", "login/refresh"), key("e", "edit"), key("o", "browser"), key("d", "delete"), key("i", "full card")}, "   "))
+	// Actions, from the tier's list and one legend.
+	legend := make([]string, 0, len(tier.actions))
+	for _, k := range tier.actions {
+		legend = append(legend, m.styles.StatusKey.Render(k)+muted.Render(" "+actionLegend[k]))
 	}
+	items = append(items, strings.Join(legend, "  "))
 
 	lines := make([]string, len(items))
 	for i, item := range items {
@@ -811,14 +861,13 @@ func (m Model) expandedLines(provider string, info *ProfileInfo, inner int, tier
 		if i == len(items)-1 {
 			glyph = "└─ "
 		}
-		lines[i] = truncateStyledWidth("  "+muted.Render(glyph)+item, inner)
+		lines[i] = ansi.Truncate("  "+muted.Render(glyph)+item, inner, "…")
 	}
 	return lines
 }
 
-func ps(m Model) ProfilesPanelStyles { return m.profilesPanel.styles }
-
-// vaultPathFor is the profile's vault directory, shortened with ~.
+// vaultPathFor is the profile's vault directory, shortened with ~ when it
+// is under the default vault.
 func (m Model) vaultPathFor(provider, name string) string {
 	if m.vaultPath == "" {
 		return ""
@@ -832,113 +881,25 @@ func (m Model) vaultPathFor(provider, name string) string {
 
 // --- small rendering helpers ---------------------------------------------
 
-// padStyled pads an already-styled line to width in the row style's
-// background, so a highlight reaches the pane's edge. Only the background
-// is carried: a style with padding or margins would add its frame to the
-// padding run and overshoot the width — which is how every provider card
-// came out one column too wide and a full row of them soft-wrapped.
-func padStyled(s string, width int, style lipgloss.Style) string {
+// padStyled pads an already-styled line to width in a background colour,
+// so a highlight reaches the pane's edge. Only a colour is taken: a
+// style's padding or margins would add their frame to the padding run.
+func padStyled(s string, width int, bg lipgloss.TerminalColor) string {
 	if pad := width - lipgloss.Width(s); pad > 0 {
-		return s + lipgloss.NewStyle().Background(style.GetBackground()).Render(strings.Repeat(" ", pad))
+		return s + lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", pad))
 	}
 	return s
 }
 
-func stripANSI(s string) string {
-	var b strings.Builder
-	inEsc := false
-	for _, r := range s {
-		switch {
-		case inEsc:
-			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
-				inEsc = false
-			}
-		case r == 0x1b:
-			inEsc = true
-		default:
-			b.WriteRune(r)
+// fitWidth cuts every line of a block to width, keeping its styling, so a
+// style with a fixed Width never soft-wraps it. A guard, not a layout
+// step: lines are built to fit before they get here.
+func fitWidth(block string, width int) string {
+	lines := strings.Split(block, "\n")
+	for i, line := range lines {
+		if lipgloss.Width(line) > width {
+			lines[i] = ansi.Truncate(line, width, "…")
 		}
 	}
-	return b.String()
-}
-
-// truncateStyledWidth cuts a styled line to width by visible text.
-func truncateStyledWidth(s string, width int) string {
-	if lipgloss.Width(s) <= width {
-		return s
-	}
-	return truncateWithEllipsis(stripANSI(s), width)
-}
-
-// --- limits prefetch --------------------------------------------------------
-
-// limitsFetchFor starts a fetch for one profile when the cached entry is
-// missing, stale or errored; nil otherwise.
-func (m *Model) limitsFetchFor(provider, profile string) tea.Cmd {
-	if m.hooks.Limits == nil || provider == "" || profile == "" {
-		return nil
-	}
-	if m.limits == nil {
-		m.limits = make(map[string]limitsEntry)
-	}
-	key := limitsKey(provider, profile)
-	e, ok := m.limits[key]
-	if ok && (e.loading || (e.err == nil && time.Since(e.at) < limitsTTL)) {
-		return nil
-	}
-	e.loading = true
-	m.limits[key] = e
-
-	fetch := m.hooks.Limits
-	return func() tea.Msg {
-		ctx, cancel := contextWithTimeout(30 * time.Second)
-		defer cancel()
-		res, err := fetch(ctx, provider, profile)
-		return limitsLoadedMsg{provider: provider, profile: profile, info: res, err: err}
-	}
-}
-
-// limitsPrefetchCmd fetches what the screen shows: every account of the
-// selected provider (the table's columns) and every provider's active
-// account (the strip's summaries). Cached entries cost nothing.
-func (m *Model) limitsPrefetchCmd() tea.Cmd {
-	if m.hooks.Limits == nil {
-		return nil
-	}
-	var cmds []tea.Cmd
-	provider := m.currentProvider()
-	for _, p := range m.profiles[provider] {
-		if c := m.limitsFetchFor(provider, p.Name); c != nil {
-			cmds = append(cmds, c)
-		}
-	}
-	for _, id := range m.providers {
-		for _, p := range m.profiles[id] {
-			if p.IsActive {
-				if c := m.limitsFetchFor(id, p.Name); c != nil {
-					cmds = append(cmds, c)
-				}
-			}
-		}
-	}
-	if len(cmds) == 0 {
-		return nil
-	}
-	return tea.Batch(cmds...)
-}
-
-// limitsRefresh forgets the cached limits the screen shows so the next
-// prefetch asks again.
-func (m *Model) limitsRefresh() {
-	provider := m.currentProvider()
-	for _, p := range m.profiles[provider] {
-		delete(m.limits, limitsKey(provider, p.Name))
-	}
-	for _, id := range m.providers {
-		for _, p := range m.profiles[id] {
-			if p.IsActive {
-				delete(m.limits, limitsKey(id, p.Name))
-			}
-		}
-	}
+	return strings.Join(lines, "\n")
 }

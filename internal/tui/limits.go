@@ -45,8 +45,6 @@ type limitsEntry struct {
 	stale bool
 }
 
-func errorString(s string) error { return errors.New(s) }
-
 func trimFloat(v float64) string {
 	return strconv.FormatFloat(v, 'f', -1, 64)
 }
@@ -61,20 +59,88 @@ type limitsLoadedMsg struct {
 
 func limitsKey(provider, profile string) string { return provider + "/" + profile }
 
-// limitsFetchCmd starts a fetch for the selected profile when the hook is
-// set and the cached entry is missing, stale, or errored; nil otherwise.
-// The model is a value, so the caller must keep the returned model: the
-// loading mark lives in the (shared) map, the map itself is created here.
-func (m *Model) limitsFetchCmd() tea.Cmd {
-	info := m.selectedProfileInfo()
-	if info == nil {
+// limitsErrTTL is how long a failed fetch is left alone before the
+// selection landing on that profile again retries it. Without it a
+// profile whose fetch fails (expired auth, a 403, no network) was retried
+// on every keypress.
+const limitsErrTTL = 20 * time.Second
+
+// limitsFetchFor starts a fetch for one profile when the cached entry is
+// missing or has aged past its TTL (limitsTTL for a result, limitsErrTTL
+// for a failure); nil otherwise.
+func (m *Model) limitsFetchFor(provider, profile string) tea.Cmd {
+	if m.hooks.Limits == nil || provider == "" || profile == "" {
 		return nil
 	}
-	return m.limitsFetchFor(m.currentProvider(), info.Name)
+	if m.limits == nil {
+		m.limits = make(map[string]limitsEntry)
+	}
+	key := limitsKey(provider, profile)
+	e, ok := m.limits[key]
+	if ok {
+		ttl := limitsTTL
+		if e.err != nil {
+			ttl = limitsErrTTL
+		}
+		if e.loading || time.Since(e.at) < ttl {
+			return nil
+		}
+	}
+	e.loading = true
+	m.limits[key] = e
+
+	fetch := m.hooks.Limits
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		res, err := fetch(ctx, provider, profile)
+		return limitsLoadedMsg{provider: provider, profile: profile, info: res, err: err}
+	}
 }
 
-func contextWithTimeout(d time.Duration) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), d)
+// limitsPrefetchCmd fetches what the screen shows: every account of the
+// selected provider (the table's columns) and every provider's active
+// account (the strip's summaries). Cached entries cost nothing.
+func (m *Model) limitsPrefetchCmd() tea.Cmd {
+	if m.hooks.Limits == nil {
+		return nil
+	}
+	var cmds []tea.Cmd
+	provider := m.currentProvider()
+	for _, p := range m.profiles[provider] {
+		if c := m.limitsFetchFor(provider, p.Name); c != nil {
+			cmds = append(cmds, c)
+		}
+	}
+	for _, id := range m.providers {
+		for _, p := range m.profiles[id] {
+			if p.IsActive {
+				if c := m.limitsFetchFor(id, p.Name); c != nil {
+					cmds = append(cmds, c)
+				}
+			}
+		}
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
+}
+
+// limitsRefresh forgets the cached limits the screen shows so the next
+// prefetch asks again.
+func (m *Model) limitsRefresh() {
+	provider := m.currentProvider()
+	for _, p := range m.profiles[provider] {
+		delete(m.limits, limitsKey(provider, p.Name))
+	}
+	for _, id := range m.providers {
+		for _, p := range m.profiles[id] {
+			if p.IsActive {
+				delete(m.limits, limitsKey(id, p.Name))
+			}
+		}
+	}
 }
 
 // applyLimitsLoaded stores a fetch result. A failed fetch keeps the
@@ -87,7 +153,7 @@ func (m *Model) applyLimitsLoaded(msg limitsLoadedMsg) {
 	prev := m.limits[key]
 	entry := limitsEntry{info: msg.info, err: msg.err, at: time.Now()}
 	if msg.err == nil && msg.info != nil && msg.info.Error != "" {
-		entry.err = errorString(msg.info.Error)
+		entry.err = errors.New(msg.info.Error)
 	}
 	if entry.err != nil && (entry.info == nil || len(usage.WindowsOf(entry.info)) == 0) && prev.info != nil {
 		entry.info = prev.info

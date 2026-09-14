@@ -787,21 +787,26 @@ Piped or run with `--once`, `caam monitor` prints the plain table it always
 did; `--format brief|json|alerts` are unchanged.
 
 The main TUI (`caam` with no arguments) is split top to bottom. A strip of
-providers runs across the top — one card per provider with its account
-count, active account and tightest windows (`5h 53% · wk 44% · Fable 0%`)
-— and ←/→ move along it. The selected provider's accounts fill the pane
-below, one row each, with every rate-limit window the provider reports as
-a column (`53% left · 6:10 PM`) and the active account marked `●`. ↑/↓
-move between them, and the selected account expands in place, like a
-tree node, with the lines its row cannot hold: auth, plan, health and
-token, its vault path, and what the keys do. Move on and it folds up
+providers runs across the top as a tab strip: every provider has a slot,
+in a fixed order, and ←/→ (or tab) move the selection along it. The slots
+sit in one row that scrolls sideways; when providers are off either edge
+the strip says how many (`‹ 2`, `3 ›`), and the row scrolls only when the
+selection would leave it, so nothing shifts under the cursor. A provider
+with accounts shows its count, active account and tightest windows
+(`5h 53% · wk 44% · Fable 0%`); one without shows the `caam backup`
+command that would capture one. The selected provider's accounts fill the
+pane below, one row each, with every rate-limit window the provider
+reports as a column (`53% left · 6:10 PM`) and the active account marked
+`●`. ↑/↓ move between them, and the selected account expands in place,
+like a tree node, with the lines its row cannot hold: auth, plan, health
+and token, its vault path, and what the keys do. Move on and it folds up
 again, so a provider with many accounts is one list to scroll through:
 
 ```
-╭─ Providers ──────────────────────────────────────────────────────────────╮
-│ ▶ Claude (2)                   Codex (1)                  Antigravity (1) │
-│ ● chris@gascity.com            ● ops+chris-claude-1@…     ● chris@gascity │
-│ 5h 53% · wk 44% · Fable 0%     wk 30%                     auth expired    │
+╭─ Providers (9) ──────────────────────────────────────────────────────────╮
+│ ▸ Claude (2)          Codex (1)             Antigravity (1)               │
+│ ● chris@gascity.com   ● ops+chris-claude-1… ● chris@gascity.com     5 › │
+│ 5h 53% · wk 44% · …   wk 30%                auth expired (re-login)      │
 ╰──────────────────────────────────────────────────────────────────────────╯
 ╭─ Claude accounts ──────────────────────────────────── limits as of 17:08 ─╮
 │ NAME                 STATUS     5-HOUR             WEEKLY        FABLE     │
@@ -815,26 +820,26 @@ again, so a provider with many accounts is one list to scroll through:
 
 `i` opens the full card as an overlay and `r` refreshes the limits shown.
 Limits are fetched for the accounts on screen — the selected provider's
-rows and every provider's active account — at most once a minute each,
-through the same credential resolution as `caam limits`; a failed fetch
-keeps the last known figures, marked `*`, and says so in the expansion.
-Enter switches through the same re-capture-first path as `caam
-activate`, and the outcome — switched, refused, failed — is the first
-line of the expansion, not only a status-bar message. A profile that
-holds settings but no credential (captured before the keychain bridge,
-or from a logged-out state) is listed as `No credential`, cannot be
-activated from the TUI, and is refused by `caam activate` too:
-installing it would change nothing while reporting success.
+rows and every provider's active account — at most once a minute each
+(a failed fetch is left alone for twenty seconds), through the same
+credential resolution as `caam limits`; a failed fetch keeps the last
+known figures, marked `*`, and says so in the expansion. Keys typed into
+search or a dialog never start a fetch. Enter switches through the same
+re-capture-first path as `caam activate`, and the outcome — switched,
+refused, failed — is the first line of the expansion, not only a
+status-bar message. A profile that holds settings but no credential
+(captured before the keychain bridge, or from a logged-out state) is
+listed as `No credential`, cannot be activated from the TUI, and is
+refused by `caam activate` too: installing it would change nothing while
+reporting success.
 
 The layout follows the terminal. At 150 columns and up the provider
-cards are three lines tall and every window column shows with LAST USED;
-from 100 columns the cards collapse to one-line chips that wrap and the
-window cells shorten; below that the providers become a single row of
-tabs scrolled around the selected one and the table keeps only STATUS and
-the TIGHTEST window, with every window listed in the expansion instead.
-The strip's height is fixed by its content, the accounts pane takes the
-remaining rows and scrolls by account so the expansion stays in view, and
-the status bar is always the last line.
+slots are three-line cards and every window column shows with LAST USED;
+from 100 columns the slots are one-line chips and the window cells
+shorten; below that the slots are plain tabs and the table keeps only
+STATUS and the TIGHTEST window, with every window listed in the
+expansion instead. A short terminal turns the cards into tabs so the
+accounts pane keeps its rows, and the status bar is always the last line.
 
 ### Uninstall Notes
 

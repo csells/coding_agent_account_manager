@@ -20,9 +20,6 @@ func TestNew(t *testing.T) {
 	if m.activeProvider != 0 {
 		t.Errorf("expected activeProvider 0, got %d", m.activeProvider)
 	}
-	if m.providerPanel == nil {
-		t.Error("expected providerPanel to be initialized")
-	}
 }
 
 func TestNewWithProviders(t *testing.T) {
@@ -97,17 +94,6 @@ func TestCurrentProvider(t *testing.T) {
 	}
 }
 
-func TestProviderPanelView(t *testing.T) {
-	p := NewProviderPanel(DefaultProviders())
-	p.SetProfileCounts(map[string]int{"claude": 2, "codex": 1, "gemini": 0})
-	p.SetActiveProvider(0)
-
-	view := p.View()
-	if view == "" {
-		t.Error("expected non-empty view")
-	}
-}
-
 func TestCapitalizeFirst(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -127,19 +113,6 @@ func TestCapitalizeFirst(t *testing.T) {
 	}
 }
 
-func TestProfilesPanelBasic(t *testing.T) {
-	p := NewProfilesPanel()
-	if p == nil {
-		t.Fatal("expected non-nil profiles panel")
-	}
-
-	p.SetProvider("claude")
-	view := p.View()
-	if view == "" {
-		t.Error("expected non-empty view")
-	}
-}
-
 func TestProfilesPanelWithProfiles(t *testing.T) {
 	p := NewProfilesPanel()
 	p.SetProvider("codex")
@@ -151,11 +124,6 @@ func TestProfilesPanelWithProfiles(t *testing.T) {
 		{Name: "personal@gmail.com", AuthMode: "oauth", LoggedIn: true, Locked: true, LastUsed: time.Now().Add(-1 * time.Hour)},
 	}
 	p.SetProfiles(profiles)
-
-	view := p.View()
-	if view == "" {
-		t.Error("expected non-empty view")
-	}
 
 	// Test selection
 	if p.GetSelected() != 0 {
@@ -707,90 +675,6 @@ func TestMainViewWithFullLayout(t *testing.T) {
 	}
 }
 
-// TestIsCompactLayout tests the isCompactLayout method.
-func TestIsCompactLayout(t *testing.T) {
-	tests := []struct {
-		width, height int
-		expected      bool
-	}{
-		{0, 0, false},    // Zero dimensions
-		{50, 30, true},   // Narrow width
-		{150, 20, true},  // Short height
-		{150, 40, false}, // Full size
-		{93, 30, true},   // Just under width threshold
-		{94, 23, true},   // Just under height threshold
-		{94, 24, false},  // Exactly at thresholds
-	}
-
-	for _, tc := range tests {
-		t.Run(fmt.Sprintf("%dx%d", tc.width, tc.height), func(t *testing.T) {
-			m := New()
-			m.width = tc.width
-			m.height = tc.height
-
-			result := m.isCompactLayout()
-			if result != tc.expected {
-				t.Errorf("isCompactLayout() with %dx%d = %v, expected %v",
-					tc.width, tc.height, result, tc.expected)
-			}
-		})
-	}
-}
-
-func TestLayoutModeTiny(t *testing.T) {
-	m := New()
-	m.width = minTinyWidth - 1
-	m.height = 40
-	if m.layoutMode() != layoutTiny {
-		t.Errorf("expected tiny layout for narrow width, got %v", m.layoutMode())
-	}
-
-	m.width = 120
-	m.height = minTinyHeight - 1
-	if m.layoutMode() != layoutTiny {
-		t.Errorf("expected tiny layout for short height, got %v", m.layoutMode())
-	}
-}
-
-func TestFullLayoutSpecWidths(t *testing.T) {
-	m := New()
-	m.width = minFullWidth() + 20
-	m.height = minFullHeight + 10
-
-	spec := m.fullLayoutSpec(20)
-	available := m.width - (layoutGap * 2)
-	total := spec.ProviderWidth + spec.ProfilesWidth + spec.DetailWidth
-
-	if spec.ProviderWidth < minProviderWidth {
-		t.Errorf("provider width below min: %d", spec.ProviderWidth)
-	}
-	if spec.ProfilesWidth < minProfilesWidth {
-		t.Errorf("profiles width below min: %d", spec.ProfilesWidth)
-	}
-	if spec.DetailWidth < minDetailWidth {
-		t.Errorf("detail width below min: %d", spec.DetailWidth)
-	}
-	if total > available {
-		t.Errorf("panel widths exceed available: %d > %d", total, available)
-	}
-}
-
-func TestCompactLayoutSpecTinyDetailHeights(t *testing.T) {
-	m := New()
-	spec := m.compactLayoutSpec(layoutTiny, 30, 1)
-	if !spec.ShowDetail {
-		t.Error("expected detail to be enabled for tall tiny layout")
-	}
-	if spec.ProfilesHeight <= 0 {
-		t.Error("expected profiles height to be positive in tiny layout")
-	}
-
-	spec = m.compactLayoutSpec(layoutTiny, 10, 1)
-	if spec.ShowDetail {
-		t.Error("expected detail to be disabled for short tiny layout")
-	}
-}
-
 // TestProjectContextLine tests the projectContextLine method.
 func TestProjectContextLine(t *testing.T) {
 	m := New()
@@ -1112,40 +996,13 @@ func TestValidateAndPreviewImport(t *testing.T) {
 	}
 }
 
-// TestRenderProfileList tests the renderProfileList method.
-func TestRenderProfileList(t *testing.T) {
-	m := New()
-	m.profiles = map[string][]Profile{}
-
-	// Test with empty profiles
-	view := m.renderProfileList()
-	if !strings.Contains(view, "No profiles saved") {
-		t.Errorf("expected 'No profiles saved' for empty list, got %q", view)
-	}
-
-	// Test with profiles
-	m.profiles = map[string][]Profile{
-		"claude": {
-			{Name: "test@example.com", IsActive: true},
-			{Name: "work@company.com", IsActive: false},
-		},
-	}
-	view = m.renderProfileList()
-	if !strings.Contains(view, "test@example.com") {
-		t.Errorf("expected profile name in view, got %q", view)
-	}
-	if !strings.Contains(view, "work@company.com") {
-		t.Errorf("expected second profile name in view, got %q", view)
-	}
-}
-
 // TestRenderStatusBar tests the renderStatusBar method.
 func TestRenderStatusBar(t *testing.T) {
 	m := New()
 
 	// Test with zero width
 	m.width = 0
-	view := m.renderStatusBar(layoutSpec{Mode: layoutFull})
+	view := m.renderStatusBar()
 	if view != "" {
 		t.Errorf("expected empty string for zero width, got %q", view)
 	}
@@ -1153,7 +1010,7 @@ func TestRenderStatusBar(t *testing.T) {
 	// Test with status message
 	m.width = 100
 	m.statusMsg = "Test status"
-	view = m.renderStatusBar(layoutSpec{Mode: layoutFull})
+	view = m.renderStatusBar()
 	if !strings.Contains(view, "Test status") {
 		t.Errorf("expected status message in view, got %q", view)
 	}
@@ -1161,7 +1018,7 @@ func TestRenderStatusBar(t *testing.T) {
 	// Test with narrow width (< 70)
 	m.statusMsg = ""
 	m.width = 50
-	view = m.renderStatusBar(layoutSpec{Mode: layoutCompact})
+	view = m.renderStatusBar()
 	// Narrow view shows only provider hint, not quit
 	if !strings.Contains(view, "provider") {
 		t.Errorf("expected 'provider' hint in narrow view, got %q", view)
@@ -1169,20 +1026,20 @@ func TestRenderStatusBar(t *testing.T) {
 
 	// Test with medium width (70-99)
 	m.width = 80
-	view = m.renderStatusBar(layoutSpec{Mode: layoutCompact})
+	view = m.renderStatusBar()
 	if !strings.Contains(view, "provider") {
 		t.Errorf("expected 'provider' hint in medium view, got %q", view)
 	}
 
 	// Test with full width (>= 100)
 	m.width = 120
-	view = m.renderStatusBar(layoutSpec{Mode: layoutFull})
+	view = m.renderStatusBar()
 	// Updated: status bar now shows "provider" not "switch provider" for conciseness
 	if !strings.Contains(view, "provider") {
 		t.Errorf("expected 'provider' hint in full view, got %q", view)
 	}
-	if !strings.Contains(view, "activate") {
-		t.Errorf("expected 'activate' hint in full view, got %q", view)
+	if !strings.Contains(view, "switch") {
+		t.Errorf("expected 'switch' hint in full view, got %q", view)
 	}
 }
 
@@ -1193,7 +1050,7 @@ func TestStatusBarSeveritySnapshots(t *testing.T) {
 	m.width = 120
 
 	// Status bar now has 3 segments: mode indicator | center message | key hints
-	// The format is: " CLAUDE  message  [ tab  :provider] [ enter  :activate] [ /  :search]"
+	// The format is: " CLAUDE  message  [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ /  :search]"
 	tests := []struct {
 		name    string
 		message string
@@ -1203,26 +1060,26 @@ func TestStatusBarSeveritySnapshots(t *testing.T) {
 			name:    "success",
 			message: "Exported",
 			want: "" +
-				"  CLAUDE   Exported                                                 [ tab  :provider] [ enter  :activate] [ /  :search]",
+				"  CLAUDE   Exported                                  [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ /  :search]",
 		},
 		{
 			name:    "warning",
 			message: "No profile selected",
 			want: "" +
-				"  CLAUDE   No profile selected                                      [ tab  :provider] [ enter  :activate] [ /  :search]",
+				"  CLAUDE   No profile selected                       [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ /  :search]",
 		},
 		{
 			name:    "error",
 			message: "Export failed",
 			want: "" +
-				"  CLAUDE   Export failed                                            [ tab  :provider] [ enter  :activate] [ /  :search]",
+				"  CLAUDE   Export failed                             [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ /  :search]",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m.statusMsg = tt.message
-			got := normalizeStatusSnapshot(m.renderStatusBar(layoutSpec{Mode: layoutFull}))
+			got := normalizeStatusSnapshot(m.renderStatusBar())
 			if got != tt.want {
 				t.Fatalf("status snapshot mismatch\n--- got ---\n%s\n--- want ---\n%s", got, tt.want)
 			}
@@ -1373,52 +1230,6 @@ func TestFormatSQLiteSince(t *testing.T) {
 	}
 }
 
-// TestUpdateProviderCounts tests the updateProviderCounts method.
-func TestUpdateProviderCounts(t *testing.T) {
-	m := New()
-	m.profiles = map[string][]Profile{
-		"claude": {{Name: "a"}, {Name: "b"}},
-		"codex":  {{Name: "c"}},
-	}
-	m.providerPanel = NewProviderPanel([]string{"claude", "codex"})
-
-	// Should not panic
-	m.updateProviderCounts()
-}
-
-// TestSyncProviderPanel tests the syncProviderPanel method.
-func TestSyncProviderPanel(t *testing.T) {
-	m := New()
-	m.activeProvider = 1
-	m.providerPanel = NewProviderPanel(DefaultProviders())
-
-	// Should not panic
-	m.syncProviderPanel()
-}
-
-// TestRenderProviderTabsWithCounts tests renderProviderTabs with different widths.
-func TestRenderProviderTabsWithCounts(t *testing.T) {
-	m := New()
-	m.profiles = map[string][]Profile{
-		"claude": {{Name: "a"}, {Name: "b"}},
-		"codex":  {{Name: "c"}},
-	}
-
-	// Test with narrow width (counts hidden)
-	m.width = 60
-	view := m.renderProviderTabs()
-	if view == "" {
-		t.Error("expected non-empty tabs view")
-	}
-
-	// Test with wide width (counts shown)
-	m.width = 100
-	view = m.renderProviderTabs()
-	if !strings.Contains(view, "2") { // Should show count
-		// This may depend on styling, so just check it renders
-	}
-}
-
 // TestToastCreation tests creating new toasts.
 func TestToastCreation(t *testing.T) {
 	toast := NewToast("Test message", StatusSuccess)
@@ -1541,24 +1352,22 @@ func TestStatusModeIndicator(t *testing.T) {
 func TestStatusKeyHints(t *testing.T) {
 	m := New()
 
-	layout := layoutSpec{Mode: layoutFull}
-
 	// Test narrow width
 	m.width = 60
-	hints := m.statusKeyHints(layout)
+	hints := m.statusKeyHints()
 	plainHints := ansi.Strip(hints)
 	plainHints = strings.ReplaceAll(plainHints, " ", "")
-	if !strings.Contains(plainHints, "[tab:provider]") {
-		t.Errorf("expected '[tab:provider]' in narrow hints, got %q", plainHints)
+	if !strings.Contains(plainHints, "[←/→:provider]") {
+		t.Errorf("expected '[←/→:provider]' in narrow hints, got %q", plainHints)
 	}
 
 	// Test wide width
 	m.width = 120
-	hints = m.statusKeyHints(layout)
+	hints = m.statusKeyHints()
 	plainHints = ansi.Strip(hints)
 	plainHints = strings.ReplaceAll(plainHints, " ", "")
-	if !strings.Contains(plainHints, "[enter:activate]") {
-		t.Errorf("expected '[enter:activate]' in wide hints, got %q", plainHints)
+	if !strings.Contains(plainHints, "[enter:switch]") {
+		t.Errorf("expected '[enter:switch]' in wide hints, got %q", plainHints)
 	}
 	if !strings.Contains(plainHints, "[/:search]") {
 		t.Errorf("expected '[/:search]' in wide hints, got %q", plainHints)
@@ -1596,10 +1405,8 @@ func TestRenderStatusBarThreeSegments(t *testing.T) {
 	m.width = 100
 	m.height = 30
 
-	layout := layoutSpec{Mode: layoutFull}
-
 	// Render status bar
-	bar := m.renderStatusBar(layout)
+	bar := m.renderStatusBar()
 	plainBar := ansi.Strip(bar)
 
 	// Should contain mode indicator (provider name)
@@ -1614,15 +1421,15 @@ func TestRenderStatusBarThreeSegments(t *testing.T) {
 
 	// Add a status message and verify layout
 	m.statusMsg = "Test status"
-	bar = m.renderStatusBar(layout)
+	bar = m.renderStatusBar()
 	plainBar = ansi.Strip(bar)
 
 	// Should still have mode and hints
 	if !strings.Contains(plainBar, "CLAUDE") {
 		t.Errorf("expected CLAUDE mode indicator with status message, got %q", plainBar)
 	}
-	if !strings.Contains(plainBar, "tab") {
-		t.Errorf("expected 'tab' hint with status message, got %q", plainBar)
+	if !strings.Contains(plainBar, "provider") {
+		t.Errorf("expected 'provider' hint with status message, got %q", plainBar)
 	}
 	// Should have status message
 	if !strings.Contains(plainBar, "Test status") {

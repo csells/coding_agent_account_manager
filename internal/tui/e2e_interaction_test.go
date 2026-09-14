@@ -718,11 +718,6 @@ func TestE2E_ProviderPanelSync(t *testing.T) {
 	m.profiles = profiles
 	m.syncProfilesPanel()
 
-	// Provider panel should have correct counts
-	if m.providerPanel == nil {
-		t.Fatal("Expected provider panel to be initialized")
-	}
-
 	h.Log.Info("Provider panel sync verified")
 }
 

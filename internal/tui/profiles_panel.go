@@ -36,13 +36,13 @@ type ProfileInfo struct {
 	Renewable bool
 }
 
-// ProfilesPanel renders the center panel showing profiles for the selected provider.
+// ProfilesPanel is the selection cursor over the selected provider's
+// accounts, and the styles the accounts table draws with; the table itself
+// is rendered by the vertical layout (renderAccountsPane).
 type ProfilesPanel struct {
 	provider string
 	profiles []ProfileInfo
 	selected int
-	width    int
-	height   int
 	styles   ProfilesPanelStyles
 }
 
@@ -190,20 +190,6 @@ func (s ProfilesPanelStyles) StatusStyle(status health.HealthStatus) lipgloss.St
 		return s.StatusBad
 	default:
 		return s.StatusMuted
-	}
-}
-
-// statusBadgeStyle returns the badge style for a given health status.
-func (p *ProfilesPanel) statusBadgeStyle(status health.HealthStatus) lipgloss.Style {
-	switch status {
-	case health.StatusHealthy:
-		return p.styles.StatusBadgeOK
-	case health.StatusWarning:
-		return p.styles.StatusBadgeWarn
-	case health.StatusCritical:
-		return p.styles.StatusBadgeBad
-	default:
-		return p.styles.StatusBadge.Foreground(p.styles.StatusMuted.GetForeground())
 	}
 }
 
@@ -361,209 +347,6 @@ func (p *ProfilesPanel) MoveDown() {
 	if p.selected < len(p.profiles)-1 {
 		p.selected++
 	}
-}
-
-// SetSize sets the panel dimensions.
-func (p *ProfilesPanel) SetSize(width, height int) {
-	p.width = width
-	p.height = height
-}
-
-// View renders the profiles panel.
-func (p *ProfilesPanel) View() string {
-	// Title
-	title := p.styles.Title.Render(providerLabel(p.provider) + " Profiles")
-
-	if len(p.profiles) == 0 {
-		empty := p.styles.Empty.Render(emptyProfilesMessage(p.provider))
-		inner := lipgloss.JoinVertical(lipgloss.Left, title, empty)
-		if p.width > 0 {
-			return p.styles.Border.Width(p.width - 2).Render(inner)
-		}
-		return p.styles.Border.Render(inner)
-	}
-
-	availableWidth := p.width
-	if availableWidth > 0 {
-		availableWidth = availableWidth - 4
-	}
-
-	layout := "full"
-	if availableWidth > 0 {
-		switch {
-		case availableWidth < 56:
-			layout = "narrow"
-		case availableWidth < 80:
-			layout = "compact"
-		}
-	}
-
-	colWidths := struct {
-		name     int
-		auth     int
-		status   int
-		lastUsed int
-		account  int
-	}{
-		name:     18,
-		auth:     8,
-		status:   14,
-		lastUsed: 12,
-		account:  16,
-	}
-
-	switch layout {
-	case "compact":
-		colWidths.name = 22
-		colWidths.status = 14
-		colWidths.lastUsed = 12
-		colWidths.auth = 0
-		colWidths.account = 0
-	case "narrow":
-		colWidths.name = 26
-		colWidths.status = 12
-		colWidths.lastUsed = 0
-		colWidths.auth = 0
-		colWidths.account = 0
-	}
-
-	columnCount := 2
-	if layout == "full" {
-		columnCount = 5
-	} else if layout == "compact" {
-		columnCount = 3
-	}
-
-	sumWidths := colWidths.name + colWidths.status
-	if layout == "full" {
-		sumWidths += colWidths.auth + colWidths.lastUsed + colWidths.account
-	} else if layout == "compact" {
-		sumWidths += colWidths.lastUsed
-	}
-	sumWidths += columnCount - 1
-	if availableWidth > 0 && sumWidths > availableWidth {
-		reduce := sumWidths - availableWidth
-		minName := 12
-		if layout == "full" {
-			minName = 10
-		}
-		if colWidths.name-reduce < minName {
-			colWidths.name = minName
-		} else {
-			colWidths.name -= reduce
-		}
-	}
-
-	// Header row
-	headerCells := []string{padRight("Name", colWidths.name)}
-	if layout == "full" {
-		headerCells = append(headerCells, padRight("Auth", colWidths.auth))
-	}
-	headerCells = append(headerCells, padRight("Status", colWidths.status))
-	if layout != "narrow" {
-		headerCells = append(headerCells, padRight("Last Used", colWidths.lastUsed))
-	}
-	if layout == "full" {
-		headerCells = append(headerCells, padRight("Account", colWidths.account))
-	}
-	header := p.styles.Header.Render(strings.Join(headerCells, " "))
-
-	// Profile rows with zebra striping
-	var rows []string
-	for i, prof := range p.profiles {
-		// The row's own style (selection, zebra stripe) is applied to every
-		// cell rather than wrapped around the assembled line: a cell's own
-		// ANSI reset would otherwise end the row background at the first
-		// styled cell, which on the active row is the green dot — so the
-		// selection highlight covered two characters of it and the rest of
-		// the row looked unselected.
-		var rowStyle lipgloss.Style
-		switch {
-		case i == p.selected:
-			rowStyle = p.styles.SelectedRow
-		case i%2 == 1:
-			// Alternate rows get subtle background
-			rowStyle = p.styles.RowAlt
-		default:
-			rowStyle = p.styles.Row
-		}
-		inRow := func(s lipgloss.Style) lipgloss.Style { return s.Inherit(rowStyle) }
-		rowBG := rowStyle.GetBackground()
-		_, noBG := rowBG.(lipgloss.NoColor)
-		hasBG := rowBG != nil && !noBG
-
-		// Left icon indicator for active profile
-		indicator := rowStyle.Render("  ")
-		if prof.IsActive {
-			indicator = inRow(p.styles.ActiveIndicator).Render("● ")
-		}
-
-		// Status badge with icon and consistent styling. The badge paints
-		// its own surface; on a highlighted row it takes the row's instead.
-		statusText := formatTUIStatus(&prof)
-		statusBadgeStyle := p.statusBadgeStyle(prof.HealthStatus)
-		if hasBG {
-			statusBadgeStyle = statusBadgeStyle.Background(rowBG)
-		}
-		if prof.Locked && layout == "full" {
-			statusText += " " + inRow(p.styles.LockIcon).Render("🔒")
-		}
-
-		// Last used - relative time (right-aligned in display)
-		lastUsed := formatRelativeTime(prof.LastUsed)
-
-		// Account (truncate with ellipsis if needed)
-		account := prof.Account
-		if account == "" {
-			account = "-"
-		}
-		account = truncateWithEllipsis(account, colWidths.account)
-
-		// Build row cells with proper padding
-		// Row anatomy: [Icon] [Label] [Metadata...] [Status Badge]
-		paddedName := padRight(formatNameWithBadge(prof.Name, prof.Badge, colWidths.name-2), colWidths.name-2)
-		paddedStatusText := padRight(statusText, colWidths.status)
-		renderedStatus := statusBadgeStyle.Render(paddedStatusText)
-
-		metadata := inRow(p.styles.RowMetadata)
-		rowParts := []string{indicator + rowStyle.Render(paddedName)}
-		if layout == "full" {
-			// Auth mode as secondary metadata
-			rowParts = append(rowParts, metadata.Render(padRight(prof.AuthMode, colWidths.auth)))
-		}
-		rowParts = append(rowParts, renderedStatus)
-		if layout != "narrow" {
-			// Right-aligned time value
-			rowParts = append(rowParts, metadata.Render(padRight(lastUsed, colWidths.lastUsed)))
-		}
-		if layout == "full" {
-			rowParts = append(rowParts, metadata.Render(padRight(account, colWidths.account)))
-		}
-
-		sep := rowStyle.Render(" ")
-		rowStr := strings.Join(rowParts, sep)
-		if prof.ProjectDefault && layout == "full" {
-			rowStr += sep + inRow(p.styles.ProjectBadge).Render("[PROJECT DEFAULT]")
-		}
-		// Carry the background to the panel's edge so a highlighted row
-		// reads as one bar, not as a run of coloured cells.
-		if pad := (p.width - 4) - lipgloss.Width(rowStr); hasBG && pad > 0 {
-			rowStr += rowStyle.Render(strings.Repeat(" ", pad))
-		}
-		rows = append(rows, rowStr)
-	}
-
-	// Combine header and rows
-	content := lipgloss.JoinVertical(lipgloss.Left, append([]string{header}, rows...)...)
-
-	// Combine title and content
-	inner := lipgloss.JoinVertical(lipgloss.Left, title, content)
-
-	// Apply border
-	if p.width > 0 {
-		return p.styles.Border.Width(p.width - 2).Render(inner)
-	}
-	return p.styles.Border.Render(inner)
 }
 
 func emptyProfilesMessage(provider string) string {
