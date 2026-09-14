@@ -128,3 +128,31 @@ func TestRobotAct_SwitchesThroughTheCore(t *testing.T) {
 	}
 	r.assertSwitchedToB(t, "robot act")
 }
+
+// The dashboard's capture files the identity too, for the providers whose
+// credential carries none (Antigravity, Kimi): the account name it was
+// given is the email the login reported, and status/ls read it from the
+// profile's meta.json exactly as after `caam backup`.
+func TestCaptureLiveAccount_RecordsTheIdentityForKimi(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", filepath.Join(tmp, "kimi"))
+	t.Setenv("CAAM_KEYCHAIN", "0")
+	credPath := filepath.Join(tmp, "kimi", "credentials", "kimi-code.json")
+	if err := os.MkdirAll(filepath.Dir(credPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(credPath, []byte(`{"access_token":"SYNTHETIC","refresh_token":"SYNTHETIC","expires_at":4102444800}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldVault := vault
+	vault = authfile.NewVault(filepath.Join(tmp, "vault"))
+	t.Cleanup(func() { vault = oldVault })
+
+	if err := captureLiveAccount("kimi", "k@example.com"); err != nil {
+		t.Fatalf("captureLiveAccount: %v", err)
+	}
+	id := getVaultIdentity("kimi", "k@example.com")
+	if id == nil || id.Email != "k@example.com" {
+		t.Fatalf("identity after capture = %+v, want k@example.com recorded in meta.json", id)
+	}
+}

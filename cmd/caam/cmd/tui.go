@@ -129,7 +129,18 @@ func captureLiveAccount(provider, name string) error {
 	if vault == nil {
 		vault = authfile.NewVault(authfile.DefaultVaultPath())
 	}
-	return vault.Backup(get(), name)
+	if err := vault.Backup(get(), name); err != nil {
+		return err
+	}
+	// Antigravity's and Kimi's credentials name nobody; the account name
+	// the login reported is the identity, recorded in meta.json as `caam
+	// backup` does, so status and ls can read it.
+	if (provider == "agy" || provider == "kimi") && strings.Contains(name, "@") {
+		if err := vault.RecordProfileIdentity(provider, name, name); err != nil {
+			return fmt.Errorf("captured %s/%s but could not record its identity: %w", provider, name, err)
+		}
+	}
+	return nil
 }
 
 // captureSignedInAccount re-captures the tool's signed-in account into the
