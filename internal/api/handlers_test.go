@@ -1,9 +1,15 @@
 package api
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
+	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 )
 
 func TestFormatDuration(t *testing.T) {
@@ -75,6 +81,64 @@ func TestGetProfilesWithUnknownTool(t *testing.T) {
 	_, err := h.GetProfiles("unknown-tool")
 	if err == nil || !strings.Contains(err.Error(), "unknown tool") {
 		t.Errorf("GetProfiles() expected unknown tool error, got %v", err)
+	}
+}
+
+// TestAPIUsage_LastUsedIsFromTheActivityLog: /usage reported the health
+// probe's time as last_used. The activity log says when an account was
+// last used; the probe time is last_checked. Every tool caam manages is
+// listed, not three.
+func TestAPIUsage_LastUsedIsFromTheActivityLog(t *testing.T) {
+	dir := t.TempDir()
+	vault := authfile.NewVault(filepath.Join(dir, "vault"))
+	for _, p := range [][2]string{{"codex", "work"}, {"kimi", "k1"}} {
+		if err := os.MkdirAll(vault.ProfilePath(p[0], p[1]), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	checked := time.Date(2026, 9, 13, 17, 0, 0, 0, time.UTC)
+	store := health.NewStorage(filepath.Join(dir, "health.json"))
+	for _, p := range [][2]string{{"codex", "work"}, {"kimi", "k1"}} {
+		if err := store.UpdateProfile(p[0], p[1], &health.ProfileHealth{LastChecked: checked}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	used := checked.Add(-3 * time.Hour)
+	db, err := caamdb.OpenAt(filepath.Join(dir, "caam.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.LogEvent(caamdb.Event{Type: caamdb.EventActivate, Provider: "codex", ProfileName: "work", Timestamp: used}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := NewHandlers(vault, store, db).GetUsage("")
+	if err != nil {
+		t.Fatalf("GetUsage: %v", err)
+	}
+	byKey := map[string]UsageEntry{}
+	for _, e := range resp.Usage {
+		byKey[e.Tool+"/"+e.Profile] = e
+	}
+	work, ok := byKey["codex/work"]
+	if !ok {
+		t.Fatalf("codex/work missing from %+v", resp.Usage)
+	}
+	if work.LastUsed != used.Format(time.RFC3339) {
+		t.Errorf("last_used = %q, want the activity log's %s", work.LastUsed, used.Format(time.RFC3339))
+	}
+	if work.LastChecked != checked.Format(time.RFC3339) {
+		t.Errorf("last_checked = %q, want the probe's %s", work.LastChecked, checked.Format(time.RFC3339))
+	}
+	k1, ok := byKey["kimi/k1"]
+	if !ok {
+		t.Fatalf("kimi/k1 missing: /usage must list every tool, got %+v", resp.Usage)
+	}
+	if k1.LastUsed != "" {
+		t.Errorf("an account the log never saw has no last_used, got %q", k1.LastUsed)
 	}
 }
 

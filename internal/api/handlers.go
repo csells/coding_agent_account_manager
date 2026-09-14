@@ -8,6 +8,7 @@ import (
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/identity"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider"
 )
 
 // Handlers provides the business logic for API endpoints.
@@ -80,13 +81,16 @@ type UsageResponse struct {
 	Usage  []UsageEntry `json:"usage"`
 }
 
-// UsageEntry represents usage for a profile.
+// UsageEntry represents usage for a profile. LastUsed is when the activity
+// log last saw the account switched to, away from, or logged in;
+// LastChecked is when its health was last probed. Both RFC 3339.
 type UsageEntry struct {
-	Tool       string `json:"tool"`
-	Profile    string `json:"profile"`
-	TotalCalls int    `json:"total_calls"`
-	ErrorCount int    `json:"error_count"`
-	LastUsed   string `json:"last_used,omitempty"`
+	Tool        string `json:"tool"`
+	Profile     string `json:"profile"`
+	TotalCalls  int    `json:"total_calls"`
+	ErrorCount  int    `json:"error_count"`
+	LastUsed    string `json:"last_used,omitempty"`
+	LastChecked string `json:"last_checked,omitempty"`
 }
 
 // CoordinatorsResponse is the response for GET /coordinators.
@@ -309,10 +313,19 @@ func (h *Handlers) GetUsage(tool string) (*UsageResponse, error) {
 		return nil, fmt.Errorf("vault not available")
 	}
 
-	// Get all health data
-	toolsToCheck := []string{"codex", "claude", "gemini"}
+	// Every tool caam manages, in the strip's order.
+	toolsToCheck := provider.DisplayOrder()
 	if tool != "" {
 		toolsToCheck = []string{tool}
+	}
+
+	// The activity log says when each account was last used; the health
+	// probe's time is a different fact and is reported as such.
+	var lastUsed map[string]map[string]time.Time
+	if h.db != nil {
+		if used, err := h.db.LastUsed(); err == nil {
+			lastUsed = used
+		}
 	}
 
 	for _, t := range toolsToCheck {
@@ -333,8 +346,11 @@ func (h *Handlers) GetUsage(tool string) (*UsageResponse, error) {
 				TotalCalls: 0, // Not tracked in ProfileHealth
 				ErrorCount: ph.ErrorCount1h,
 			}
+			if ts, ok := lastUsed[t][name]; ok {
+				entry.LastUsed = ts.Format(time.RFC3339)
+			}
 			if !ph.LastChecked.IsZero() {
-				entry.LastUsed = ph.LastChecked.Format(time.RFC3339)
+				entry.LastChecked = ph.LastChecked.Format(time.RFC3339)
 			}
 			resp.Usage = append(resp.Usage, entry)
 		}
