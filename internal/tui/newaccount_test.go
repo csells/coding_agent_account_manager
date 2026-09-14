@@ -152,3 +152,32 @@ func TestNewAccount_FailedLoginIsReported(t *testing.T) {
 		t.Fatalf("a failed login must not capture: status=%q captured=%v", m.statusMsg, h.captured)
 	}
 }
+
+// A status line about one provider (here a login failure) must not follow
+// the user to the next tab: it belongs to the provider it was written under. Providers with no
+// accounts are the hard case, since their account selection is the same
+// (empty) key on both sides of the move.
+func TestNewAccount_ErrorLeavesWithTheTab(t *testing.T) {
+	h := &newAccountHooks{}
+	m := modelWithTwoClaudeProfiles(h.hooks(t))
+	m.profiles["cursor"] = nil
+	m.profiles["opencode"] = nil
+	m.providers = []string{"claude", "cursor", "opencode"}
+	m.activeProvider = 1
+	m.syncProfilesPanel()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m = updated.(Model)
+	if !strings.Contains(m.statusMsg, "Cannot log in to Cursor") {
+		t.Fatalf("status = %q, want the Cursor login failure", m.statusMsg)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = updated.(Model)
+	if m.currentProvider() != "opencode" {
+		t.Fatalf("provider = %q, want opencode", m.currentProvider())
+	}
+	if m.statusMsg != "" {
+		t.Fatalf("status = %q after moving to another tab, want it cleared", m.statusMsg)
+	}
+}

@@ -244,6 +244,14 @@ func (m Model) selectionKey() string {
 	return limitsKey(m.currentProvider(), info.Name)
 }
 
+// focusKey identifies what the user is looking at: the selected provider
+// and, when it has one, the selected profile. Unlike selectionKey it
+// changes when moving between providers that have no accounts, so a
+// message about one empty provider does not follow the user to the next.
+func (m Model) focusKey() string {
+	return m.currentProvider() + "\x00" + m.selectionKey()
+}
+
 // setNotice records an action outcome to show on the detail card.
 func (m *Model) setNotice(provider, profile, text string, isErr bool) {
 	m.notice = text
@@ -840,15 +848,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		before := m.selectionKey()
+		before := m.focusKey()
+		beforeStatus := m.statusMsg
 		model, cmd := m.handleKeyPress(msg)
-		// A key may have moved the selection; fetch that profile's limits
-		// if the cached ones are missing or stale, and drop a notice that
-		// was about the profile the selection left.
+		// A key may have moved the focus; fetch that profile's limits if
+		// the cached ones are missing or stale, and drop the messages
+		// that were about the provider or profile the focus left.
 		if next, ok := model.(Model); ok {
-			if next.selectionKey() != before && next.noticeKey != next.selectionKey() {
-				next.notice = ""
-				next.noticeKey = ""
+			if next.focusKey() != before {
+				if next.noticeKey != next.selectionKey() {
+					next.notice = ""
+					next.noticeKey = ""
+				}
+				// A status line the key itself just wrote stays.
+				if next.statusMsg == beforeStatus {
+					next.statusMsg = ""
+				}
 			}
 			next.settleStrip()
 			// Only the list itself reads limits; keys typed into search
