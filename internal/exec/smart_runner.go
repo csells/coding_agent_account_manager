@@ -460,7 +460,8 @@ func (r *SmartRunner) handleRateLimit(ctx context.Context) {
 	// 4. Switch through the shared core: the outgoing profile is
 	// re-captured first (a failure refuses the switch — the vault must never
 	// be left with a stale copy of a rotating family), then the next
-	// profile's credential is installed.
+	// profile's credential is installed. The core's own refresh gate and
+	// safety config apply.
 	r.setState(SwappingAuth)
 	if _, err := switcher.Switch(ctx, r.vault, fileSet, switcher.Options{Profile: nextProfile, DB: r.db, Source: "handoff"}); err != nil {
 		r.failWithManual("auth swap failed: %v", err)

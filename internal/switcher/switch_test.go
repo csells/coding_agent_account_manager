@@ -2,9 +2,12 @@ package switcher
 
 import (
 	"context"
-	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/testutil"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +15,8 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/refresh"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/testutil"
 )
 
 // codexWorld is a Codex home and a vault in temp dirs: Account a is
@@ -32,7 +37,10 @@ func newCodexWorld(t *testing.T) *codexWorld {
 		t.Fatal(err)
 	}
 	w := &codexWorld{vault: authfile.NewVault(filepath.Join(tmp, "vault")), fileSet: authfile.CodexAuthFiles()}
-	base := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC).Unix()
+	// Tokens issued now are valid for an hour, so the core's refresh gate
+	// (which reads the vault copy's expiry) stays shut unless a test
+	// expires a token on purpose.
+	base := time.Now().Unix()
 	w.stale = testutil.SyntheticCodexAuth(t, "a@example.com", "a-stale", base)
 	w.rotated = testutil.SyntheticCodexAuth(t, "a@example.com", "a-rotated", base+3600)
 	w.incoming = testutil.SyntheticCodexAuth(t, "b@example.com", "b", base)
@@ -218,6 +226,55 @@ func TestSwitch_RefreshesOnlyAnExpiredIncomingToken(t *testing.T) {
 	res, err = Switch(context.Background(), w.vault, w.fileSet, Options{Profile: "a", Refresher: fr, HealthOf: healthOf})
 	if err != nil || !res.Refreshed || len(fr.calls) != 1 || fr.calls[0] != "codex/a" {
 		t.Fatalf("an expired incoming token should be refreshed first: res=%+v calls=%v err=%v", res, fr.calls, err)
+	}
+}
+
+// With no refresher or health reader given, the core supplies its own: an
+// expired incoming vault token is refreshed at the token endpoint before
+// it is installed, exactly as the CLI's switch does, so the wrappers, the
+// HTTP API and the smart runner are under the same gate.
+func TestSwitch_DefaultsSupplyTheRefreshGate(t *testing.T) {
+	w := newCodexWorld(t)
+	t.Setenv("CAAM_HOME", t.TempDir()) // the default health store and SPM config
+	expired := testutil.SyntheticCodexAuth(t, "b@example.com", "b-expired", time.Now().Add(-2*time.Hour).Unix())
+	w.write(t, filepath.Join(w.vault.ProfilePath("codex", "b"), "auth.json"), expired)
+
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(wr http.ResponseWriter, r *http.Request) {
+		requests++
+		_ = json.NewEncoder(wr).Encode(map[string]any{"access_token": "fresh-access", "refresh_token": "fresh-refresh", "expires_in": 3600})
+	}))
+	t.Cleanup(srv.Close)
+	old := refresh.CodexTokenURL
+	refresh.CodexTokenURL = srv.URL
+	t.Cleanup(func() { refresh.CodexTokenURL = old })
+
+	res, err := Switch(context.Background(), w.vault, w.fileSet, Options{Profile: "b"})
+	if err != nil || !res.Refreshed || requests != 1 {
+		t.Fatalf("an expired incoming token should be refreshed once by default: res=%+v requests=%d err=%v", res, requests, err)
+	}
+	if live := w.read(t, w.livePath); !strings.Contains(live, "fresh-access") {
+		t.Fatalf("the refreshed token should be what was installed, got %s", live)
+	}
+
+	// A valid token is left alone: the gate, not the default, decides.
+	requests = 0
+	if res, err := Switch(context.Background(), w.vault, w.fileSet, Options{Profile: "a"}); err != nil || res.Refreshed || requests != 0 {
+		t.Fatalf("a valid incoming token must not be spent: res=%+v requests=%d err=%v", res, requests, err)
+	}
+}
+
+// With no Config given, the core reads the user's SPM config rather than
+// the stock defaults: auto_backup_before_switch: always files the live
+// credential before every switch.
+func TestSwitch_DefaultsLoadTheUsersSafetyConfig(t *testing.T) {
+	w := newCodexWorld(t)
+	home := t.TempDir()
+	t.Setenv("CAAM_HOME", home)
+	w.write(t, filepath.Join(home, "config.yaml"), []byte("safety:\n  auto_backup_before_switch: always\n"))
+	res, err := Switch(context.Background(), w.vault, w.fileSet, Options{Profile: "b"})
+	if err != nil || res.AutoBackup == "" {
+		t.Fatalf("the user's safety config should apply to a switch with no Config: res=%+v err=%v", res, err)
 	}
 }
 

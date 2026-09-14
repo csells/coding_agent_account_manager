@@ -89,9 +89,7 @@ func Switch(ctx context.Context, vault *authfile.Vault, fileSet authfile.AuthFil
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if opts.Config == nil {
-		opts.Config = config.DefaultSPMConfig()
-	}
+	opts = withDefaults(opts, vault)
 	res := &Result{}
 	res.PreviousProfile, _ = vault.ActiveProfile(fileSet)
 
@@ -165,6 +163,55 @@ func Switch(ctx context.Context, vault *authfile.Vault, fileSet authfile.AuthFil
 		LogSwitch(opts.DB, fileSet.Tool, res.PreviousProfile, opts.Profile, map[string]any{"previous_profile": res.PreviousProfile, "selection_source": opts.Source})
 	}
 	return res, nil
+}
+
+// withDefaults fills what the caller left unset with what every switch
+// gets: the user's safety config, and the refresh gate — the token
+// refresher and the health reader it decides with — so the wrappers, the
+// HTTP API and the smart runner refresh an expired incoming token under
+// the same gate as the CLI, and never otherwise.
+func withDefaults(opts Options, vault *authfile.Vault) Options {
+	if opts.Config == nil {
+		cfg, err := config.LoadSPMConfig()
+		if err != nil {
+			cfg = config.DefaultSPMConfig()
+		}
+		opts.Config = cfg
+	}
+	if opts.Refresher == nil || opts.HealthOf == nil {
+		store := health.NewStorage("")
+		if opts.Refresher == nil {
+			opts.Refresher = RefresherFunc(func(ctx context.Context, tool, profile string) error {
+				return refresh.RefreshProfile(ctx, tool, profile, vault, store)
+			})
+		}
+		if opts.HealthOf == nil {
+			opts.HealthOf = func(tool, profile string) *health.ProfileHealth {
+				return vaultHealth(vault, store, tool, profile)
+			}
+		}
+	}
+	return opts
+}
+
+// vaultHealth is the incoming Account's health as the refresh gate sees
+// it: the stored record, with the expiry read from the vault copy of its
+// credential (the live file belongs to the outgoing Account).
+func vaultHealth(vault *authfile.Vault, store *health.Storage, tool, profile string) *health.ProfileHealth {
+	ph := &health.ProfileHealth{}
+	if stored, err := store.GetProfile(tool, profile); err == nil && stored != nil {
+		ph = stored
+	}
+	dir := vault.ProfilePath(tool, profile)
+	if tool == "gemini" {
+		_ = authfile.MigrateGeminiVaultDir(dir)
+	}
+	if info, err := health.ParseVaultExpiry(tool, dir); err == nil && info != nil && !info.ExpiresAt.IsZero() {
+		ph.TokenExpiresAt = info.ExpiresAt
+		ph.SelfRefreshing = info.SelfRefreshing
+		ph.TokenRenewable = info.Renewable
+	}
+	return ph
 }
 
 // LogSwitch records a switch in the activity log: a deactivation of the
