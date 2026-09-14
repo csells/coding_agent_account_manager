@@ -201,7 +201,7 @@ func (m Model) providerSummary(provider, active string, now time.Time) (plain, s
 	if !ok || (e.loading && e.info == nil) {
 		return "fetching…", muted.Render("fetching…")
 	}
-	cells := usage.WindowsOf(e.info)
+	cells := e.cells
 	if len(cells) == 0 {
 		msg := "no windows reported"
 		if e.err != nil {
@@ -813,7 +813,7 @@ func (m Model) windowCell(provider, profile, column string, tier layoutTier, now
 	if !ok || (e.loading && e.info == nil) {
 		return "…", "…", m.styles.StatusText
 	}
-	for _, c := range usage.WindowsOf(e.info) {
+	for _, c := range e.cells {
 		if c.Column != column {
 			continue
 		}
@@ -846,7 +846,7 @@ func (m Model) tightestCell(provider, profile string, now time.Time) (figure, re
 	}
 	w := e.info.MostConstrainedWindow()
 	label := ""
-	for _, c := range usage.WindowsOf(e.info) {
+	for _, c := range e.cells {
 		if c.Window == w {
 			label = shortWindowLabel(c.Label)
 		}
@@ -878,7 +878,7 @@ func (m Model) expandedLines(provider string, info *ProfileInfo, inner int, tier
 	}
 
 	if e, ok := m.limits[limitsKey(provider, info.Name)]; ok && m.hooks.Limits != nil {
-		cells := usage.WindowsOf(e.info)
+		cells := e.cells
 		switch {
 		case len(cells) > 0:
 			for _, c := range cells {

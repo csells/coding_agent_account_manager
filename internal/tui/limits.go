@@ -49,7 +49,10 @@ const limitsTTL = 60 * time.Second
 
 // limitsEntry is the cached result for one provider/profile.
 type limitsEntry struct {
-	info    *usage.UsageInfo
+	info *usage.UsageInfo
+	// cells is info's windows in display order (usage.WindowsOf), worked
+	// out once when the entry is stored; every frame reads it.
+	cells   []usage.WindowCell
 	err     error
 	at      time.Time
 	loading bool
@@ -164,12 +167,13 @@ func (m *Model) applyLimitsLoaded(msg limitsLoadedMsg) {
 	}
 	key := limitsKey(msg.provider, msg.profile)
 	prev := m.limits[key]
-	entry := limitsEntry{info: msg.info, err: msg.err, at: time.Now()}
+	entry := limitsEntry{info: msg.info, cells: usage.WindowsOf(msg.info), err: msg.err, at: time.Now()}
 	if msg.err == nil && msg.info != nil && msg.info.Error != "" {
 		entry.err = errors.New(msg.info.Error)
 	}
-	if entry.err != nil && (entry.info == nil || len(usage.WindowsOf(entry.info)) == 0) && prev.info != nil {
+	if entry.err != nil && len(entry.cells) == 0 && prev.info != nil {
 		entry.info = prev.info
+		entry.cells = prev.cells
 		entry.at = prev.at
 		entry.stale = true
 	}
@@ -190,7 +194,7 @@ func (m Model) limitsInfoFor(provider, profile string) *LimitsInfo {
 		out.Err = e.err.Error()
 	}
 	now := time.Now()
-	for _, c := range usage.WindowsOf(e.info) {
+	for _, c := range e.cells {
 		out.Rows = append(out.Rows, LimitRow{
 			Label:    c.Label,
 			Value:    usage.WindowLeftText(c.Window, now),
