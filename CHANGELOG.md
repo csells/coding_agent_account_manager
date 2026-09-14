@@ -71,8 +71,12 @@ logging in again. Architecture and the facts behind it:
   pool monitor only tends cooldowns on its tick and its explicit
   `RefreshAll` takes expired profiles only; `caam refresh --all --force` is
   refused.
-- **One vocabulary, "left, resets at" everywhere**: `provider.Label` names
-  providers by product on every surface (Antigravity, Kimi Code, OpenCode,
+- **One vocabulary, "left, resets at" everywhere**: every string a person
+  reads in the dashboard, the CLI help and errors calls the thing with
+  accounts an agent ("Agents (5)", "Log in to which agent?", `caam add
+  <agent>`, "unknown agent"); flag names, JSON keys and the HTTP API keep
+  their contract. `provider.Label` names
+  agents by product on every surface (Antigravity, Kimi Code, OpenCode,
   zcode, Claude Code, Codex, Gemini, Grok, Cursor); the `limits` table,
   `--rank`, `--forecast`, `monitor`'s brief/table/alerts and `robot limits`
   say what is left and when it resets, like the dashboard; `ls` lists

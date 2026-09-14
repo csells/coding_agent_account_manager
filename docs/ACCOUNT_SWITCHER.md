@@ -264,7 +264,11 @@ that run.
 
 - The five Codex Accounts revoked before §2 was understood need one `n`
   login each; they are filed under the same names.
-- `.golangci.yml` needs migrating to the v2 config format.
+- `.golangci.yml` still needs migrating to the v2 config format. Measured
+  2026-09-14 on a scratch copy: the migrated config reports 12 staticcheck
+  findings, 11 of them style quick-fixes in upstream code and one real nil
+  dereference in the monitor dashboard, since fixed. Committing the
+  migrated config is Chris's call (`docs/SURFACE_PLAN.md`, R6).
 - Which "pro" model becomes Antigravity's primary Window is decided by usage
   then name, so with everything untouched it is `gemini-2.5-pro` rather than
   a 3.x model.
@@ -275,7 +279,10 @@ that run.
   gaps between the dashboard and the rest of caam and the plan that closed
   them. Gaps 1 (one switch core), 2 (one refresh gate, no timers), 3
   (every login is capture → clear → login) and 5 (the dashboard's edges)
-  and 4 (one vocabulary and "left, resets at" in every output) are done.
+  and 4 (one vocabulary and "left, resets at" in every output) are done,
+  and so is round 2 (robot hints from the registry, Kimi refreshes its own
+  token, switch-then-resume, "agent" in every string a person reads, this
+  handoff). What remains waits on Chris (R6).
 - A running session holds its credential in memory, so switching the
   file under it is not enough. The smart handoff (`caam run` with handoff
   enabled), the coordinator and `caam wezterm switch-all` therefore
