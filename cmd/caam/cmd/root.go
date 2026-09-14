@@ -1292,29 +1292,6 @@ func lastUsedByProfile() map[string]map[string]time.Time {
 	return used
 }
 
-// formatLastUsed says how long ago an account was used, in the words the
-// dashboard uses: never, now, 5m ago, 3h ago, 2d ago, 1w ago, or the date.
-func formatLastUsed(t, now time.Time) string {
-	if t.IsZero() {
-		return "never"
-	}
-	d := now.Sub(t)
-	switch {
-	case d < time.Minute:
-		return "now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	case d < 7*24*time.Hour:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-	case d < 30*24*time.Hour:
-		return fmt.Sprintf("%dw ago", int(d.Hours()/(24*7)))
-	default:
-		return t.Format("Jan 2, 2006")
-	}
-}
-
 type lsHealth struct {
 	Status     string `json:"status"`
 	ExpiresAt  string `json:"expires_at,omitempty"`
@@ -1454,7 +1431,7 @@ func runLs(cmd *cobra.Command, args []string) error {
 
 				email, plan := formatIdentityDisplay(id)
 				healthStr := health.FormatHealthStatus(status, ph, formatOpts)
-				fmt.Printf("%s%-20s  %-24s  %-10s  %-10s  %s\n", marker, displayName, email, plan, formatLastUsed(lastUsed, now), healthStr)
+				fmt.Printf("%s%-20s  %-24s  %-10s  %-10s  %s\n", marker, displayName, email, plan, tui.FormatRelativeTime(lastUsed, now), healthStr)
 			}
 		}
 
@@ -1556,7 +1533,7 @@ func runLs(cmd *cobra.Command, args []string) error {
 
 				email, plan := formatIdentityDisplay(id)
 				healthStr := health.FormatHealthStatus(status, ph, formatOpts)
-				fmt.Printf("  %s%-20s  %-24s  %-10s  %-10s  %s\n", marker, displayName, email, plan, formatLastUsed(lastUsed, now), healthStr)
+				fmt.Printf("  %s%-20s  %-24s  %-10s  %-10s  %s\n", marker, displayName, email, plan, tui.FormatRelativeTime(lastUsed, now), healthStr)
 			}
 		}
 	}
