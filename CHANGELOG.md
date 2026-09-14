@@ -38,11 +38,33 @@ logging in again. Architecture and the facts behind it:
 ### Changed
 
 - **Every switch re-captures the outgoing account first** and aborts when it
-  cannot (`--force` overrides); `caam activate`, the TUI and `monitor` share
-  one switch core.
-- **A login is a logout first**: the dashboard's `n` clears the vaulted live
-  credential before running the tool's login, because `codex login` revokes
-  the session it finds, refresh-token family and vault copy included.
+  cannot (`--force` overrides). One core, `internal/switcher.Switch`, is
+  called by `caam activate`, `next`, `run` (and `--precheck`), `workspace`,
+  `robot act`, the wrap retry loop, the HTTP API, the TUI and `monitor`;
+  none of them restores a vault copy on its own any more.
+- **A login is a logout first**: `internal/switcher.Login` vaults the
+  signed-in account (or files an unknown live credential as a backup),
+  clears the live credential so the tool's login has nothing to revoke,
+  runs the login, and files the new session under the account that signed
+  in. The dashboard's `n` and `caam add` both use it (`add` no longer files
+  the outgoing account as `_auto_backup_` or deletes files around the
+  keychain). The smart handoff no longer injects a login on top of a
+  restored credential; the coordinator and `wezterm login-all` capture the
+  signed-in account before injecting `/login` and refuse when they cannot;
+  isolated `caam login` for Claude Code and Antigravity is refused on macOS
+  while the keychain bridge is on; `caam watch` no longer files auto-named
+  profiles.
+- **One refresh gate, no timers**: `refresh.NeedsRefresh` (expired, or just
+  refused) replaces `ShouldRefresh`, which refreshed valid tokens and refused
+  expired ones. The daemon no longer refreshes on its five-minute timer; the
+  pool monitor only tends cooldowns on its tick and its explicit
+  `RefreshAll` takes expired profiles only; `caam refresh --all --force` is
+  refused.
+- **Dashboard edges**: help teaches `n`; the export dialog names its
+  directory and that the bundle is plaintext; empty states say "press n";
+  the name dialog speaks of login; `l` moves right; the palette has New
+  Login, Full Card and Search; the sync panel's `s` confirms in a dialog;
+  the status bar honours `show_key_hints`.
 - **Antigravity limits** resolve the Code Assist project via `loadCodeAssist`
   under the `antigravity` User-Agent before calling `retrieveUserQuota`;
   the empty-body call was refused with "no valid license (#3501)".

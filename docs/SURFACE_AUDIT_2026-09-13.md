@@ -4,8 +4,10 @@ A read-only audit of caam's CLI, output formats, HTTP API and the parts of the
 TUI the account-switcher work did not touch, checked against the principles in
 `ACCOUNT_SWITCHER.md` and the credential rules in `AGENTS.md`. Every
 file:line was read at the time; the five most consequential (1, 2, 3, 6, 9)
-were re-verified by hand. **Nothing here is fixed yet.** Chris decides what
-changes; this file is the list.
+were re-verified by hand. Status (2026-09-14): findings 1–15 (credential
+paths) and 26–32 (the dashboard's edges) are fixed on the `account-switcher`
+branch per `SURFACE_PLAN.md` gaps 1, 2, 3 and 5; findings 16–25 (output
+formats) are gap 4, in progress.
 
 Rule numbers refer to `AGENTS.md` "Credentials — the rules the switcher lives
 by": (1) re-capture before you replace, (2) a login is a logout first,

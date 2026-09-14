@@ -30,11 +30,13 @@ account this way). Two consequences drive the design:
   The agent refreshes in place; the vault still holds the token it started
   with. So before anything replaces the live credential — a Switch, a Login —
   the outgoing Active Account is **re-captured** into the vault first, and a
-  failed re-capture aborts the operation (`authfile.Vault.ResnapshotOutgoing`,
-  `cmd/caam/cmd/activate.go: performSwitch`, `--force` to override). Every
-  path that switches — `caam activate`, the dashboard's Enter, `caam monitor`'s
-  Enter — goes through the same `switchProfile` core so this cannot be
-  forgotten in one of them.
+  failed re-capture aborts the operation (`internal/switcher.Switch`, built on
+  `authfile.Vault.ResnapshotOutgoing`; `Force` to override). Every path that
+  switches — `caam activate`, `next`, `run`, `workspace`, `robot act`, the
+  wrap retry loop, the HTTP API, the dashboard's Enter, `caam monitor`'s
+  Enter — calls that one core, so this cannot be forgotten in one of them.
+  `performSwitch` in `cmd/caam/cmd/activate.go` is only the interactive
+  wrapper (printing, the stealth delay, the Codex daemon reload).
 - **A vault copy that has been rotated past cannot be revived.** Neither caam
   nor the agent can refresh it; only a new Login mints a new family. So the
   switcher never "refreshes" a credential casually (see §6), and never lets
@@ -228,15 +230,19 @@ path, rows whose fetch fails keep their last good numbers. Piped or with
 
 ## 6. Refreshing a token is spending it
 
-`caam refresh` and the dashboard's `r` use `internal/refresh`, which for
-Codex and Gemini presents the vault copy's refresh token to get a fresh
-access token and stores the new family in the vault (and, if the Account is
-Active and the live file has not moved, restores it to the live file too).
-Every such refresh consumes the refresh token. So the dashboard refreshes a
-token only for a reason — the health record says it has expired, or the last
-limits fetch was refused as unauthorized — and never on a plain keypress.
-Claude Code, Kimi, Antigravity, zcode and OpenCode renew their own; a
-refresh cannot revive a revoked family (§2).
+`caam refresh`, `caam activate` and the dashboard's `r` use
+`internal/refresh`, which for Codex and Gemini presents the vault copy's
+refresh token to get a fresh access token and stores the new family in the
+vault (and, if the Account is Active and the live file has not moved,
+restores it to the live file too). Every such refresh consumes the refresh
+token. So there is one gate, `refresh.NeedsRefresh`: expired, or just
+refused by the provider — never early, never on a timer, never on a plain
+keypress. The daemon keeps the vault-backup schedule and does not refresh;
+the pool monitor tends cooldowns on its tick, and its explicit `RefreshAll`
+takes expired profiles only — a refused refresh is terminal until a person
+acts. `caam refresh --all --force` is refused. Claude Code, Kimi,
+Antigravity, zcode and OpenCode renew their own; a refresh cannot revive a
+revoked family (§2).
 
 ## 7. Verifying changes
 
@@ -262,8 +268,13 @@ that run.
   a 3.x model.
 - The parent handoff (`caam-handoff.md`) still describes the mission in its
   pre-product framing; ADR-0001 says it should be rewritten.
-- `docs/SURFACE_AUDIT_2026-09-13.md` lists the rest of caam's surface that
-  does not yet follow §1–§6: eight other switch paths that restore without
-  re-capturing, two timers that spend refresh tokens, `caam add` and the
-  smart handoff running a login in the unsafe order, and output surfaces
-  that still say "used %" and raw ids. None of it is fixed yet.
+- `docs/SURFACE_AUDIT_2026-09-13.md` and `docs/SURFACE_PLAN.md` record the
+  gaps between the dashboard and the rest of caam and the plan that closed
+  them. Gaps 1 (one switch core), 2 (one refresh gate, no timers), 3
+  (every login is capture → clear → login) and 5 (the dashboard's edges)
+  are done; gap 4 (one vocabulary and "left, resets at" in every output)
+  is in progress on its own branch.
+- The smart handoff (`caam run` with handoff enabled) now switches the
+  credential under the running session and does not inject a login. The
+  session picks the new credential up on its next token refresh; until then
+  it is still on the rate-limited one. Restarting it switches at once.
