@@ -407,6 +407,24 @@ func xdgConfigHome() string {
 	return filepath.Join(homeDir, ".config")
 }
 
+// jsonHasAnyKey returns an auth-file validator that accepts a JSON object
+// holding any of the given top-level keys, reporting missing when none is
+// present and the parse error when the file is not JSON.
+func jsonHasAnyKey(missing string, keys ...string) func(data []byte) (bool, string) {
+	return func(data []byte) (bool, string) {
+		var parsed map[string]interface{}
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			return false, fmt.Sprintf("invalid JSON: %v", err)
+		}
+		for _, key := range keys {
+			if _, ok := parsed[key]; ok {
+				return true, ""
+			}
+		}
+		return false, missing
+	}
+}
+
 // DetectExistingAuth detects existing Gemini authentication files in standard locations.
 // Locations checked:
 // - ~/.gemini/settings.json (main settings with OAuth state)
@@ -459,20 +477,7 @@ func (p *Provider) DetectExistingAuth() (*provider.AuthDetection, error) {
 			{
 				path:        filepath.Join(baseDir, "oauth_creds.json"),
 				description: "Gemini CLI OAuth credentials cache" + suffix,
-				validator: func(data []byte) (bool, string) {
-					var parsed map[string]interface{}
-					if err := json.Unmarshal(data, &parsed); err != nil {
-						return false, fmt.Sprintf("invalid JSON: %v", err)
-					}
-					// Check for token fields
-					if _, ok := parsed["access_token"]; ok {
-						return true, ""
-					}
-					if _, ok := parsed["refresh_token"]; ok {
-						return true, ""
-					}
-					return false, "missing expected OAuth fields"
-				},
+				validator:   jsonHasAnyKey("missing expected OAuth fields", "access_token", "refresh_token"),
 			},
 			{
 				path:        filepath.Join(baseDir, ".env"),
@@ -502,20 +507,7 @@ func (p *Provider) DetectExistingAuth() (*provider.AuthDetection, error) {
 	locations = append(locations, authLocationSpec{
 		path:        filepath.Join(xdgConfigHome(), "gcloud", "application_default_credentials.json"),
 		description: "Google Cloud Application Default Credentials (Vertex AI)",
-		validator: func(data []byte) (bool, string) {
-			var parsed map[string]interface{}
-			if err := json.Unmarshal(data, &parsed); err != nil {
-				return false, fmt.Sprintf("invalid JSON: %v", err)
-			}
-			// Check for ADC fields
-			if _, ok := parsed["client_id"]; ok {
-				return true, ""
-			}
-			if _, ok := parsed["type"]; ok {
-				return true, ""
-			}
-			return false, "missing expected ADC fields"
-		},
+		validator:   jsonHasAnyKey("missing expected ADC fields", "client_id", "type"),
 	})
 
 	var mostRecent *provider.AuthLocation

@@ -28,14 +28,9 @@ func ExtractFromAgyProfile(dir string) (*Identity, error) {
 	// or the email the login reported) wins: google_accounts.json is the
 	// Gemini CLI's file, and its active account is whoever the Gemini CLI
 	// last used, which need not be this Antigravity account.
-	if data, err := os.ReadFile(filepath.Join(dir, "meta.json")); err == nil {
-		var meta struct {
-			Identity string `json:"identity"`
-		}
-		if err := json.Unmarshal(data, &meta); err == nil && strings.Contains(meta.Identity, "@") {
-			id.Email = strings.TrimSpace(meta.Identity)
-			found = true
-		}
+	if email := MetaIdentity(dir); strings.Contains(email, "@") {
+		id.Email = email
+		found = true
 	}
 
 	if id.Email == "" {

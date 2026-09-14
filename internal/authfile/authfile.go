@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/identity"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/keychain"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/zcodecred"
 )
@@ -726,17 +727,7 @@ func (v *Vault) RecordProfileIdentity(tool, profile, identity string) error {
 // profileMetaIdentity reads the identity Backup (or RecordProfileIdentity)
 // stored in a profile's meta.json, "" when absent.
 func profileMetaIdentity(profileDir string) string {
-	data, err := os.ReadFile(filepath.Join(profileDir, "meta.json"))
-	if err != nil {
-		return ""
-	}
-	var meta struct {
-		Identity string `json:"identity"`
-	}
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(meta.Identity)
+	return identity.MetaIdentity(profileDir)
 }
 
 // optionalFilesCarryAuth reports whether a file set's optional files hold a
@@ -2170,43 +2161,9 @@ func hashClaudeCredentials(path string) (string, error) {
 // (changelogLastFetched, numStartups, tipsHistory, etc.) that change
 // frequently and would break profile detection if included in the hash.
 func hashClaudeSettings(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-
-	var root map[string]interface{}
-	if err := json.Unmarshal(data, &root); err != nil {
-		return hashBytes(data), nil
-	}
-
 	// oauthAccount is the identity-bearing field in .claude.json.
 	// All other top-level fields are volatile session/UI state.
-	identityFields := map[string]interface{}{}
-	for _, key := range []string{"oauthAccount", "userID"} {
-		if v, exists := root[key]; exists {
-			identityFields[key] = v
-		}
-	}
-
-	if len(identityFields) == 0 {
-		// No identity fields found; the file is purely volatile settings.
-		// Return a fixed sentinel hash so all settings-only files match,
-		// preventing settings drift from breaking profile detection.
-		h := sha256.New()
-		h.Write([]byte("claude:settings:no-identity"))
-		return hex.EncodeToString(h.Sum(nil)), nil
-	}
-
-	canonical, err := json.Marshal(identityFields)
-	if err != nil {
-		return hashBytes(data), nil
-	}
-
-	h := sha256.New()
-	h.Write([]byte("claude:settings:"))
-	h.Write(canonical)
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return hashIdentityFields(path, []string{"oauthAccount", "userID"}, "claude:settings:")
 }
 
 // hashClaudeUserSettings hashes only the auth-bearing fields of Claude's
@@ -2216,6 +2173,16 @@ func hashClaudeSettings(path string) (string, error) {
 // break on any settings tweak, and would ALWAYS break after the restore-time
 // enabledPlugins merge (issue #55).
 func hashClaudeUserSettings(path string) (string, error) {
+	return hashIdentityFields(path, []string{"apiKeyHelper", "env"}, "claude:user-settings:")
+}
+
+// hashIdentityFields hashes only the named top-level keys of a JSON file
+// under the given hash-domain label. A file that is not JSON, or whose
+// identity fields will not re-marshal, falls back to a whole-file hash. A
+// file with none of the keys is purely volatile settings and hashes to the
+// fixed sentinel label+"no-identity", so settings drift never breaks
+// profile detection.
+func hashIdentityFields(path string, keys []string, label string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
@@ -2227,18 +2194,15 @@ func hashClaudeUserSettings(path string) (string, error) {
 	}
 
 	identityFields := map[string]interface{}{}
-	for _, key := range []string{"apiKeyHelper", "env"} {
+	for _, key := range keys {
 		if v, exists := root[key]; exists {
 			identityFields[key] = v
 		}
 	}
 
 	if len(identityFields) == 0 {
-		// No auth-bearing fields: purely workflow settings. Fixed sentinel so
-		// settings drift never breaks profile detection (matches the
-		// .claude.json no-identity convention above).
 		h := sha256.New()
-		h.Write([]byte("claude:user-settings:no-identity"))
+		h.Write([]byte(label + "no-identity"))
 		return hex.EncodeToString(h.Sum(nil)), nil
 	}
 
@@ -2248,7 +2212,7 @@ func hashClaudeUserSettings(path string) (string, error) {
 	}
 
 	h := sha256.New()
-	h.Write([]byte("claude:user-settings:"))
+	h.Write([]byte(label))
 	h.Write(canonical)
 	return hex.EncodeToString(h.Sum(nil)), nil
 }

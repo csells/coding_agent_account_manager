@@ -45,23 +45,7 @@ func ExtractFromKimiCredentials(path string) (*Identity, error) {
 		id.ExpiresAt = time.Unix(int64(secs), 0)
 	}
 	if id.Email == "" {
-		id.Email = metaIdentity(filepath.Dir(path))
+		id.Email = MetaIdentity(filepath.Dir(path))
 	}
 	return id, nil
-}
-
-// metaIdentity reads the identity `caam backup` recorded in a vault
-// profile's meta.json, "" when there is none.
-func metaIdentity(dir string) string {
-	data, err := os.ReadFile(filepath.Join(dir, "meta.json"))
-	if err != nil {
-		return ""
-	}
-	var meta struct {
-		Identity string `json:"identity"`
-	}
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(meta.Identity)
 }
