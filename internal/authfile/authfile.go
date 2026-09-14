@@ -2079,10 +2079,7 @@ func stableAgyHash(path string) (string, error) {
 	if refresh == "" {
 		return hashBytes(data), nil
 	}
-	h := sha256.New()
-	h.Write([]byte("agy:refresh-token:"))
-	h.Write([]byte(refresh))
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return hashLabeled("agy:refresh-token:", refresh), nil
 }
 
 // stableClaudeHash extracts identity-bearing fields from Claude auth files and
