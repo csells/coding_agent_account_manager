@@ -48,7 +48,7 @@ func nativeLoginCommand(provider string) (*exec.Cmd, string, error) {
 	case "agy":
 		bin, hint = "agy", "Antigravity is starting: complete the Google login, then exit to come back here."
 	case "kimi":
-		bin, hint = "kimi", "Kimi Code is starting: type /login, sign in, then exit to come back here."
+		bin, args, hint = "kimi", []string{"login"}, "Complete the Kimi Code device-code login, then come back here."
 	case "zcode":
 		bin, args, hint = "zcode", []string{"login"}, "Complete the Z.AI login, then come back here."
 	case "opencode":
