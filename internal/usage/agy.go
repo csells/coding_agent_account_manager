@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -16,13 +18,27 @@ import (
 //
 // The Antigravity CLI is a Google product and its allowances are the Gemini
 // Code Assist ones: one bucket per model (and token type), each reporting the
-// fraction still remaining and when it refills. The call is a POST with an
-// empty body under the account's Google OAuth access token.
+// fraction still remaining and when it refills. Both calls are POSTs under
+// the account's Google OAuth access token. The quota call must name the
+// account's Code Assist project: without it Google answers 403
+// SUBSCRIPTION_REQUIRED ("no valid license (#3501)") even for an account in
+// good standing. loadCodeAssist, sent with the Antigravity client metadata,
+// is what returns that project.
 const (
-	AgyQuotaURL   = "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota"
-	AgyUserAgent  = "caam/1.0"
+	AgyQuotaURL          = "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota"
+	AgyLoadCodeAssistURL = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
+	// AgyUserAgent is what Code Assist expects an Antigravity client to
+	// send. It is not decoration: under any other User-Agent loadCodeAssist
+	// answers as if the account were never onboarded (allowed tiers only,
+	// no project, no current tier), and the quota call then has no project
+	// to name.
+	AgyUserAgent  = "antigravity"
 	agyTimeout    = 30 * time.Second
 	agyWindowKind = "model_quota"
+
+	// agyClientMetadata identifies the caller to loadCodeAssist the way the
+	// Antigravity CLI does; Code Assist keys the project it returns on it.
+	agyClientMetadata = `{"metadata":{"ideType":"ANTIGRAVITY","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}}`
 
 	// agyRefreshHint tells the operator how the token gets renewed, since
 	// caam will not do it.
@@ -33,7 +49,14 @@ const (
 type AgyFetcher struct {
 	client      *http.Client
 	url         string // Overridable for testing
+	loadURL     string // Overridable for testing
 	userInfoURL string // Overridable for testing
+
+	// The Code Assist project is a property of the account, so the last
+	// answer is reused while the same token keeps being presented.
+	mu              sync.Mutex
+	projectToken    string
+	projectForToken string
 }
 
 // NewAgyFetcher creates a new Antigravity usage fetcher.
@@ -77,54 +100,26 @@ func (f *AgyFetcher) Fetch(ctx context.Context, accessToken string) (*UsageInfo,
 		return nil, fmt.Errorf("access token is empty")
 	}
 
-	url := f.resolveQuotaURL()
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader("{}"))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", AgyUserAgent)
-
-	resp, err := f.client.Do(req)
-	if err != nil {
-		return &UsageInfo{
-			Provider:  "agy",
-			FetchedAt: time.Now(),
-			Error:     fmt.Sprintf("request failed: %v", err),
-		}, err
-	}
-	defer resp.Body.Close()
-
 	info := &UsageInfo{
 		Provider:  "agy",
 		Source:    SourceAPI,
 		FetchedAt: time.Now(),
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	project, err := f.codeAssistProject(ctx, accessToken)
 	if err != nil {
-		info.Error = fmt.Sprintf("read response: %v", err)
-		return info, fmt.Errorf("read response: %w", err)
+		info.Error = err.Error()
+		return info, err
 	}
 
-	switch resp.StatusCode {
-	case http.StatusOK:
-	case http.StatusUnauthorized, http.StatusForbidden:
-		// Google says why in the body ("invalid authentication credentials"
-		// is an expired token, "PERMISSION_DENIED" a scope or endpoint
-		// problem); keep that, it is what distinguishes a re-login from a
-		// caam bug.
-		// The Google access token lives an hour and agy renews it only when
-		// it runs; caam does not refresh it (that would mean holding agy's
-		// OAuth client and storing a credential agy did not write).
-		info.Error = "unauthorized: token expired or invalid" + googleErrorDetail(body) + agyRefreshHint
-		return info, fmt.Errorf("unauthorized: status %d%s%s", resp.StatusCode, googleErrorDetail(body), agyRefreshHint)
-	default:
-		info.Error = fmt.Sprintf("API error: status %d%s", resp.StatusCode, googleErrorDetail(body))
-		return info, fmt.Errorf("API error: status %d%s", resp.StatusCode, googleErrorDetail(body))
+	status, body, err := f.post(ctx, f.resolveQuotaURL(), accessToken, `{"project":`+strconv.Quote(project)+`}`)
+	if err != nil {
+		info.Error = err.Error()
+		return info, err
+	}
+	if err := agyStatusError(status, body); err != nil {
+		info.Error = err.Error()
+		return info, err
 	}
 
 	var quota agyQuotaResponse
@@ -135,6 +130,113 @@ func (f *AgyFetcher) Fetch(ctx context.Context, accessToken string) (*UsageInfo,
 
 	applyAgyBuckets(info, quota.Buckets)
 	return info, nil
+}
+
+// codeAssistProject returns the account's Gemini Code Assist project, the
+// one the quota call must name. It comes from loadCodeAssist and is cached
+// for as long as the same access token is presented.
+func (f *AgyFetcher) codeAssistProject(ctx context.Context, accessToken string) (string, error) {
+	f.mu.Lock()
+	if f.projectToken == accessToken && f.projectForToken != "" {
+		project := f.projectForToken
+		f.mu.Unlock()
+		return project, nil
+	}
+	f.mu.Unlock()
+
+	status, body, err := f.post(ctx, f.resolveLoadURL(), accessToken, agyClientMetadata)
+	if err != nil {
+		return "", err
+	}
+	if err := agyStatusError(status, body); err != nil {
+		return "", err
+	}
+	project := agyProjectOf(body)
+	if project == "" {
+		return "", fmt.Errorf("no Code Assist project on this account: Google has not onboarded it yet" + agyRefreshHint)
+	}
+
+	f.mu.Lock()
+	f.projectToken, f.projectForToken = accessToken, project
+	f.mu.Unlock()
+	return project, nil
+}
+
+// agyProjectOf extracts cloudaicompanionProject from a loadCodeAssist
+// response; Google sends it either as a bare id or as an object with one.
+func agyProjectOf(body []byte) string {
+	var payload struct {
+		Project json.RawMessage `json:"cloudaicompanionProject"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil || len(payload.Project) == 0 {
+		return ""
+	}
+	var bare string
+	if err := json.Unmarshal(payload.Project, &bare); err == nil {
+		return strings.TrimSpace(bare)
+	}
+	var object struct {
+		ID        string `json:"id"`
+		ProjectID string `json:"projectId"`
+	}
+	if err := json.Unmarshal(payload.Project, &object); err == nil {
+		if object.ID != "" {
+			return strings.TrimSpace(object.ID)
+		}
+		return strings.TrimSpace(object.ProjectID)
+	}
+	return ""
+}
+
+// post sends one JSON request under the access token and returns the status
+// and (bounded) body. A transport failure is returned as the error.
+func (f *AgyFetcher) post(ctx context.Context, url, accessToken, body string) (int, []byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(body))
+	if err != nil {
+		return 0, nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", AgyUserAgent)
+
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return 0, nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return resp.StatusCode, nil, fmt.Errorf("read response: %w", err)
+	}
+	return resp.StatusCode, data, nil
+}
+
+// agyStatusError turns a non-200 answer into the error the caller reports.
+// Google says why in the body ("invalid authentication credentials" is an
+// expired token, "PERMISSION_DENIED" a scope or licence problem); keep that,
+// it is what distinguishes a re-login from a caam bug. The Google access
+// token lives an hour and agy renews it only when it runs; caam does not
+// refresh it (that would mean holding agy's OAuth client and storing a
+// credential agy did not write).
+func agyStatusError(status int, body []byte) error {
+	switch status {
+	case http.StatusOK:
+		return nil
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return fmt.Errorf("unauthorized: token expired or invalid%s%s", googleErrorDetail(body), agyRefreshHint)
+	default:
+		return fmt.Errorf("API error: status %d%s", status, googleErrorDetail(body))
+	}
+}
+
+// resolveLoadURL returns the loadCodeAssist endpoint: the test override,
+// then the default. CAAM_AGY_QUOTA_URL changes only the quota call.
+func (f *AgyFetcher) resolveLoadURL() string {
+	if f.loadURL != "" {
+		return f.loadURL
+	}
+	return AgyLoadCodeAssistURL
 }
 
 // resolveQuotaURL returns the quota endpoint: the test override, then
@@ -178,6 +280,22 @@ func googleErrorDetail(body []byte) string {
 	return ""
 }
 
+// agyOpaqueBucket reports a bucket Google names by an internal id rather
+// than a model ("chat_20706"); those carry no reset and never move, so
+// they are noise in a per-model table.
+func agyOpaqueBucket(model string) bool {
+	rest, ok := strings.CutPrefix(model, "chat_")
+	if !ok || rest == "" {
+		return false
+	}
+	for _, r := range rest {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // applyAgyBuckets folds the quota buckets into info: every model keeps its
 // own window under ModelWindows (the most-used bucket when a model reports
 // several token types), the most-used pro bucket is the primary window and
@@ -185,7 +303,7 @@ func googleErrorDetail(body []byte) string {
 func applyAgyBuckets(info *UsageInfo, buckets []agyQuotaBucket) {
 	for _, b := range buckets {
 		model := strings.TrimSpace(b.ModelID)
-		if model == "" {
+		if model == "" || agyOpaqueBucket(model) {
 			continue
 		}
 		remaining := 1.0

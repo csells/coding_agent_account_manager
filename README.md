@@ -376,7 +376,7 @@ and a second sync writes nothing. Pass `--no-sync-config` to skip it.
 
 **Identity:** no agy file records the signed-in Google account (`~/.gemini/google_accounts.json` is the Gemini CLI's and may name none), so `caam backup agy` asks Google's userinfo endpoint once and records the email in the profile's `meta.json`; `ls` and `status` read it from there. Profile detection hashes the refresh token, so Google's hourly access-token rotation does not lose the active profile.
 
-**Limits:** `caam limits agy` queries `cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota` and reports one window per model (pro → primary, flash → secondary). The token expires hourly and agy renews it when it runs; caam does not refresh it. Google's own error status travels with any 401/403 so a stale token (`UNAUTHENTICATED`) is distinguishable from a licensing or endpoint problem (`PERMISSION_DENIED`). `CAAM_AGY_QUOTA_URL` overrides the endpoint.
+**Limits:** `caam limits agy` asks Code Assist for the account's project (`v1internal:loadCodeAssist`, sent with the Antigravity client metadata and User-Agent, which is what Google keys the answer on) and then queries `v1internal:retrieveUserQuota` for that project, reporting one window per model (pro → primary, flash → secondary). Without the project the quota call is refused with `PERMISSION_DENIED` "no valid license (#3501)" even for an account in good standing. The token expires hourly and agy renews it when it runs; caam does not refresh it. Google's own error status travels with any 401/403 so a stale token (`UNAUTHENTICATED`) is distinguishable from a licensing or endpoint problem. `CAAM_AGY_QUOTA_URL` overrides the quota endpoint.
 
 ### Kimi Code (Moonshot AI)
 
