@@ -316,3 +316,91 @@ func TestRefreshSingle_ClaudeReturnsUnsupported(t *testing.T) {
 		t.Errorf("accessToken was modified unexpectedly: got %v", got)
 	}
 }
+
+// caam refresh kimi <account>: an expired Kimi token in the vault is
+// refreshed through Kimi's token endpoint and the vault copy rewritten;
+// one with time left is skipped, because a refresh spends the refresh
+// token.
+func TestRefreshSingle_KimiUpdatesTheVaultToken(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("CAAM_HOME", tmpDir)
+	t.Setenv("KIMI_CODE_HOME", filepath.Join(tmpDir, "kimi-home"))
+	t.Setenv("KIMI_CODE_OAUTH_HOST", "")
+	t.Setenv("KIMI_OAUTH_HOST", "")
+
+	oldVault := vault
+	vault = authfile.NewVault(filepath.Join(tmpDir, "vault"))
+	t.Cleanup(func() { vault = oldVault })
+
+	profileDir := vault.ProfilePath("kimi", "work")
+	if err := os.MkdirAll(profileDir, 0700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	authPath := filepath.Join(profileDir, "kimi-code.json")
+	writeKimi := func(expiresAt int64) {
+		t.Helper()
+		raw, err := json.MarshalIndent(map[string]any{
+			"access_token":  "old-access",
+			"refresh_token": "old-refresh",
+			"expires_at":    expiresAt,
+			"expires_in":    3600,
+			"scope":         "kimi-code",
+			"token_type":    "Bearer",
+		}, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(authPath, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if err := r.ParseForm(); err != nil || r.PostForm.Get("refresh_token") != "old-refresh" {
+			t.Errorf("form = %v (%v)", r.PostForm, err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600,"token_type":"Bearer"}`))
+	}))
+	defer ts.Close()
+	oldTokenURL := refresh.KimiTokenURL
+	refresh.KimiTokenURL = ts.URL + refresh.KimiTokenPath
+	t.Cleanup(func() { refresh.KimiTokenURL = oldTokenURL })
+
+	// Time left: skipped, nothing spent.
+	writeKimi(time.Now().Add(2 * time.Hour).Unix())
+	if err := refreshSingle(context.Background(), "kimi", "work", false, false, true); err != nil {
+		t.Fatalf("refreshSingle() (fresh) error = %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("a token with time left was refreshed (%d requests)", requests)
+	}
+
+	// Expired: refreshed, the vault copy rewritten.
+	writeKimi(time.Now().Add(-time.Minute).Unix())
+	if err := refreshSingle(context.Background(), "kimi", "work", false, false, true); err != nil {
+		t.Fatalf("refreshSingle() (expired) error = %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+	updatedRaw, err := os.ReadFile(authPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	var updated map[string]any
+	if err := json.Unmarshal(updatedRaw, &updated); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if updated["access_token"] != "new-access" || updated["refresh_token"] != "new-refresh" || updated["scope"] != "kimi-code" {
+		t.Fatalf("vault copy = %v", updated)
+	}
+	if got, ok := updated["expires_at"].(float64); !ok || int64(got) <= time.Now().Unix() {
+		t.Fatalf("expires_at not moved into the future: %v", updated["expires_at"])
+	}
+	if info, err := loadExpiryInfo("kimi", "work"); err != nil || info == nil || !info.HasRefreshToken || info.ExpiresAt.Before(time.Now()) {
+		t.Fatalf("loadExpiryInfo(kimi) = %+v, %v", info, err)
+	}
+}
