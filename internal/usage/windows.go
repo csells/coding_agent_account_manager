@@ -139,38 +139,43 @@ func PercentLeft(w *UsageWindow) int {
 	return left
 }
 
-// WindowLeftText renders a window as the share left and when it resets, in
-// the viewer's local time: "82% left, resets 6:10 PM" today, "resets Tue
-// 5:00 PM" later this week, "resets Sep 20 8:45 AM" beyond that.
+// WindowLeftText renders a window as one sentence for prose surfaces (the
+// detail view, robot output): the share left and when it resets, in the
+// viewer's local time — "82% left, resets 6:10 PM" today, "resets Tue
+// 5:00 PM" later this week, "resets Sep 20 8:45 AM" beyond that. Tables
+// show the two halves in their own columns: LeftText and ResetText.
 func WindowLeftText(w *UsageWindow, now time.Time) string {
 	if w == nil {
 		return "-"
 	}
-	if w.Rolled {
-		return "100% left (reset)"
+	left := LeftText(w)
+	if reset := ResetText(w, now); reset != "-" {
+		return left + ", resets " + reset
 	}
-	left := PercentLeft(w)
-	if w.ResetsAt.IsZero() {
-		return fmt.Sprintf("%d%% left", left)
-	}
-	return fmt.Sprintf("%d%% left, resets %s", left, LocalReset(w.ResetsAt, now))
+	return left
 }
 
-// WindowLeftShort is the table-cell form of WindowLeftText: the share left
-// and the local reset clock joined by a middle dot ("88% left · 8:50 PM"),
-// as the dashboard's wide tier spells it.
-func WindowLeftShort(w *UsageWindow, now time.Time) string {
+// LeftText is a table's "what is left" cell for a window: "82% left", or
+// "100% left (reset)" for a cached window whose period has already rolled
+// over. A missing window is "-".
+func LeftText(w *UsageWindow) string {
 	if w == nil {
 		return "-"
 	}
 	if w.Rolled {
 		return "100% left (reset)"
 	}
-	left := PercentLeft(w)
-	if w.ResetsAt.IsZero() {
-		return fmt.Sprintf("%d%% left", left)
+	return fmt.Sprintf("%d%% left", PercentLeft(w))
+}
+
+// ResetText is a table's RESETS cell for a window: the local clock it
+// resets at (LocalReset), or "-" when the window is missing, has already
+// rolled over, or reports no reset time.
+func ResetText(w *UsageWindow, now time.Time) string {
+	if w == nil || w.Rolled || w.ResetsAt.IsZero() {
+		return "-"
 	}
-	return fmt.Sprintf("%d%% left · %s", left, LocalReset(w.ResetsAt, now))
+	return LocalReset(w.ResetsAt, now)
 }
 
 // LocalReset renders a reset instant in now's location, dropping the day

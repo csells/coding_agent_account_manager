@@ -313,7 +313,7 @@ func TestCachedProfileUsage(t *testing.T) {
 	if cold.Usage.PrimaryWindow != nil || cold.Usage.SecondaryWindow != nil {
 		t.Error("a profile with no snapshot must have no windows, not zeroed ones")
 	}
-	if got := usage.WindowLeftShort(cold.Usage.PrimaryWindow, now); got != "-" {
+	if got := usage.LeftText(cold.Usage.PrimaryWindow); got != "-" {
 		t.Errorf("window cell = %q, want %q", got, "-")
 	}
 	if got := formatCacheAge(cold.Usage, now); got != "-" {

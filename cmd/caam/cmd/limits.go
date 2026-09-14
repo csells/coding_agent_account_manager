@@ -476,8 +476,8 @@ func getVaultDir() string {
 // renderLimits prints the limits rows. The JSON form is a contract
 // (used_percent, resets_at) and marshals the rows untouched; the table is
 // for a person and reads as the dashboard does: the provider by its
-// product name, one column per window, each cell the share left and the
-// local clock it resets at, STATUS as before.
+// product name, two columns per window (the share left under the window's
+// name, the local clock it resets at under RESETS), STATUS as before.
 func renderLimits(w io.Writer, format string, results []usage.ProfileUsage, now time.Time) error {
 	format = strings.ToLower(strings.TrimSpace(format))
 
@@ -514,14 +514,16 @@ func renderLimits(w io.Writer, format string, results []usage.ProfileUsage, now 
 		}
 		fmt.Fprintln(w, "──────────────────────────────────────────────────────────────────────────────────────────")
 
-		// One column per window, in the dashboard's order: the union of every
-		// row's windows, shorter general windows first, then per-model ones.
+		// Two columns per window, in the dashboard's order: the union of
+		// every row's windows, shorter general windows first, then per-model
+		// ones. Each window's name heads what is left of it and a RESETS
+		// column beside it heads the local clock it resets at.
 		columns := limitsWindowColumns(results)
 
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		header := "AGENT\tPROFILE"
 		for _, c := range columns {
-			header += "\t" + c
+			header += "\t" + c + "\tRESETS"
 		}
 		header += "\tSTATUS"
 		if offline {
@@ -532,6 +534,7 @@ func renderLimits(w io.Writer, format string, results []usage.ProfileUsage, now 
 		for _, r := range results {
 			status := "unknown"
 			cells := make(map[string]string, len(columns))
+			resets := make(map[string]string, len(columns))
 
 			if r.Usage != nil {
 				switch {
@@ -545,17 +548,14 @@ func renderLimits(w io.Writer, format string, results []usage.ProfileUsage, now 
 					status = "ok"
 				}
 				for _, c := range usage.WindowsOf(r.Usage) {
-					cells[c.Column] = usage.WindowLeftShort(c.Window, now)
+					cells[c.Column] = usage.LeftText(c.Window)
+					resets[c.Column] = usage.ResetText(c.Window, now)
 				}
 			}
 
 			line := provider.Label(r.Provider) + "\t" + r.ProfileName
 			for _, c := range columns {
-				cell := cells[c]
-				if cell == "" {
-					cell = "-"
-				}
-				line += "\t" + cell
+				line += "\t" + orDash(cells[c]) + "\t" + orDash(resets[c])
 			}
 			line += "\t" + status
 			if offline {
@@ -575,6 +575,14 @@ func renderLimits(w io.Writer, format string, results []usage.ProfileUsage, now 
 	default:
 		return fmt.Errorf("unsupported format: %s", format)
 	}
+}
+
+// orDash is a table cell with "-" for a window the row does not have.
+func orDash(cell string) string {
+	if cell == "" {
+		return "-"
+	}
+	return cell
 }
 
 // limitsWindowColumns is the union of window columns across the rows, in

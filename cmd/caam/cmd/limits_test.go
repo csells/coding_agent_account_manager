@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -94,9 +95,10 @@ func TestLimitsJSON_Golden(t *testing.T) {
 }
 
 // TestLimitsTable_SaysLeftAndResetClock: the table reads as the dashboard
-// does — the provider by its product name, one column per window, each
-// cell the share left and the local clock it resets at — with STATUS as
-// before. Used-side numbers and durations belong to JSON only.
+// does — the provider by its product name, two columns per window (what is
+// left, and the local clock it resets at, under RESETS beside the window's
+// name) — with STATUS as before. Used-side numbers and durations belong to
+// JSON only.
 func TestLimitsTable_SaysLeftAndResetClock(t *testing.T) {
 	now := time.Date(2026, 9, 13, 18, 0, 0, 0, time.UTC)
 	rows := limitsFixtureRows()
@@ -107,34 +109,57 @@ func TestLimitsTable_SaysLeftAndResetClock(t *testing.T) {
 	}
 	out := b.String()
 
-	for _, want := range []string{
-		"AGENT", "PROFILE", "5-HOUR", "WEEKLY", "WEEKLY FABLE", "STATUS",
-		"Claude Code", "work",
-		"88% left · " + usage.LocalReset(rows[0].Usage.PrimaryWindow.ResetsAt, now),
-		"50% left · " + usage.LocalReset(rows[0].Usage.SecondaryWindow.ResetsAt, now),
-		"10% left",
-		"Codex", "personal",
-		"60% left · " + usage.LocalReset(rows[1].Usage.PrimaryWindow.ResetsAt, now),
-		"30% left · " + usage.LocalReset(rows[1].Usage.SecondaryWindow.ResetsAt, now),
-		"broken", "error: boom",
-		" ok",
-	} {
+	// Every column is its own field; a window's RESETS sits right after it.
+	wantRows := map[string][]string{
+		"AGENT": {"AGENT", "PROFILE", "5-HOUR", "RESETS", "WEEKLY", "RESETS", "WEEKLY FABLE", "RESETS", "STATUS"},
+		"Claude Code": {"Claude Code", "work", "88% left", usage.LocalReset(rows[0].Usage.PrimaryWindow.ResetsAt, now),
+			"50% left", usage.LocalReset(rows[0].Usage.SecondaryWindow.ResetsAt, now), "10% left", "-", "ok"},
+		"Codex": {"Codex", "personal", "60% left", usage.LocalReset(rows[1].Usage.PrimaryWindow.ResetsAt, now),
+			"30% left", usage.LocalReset(rows[1].Usage.SecondaryWindow.ResetsAt, now), "-", "-", "ok"},
+	}
+	for _, line := range strings.Split(out, "\n") {
+		for lead, want := range wantRows {
+			if !strings.HasPrefix(line, lead) || strings.Contains(line, "broken") {
+				continue
+			}
+			if got := tableFields(line); !equalStrings(got, want) {
+				t.Errorf("row %q fields = %q, want %q", lead, got, want)
+			}
+		}
+	}
+	for _, want := range []string{"broken", "error: boom"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("limits table lacks %q:\n%s", want, out)
 		}
 	}
-	for _, gone := range []string{"PRIMARY", "SECONDARY", "SCOPED", "RESETS IN", "12%", "40%", "70%", "claude/work"} {
+	for _, gone := range []string{"PRIMARY", "SECONDARY", "SCOPED", "RESETS IN", "12%", "40%", "70%", "claude/work", " · "} {
 		if strings.Contains(out, gone) {
-			t.Errorf("limits table still says %q (used-side or raw id):\n%s", gone, out)
+			t.Errorf("limits table still says %q (used-side, raw id or a combined cell):\n%s", gone, out)
 		}
 	}
+}
 
-	// A row without a window the table has a column for shows a dash there.
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "personal") && !strings.Contains(line, "  -  ") {
-			t.Errorf("codex row should show - under WEEKLY FABLE:\n%s", line)
+// tableFields splits a tabwriter line on its two-space-or-wider gaps.
+func tableFields(line string) []string {
+	var fields []string
+	for _, f := range regexp.MustCompile(`\s{2,}`).Split(strings.TrimSpace(line), -1) {
+		if f != "" {
+			fields = append(fields, f)
 		}
 	}
+	return fields
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // TestLimitsRankTable_SaysLeft: --rank speaks of headroom as what is left
