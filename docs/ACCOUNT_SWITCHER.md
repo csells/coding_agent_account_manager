@@ -272,8 +272,7 @@ that run.
   gaps between the dashboard and the rest of caam and the plan that closed
   them. Gaps 1 (one switch core), 2 (one refresh gate, no timers), 3
   (every login is capture → clear → login) and 5 (the dashboard's edges)
-  are done; gap 4 (one vocabulary and "left, resets at" in every output)
-  is in progress on its own branch.
+  and 4 (one vocabulary and "left, resets at" in every output) are done.
 - The smart handoff (`caam run` with handoff enabled) now switches the
   credential under the running session and does not inject a login. The
   session picks the new credential up on its next token refresh; until then

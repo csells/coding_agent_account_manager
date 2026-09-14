@@ -60,6 +60,17 @@ logging in again. Architecture and the facts behind it:
   pool monitor only tends cooldowns on its tick and its explicit
   `RefreshAll` takes expired profiles only; `caam refresh --all --force` is
   refused.
+- **One vocabulary, "left, resets at" everywhere**: `provider.Label` names
+  providers by product on every surface (Antigravity, Kimi Code, OpenCode,
+  zcode, Claude Code, Codex, Gemini, Grok, Cursor); the `limits` table,
+  `--rank`, `--forecast`, `monitor`'s brief/table/alerts and `robot limits`
+  say what is left and when it resets, like the dashboard; `ls` lists
+  providers in the strip's order with LAST USED; `status` labels tools and
+  moves never-logged-in ones to a footer; `which` knows every provider;
+  `robot limits` returns real limits and `robot next` reads the activity
+  log; the API's `/usage` `last_used` comes from the activity log (the
+  probe time is `last_checked`). `limits --format json` is unchanged,
+  pinned byte for byte.
 - **Dashboard edges**: help teaches `n`; the export dialog names its
   directory and that the bundle is plaintext; empty states say "press n";
   the name dialog speaks of login; `l` moves right; the palette has New
