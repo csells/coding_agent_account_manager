@@ -32,7 +32,7 @@ func WritePIDFile(path string, pid int) error {
 	}
 
 	if existingPID, err := ReadPIDFile(path); err == nil {
-		if existingPID != pid && isProcessAlive(existingPID) {
+		if existingPID != pid && IsProcessAlive(existingPID) {
 			return fmt.Errorf("pid file already points to running process (pid=%d)", existingPID)
 		}
 		_ = os.Remove(path) // stale or same pid; best-effort

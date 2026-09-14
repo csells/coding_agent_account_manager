@@ -19,6 +19,7 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/refresh"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/signals"
 )
 
 // DefaultRefreshThreshold is the pool's "expiring soon" horizon for its
@@ -701,28 +702,7 @@ func ReadPIDFile() (int, error) {
 
 // IsProcessRunning checks if a process with the given PID is running.
 func IsProcessRunning(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-
-	// On Unix, FindProcess always succeeds. We need to send signal 0 to check.
-	err = proc.Signal(syscall.Signal(0))
-	if err == nil {
-		return true
-	}
-
-	// EPERM means the process exists but we can't signal it (different user).
-	// Only ESRCH means the process doesn't exist.
-	if errors.Is(err, syscall.EPERM) {
-		return true
-	}
-
-	return false
+	return signals.IsProcessAlive(pid)
 }
 
 // GetDaemonStatus returns the current daemon status.

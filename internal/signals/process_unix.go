@@ -8,7 +8,10 @@ import (
 	"syscall"
 )
 
-func isProcessAlive(pid int) bool {
+// IsProcessAlive reports whether a process with the given PID exists.
+// On Unix it sends signal 0; EPERM means the process exists but cannot be
+// signalled, and only ESRCH (or any other error) means it is gone.
+func IsProcessAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}

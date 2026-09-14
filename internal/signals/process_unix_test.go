@@ -8,10 +8,10 @@ import (
 )
 
 func TestIsProcessAlive(t *testing.T) {
-	if isProcessAlive(-1) {
+	if IsProcessAlive(-1) {
 		t.Fatal("expected negative pid to be treated as not alive")
 	}
-	if !isProcessAlive(os.Getpid()) {
+	if !IsProcessAlive(os.Getpid()) {
 		t.Fatal("expected current pid to be treated as alive")
 	}
 }

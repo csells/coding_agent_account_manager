@@ -10,15 +10,14 @@ package profile
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/identity"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/signals"
 )
 
 // Profile represents a single account profile for an AI coding tool.
@@ -405,28 +404,7 @@ func (p *Profile) GetLockInfo() (*LockInfo, error) {
 // IsProcessAlive checks if a process with the given PID is still running.
 // On Unix, this sends signal 0 to check if the process exists.
 func IsProcessAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-
-	// On Unix, Signal(0) checks if the process exists without actually sending a signal
-	err = process.Signal(syscall.Signal(0))
-	if err == nil {
-		return true
-	}
-
-	// If we get EPERM, the process exists but we can't signal it (it's alive).
-	// Only ESRCH means it doesn't exist.
-	if errors.Is(err, syscall.EPERM) {
-		return true
-	}
-
-	return false
+	return signals.IsProcessAlive(pid)
 }
 
 // IsLockStale checks if the lock file is from a dead process.
