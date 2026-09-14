@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider"
 )
 
 // Render implements the Renderer interface for AlertRenderer.
@@ -52,7 +54,7 @@ func (r *AlertRenderer) Render(state *MonitorState) string {
 			r.history[key] = alertLevel
 			tag := alertEmoji(alertLevel)
 			timeStr := now.Format("2006-01-02 15:04:05")
-			msg := fmt.Sprintf("[%s] %s %s/%s at %.0f%%", timeStr, tag, p.Provider, p.ProfileName, percent)
+			msg := fmt.Sprintf("[%s] %s %s %s: %s", timeStr, tag, provider.Label(p.Provider), p.ProfileName, leftText(p.Usage, now))
 			msg = strings.TrimSpace(msg)
 			if alertLevel == AlertExhausted {
 				msg += " - SWITCH RECOMMENDED"

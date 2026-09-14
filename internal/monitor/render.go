@@ -8,7 +8,40 @@ import (
 	"time"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
 )
+
+// leftText says what is left of a profile's tightest window and when it
+// resets ("12% left, resets 8:50 PM"), the sentence every human-facing
+// renderer prints. ASCII only: the table pads by byte length.
+func leftText(info *usage.UsageInfo, now time.Time) string {
+	if info == nil {
+		return "-"
+	}
+	return usage.WindowLeftText(info.MostConstrainedWindow(), now)
+}
+
+// displayOrderedKeys lists the state's profile keys grouped by provider in
+// the dashboard strip's order (provider.DisplayOrder), then by key, so the
+// table and the brief read in the order people know.
+func displayOrderedKeys(state *MonitorState) []string {
+	keys := sortProfileKeys(state)
+	rank := make(map[string]int)
+	for i, id := range provider.DisplayOrder() {
+		rank[id] = i
+	}
+	rankOf := func(key string) int {
+		if p := state.Profiles[key]; p != nil {
+			if r, ok := rank[p.Provider]; ok {
+				return r
+			}
+		}
+		return len(rank)
+	}
+	sort.SliceStable(keys, func(i, j int) bool { return rankOf(keys[i]) < rankOf(keys[j]) })
+	return keys
+}
 
 // Renderer renders monitor state into an output string.
 type Renderer interface {
