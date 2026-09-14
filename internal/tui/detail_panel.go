@@ -230,7 +230,7 @@ func (p *DetailPanel) View() string {
 	// ═══ PROFILE SECTION ═══
 	profileHeader := p.styles.SectionHeader.Render("Profile")
 	var profileRows []string
-	profileRows = append(profileRows, p.renderRow("Provider", providerLabel(prof.Provider)))
+	profileRows = append(profileRows, p.renderRow("Agent", providerLabel(prof.Provider)))
 	if prof.Account != "" {
 		profileRows = append(profileRows, p.renderRow("Account", prof.Account))
 	}

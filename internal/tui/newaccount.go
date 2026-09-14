@@ -116,7 +116,7 @@ func (d *ProviderPickerDialog) move(delta int) {
 // View renders the picker: one line per provider, the selected one marked.
 func (d *ProviderPickerDialog) View() string {
 	var b strings.Builder
-	b.WriteString(d.styles.DialogTitle.Render("Log in to which provider?"))
+	b.WriteString(d.styles.DialogTitle.Render("Log in to which agent?"))
 	b.WriteString("\n\n")
 	labelWidth := 0
 	for _, c := range d.choices {
@@ -213,7 +213,7 @@ func (m Model) handleProviderPickerKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // hands the terminal to its native login.
 func (m Model) startNewAccountLogin(provider string) (tea.Model, tea.Cmd) {
 	if provider == "" {
-		m.statusMsg = "No provider selected"
+		m.statusMsg = "No agent selected"
 		return m, nil
 	}
 	cmd, hint, err := m.hooks.Login(provider)
@@ -288,7 +288,7 @@ func (m Model) captureLive(provider, name string) error {
 	}
 	fileSet, ok := authFileSetForProvider(provider)
 	if !ok {
-		return fmt.Errorf("unknown provider %s", provider)
+		return fmt.Errorf("unknown agent %s", provider)
 	}
 	return authfile.NewVault(m.vaultPath).Backup(fileSet, name)
 }

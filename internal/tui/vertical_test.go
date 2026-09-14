@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -155,7 +156,7 @@ func TestProviderStrip_HidesProvidersWithoutAnAccount(t *testing.T) {
 	}
 	m.syncProfilesPanel()
 	joined := strings.Join(stripLines(m), "\n")
-	if !strings.Contains(joined, "Providers (5)") {
+	if !strings.Contains(joined, "Agents (5)") {
 		t.Errorf("five providers have accounts:\n%s", joined)
 	}
 	for _, id := range []string{"grok", "opencode", "cursor", "kimi"} {
@@ -189,7 +190,7 @@ func TestProviderStrip_NewProviderAppearsWhenItGetsAnAccount(t *testing.T) {
 	m.activeProvider = 1 // stale index from before the sync: kimi is not visible yet
 	m.syncProfilesPanel()
 	joined := strings.Join(stripLines(m), "\n")
-	if !strings.Contains(joined, "Kimi Code (1)") || !strings.Contains(joined, "Providers (2)") {
+	if !strings.Contains(joined, "Kimi Code (1)") || !strings.Contains(joined, "Agents (2)") {
 		t.Fatalf("kimi should join the strip once it has an account:\n%s", joined)
 	}
 }
@@ -369,12 +370,12 @@ func TestVerticalLayout_ProvidersAboveAccountsWithWindowColumns(t *testing.T) {
 	m := modelWithLimits(t, 170, 40)
 	view := ansi.Strip(m.View())
 
-	iProviders := strings.Index(view, "Providers")
+	iProviders := strings.Index(view, "Agents (")
 	iAccounts := strings.Index(view, "Claude Code accounts")
 	if iProviders < 0 || iAccounts < 0 || iProviders > iAccounts {
 		t.Fatalf("providers strip must sit above the accounts pane:\n%s", view)
 	}
-	for _, want := range []string{"▸ Claude Code (2)", "● a@example.com", "5h 82%", "wk 50%", "Fable 10%", "Providers (1)",
+	for _, want := range []string{"▸ Claude Code (2)", "● a@example.com", "5h 82%", "wk 50%", "Fable 10%", "Agents (1)",
 		"NAME", "STATUS", "5-HOUR", "WEEKLY", "WEEKLY FABLE", "LAST USED",
 		"82% left · ", "50% left · ", "10% left", "enter", "switch to this account"} {
 		if !strings.Contains(view, want) {
@@ -648,4 +649,73 @@ func TestDetailCard_LastUsedMatchesTheRow(t *testing.T) {
 	if !card.LastUsedAt.Equal(row.LastUsed) {
 		t.Errorf("card LastUsedAt = %v, row says %v", card.LastUsedAt, row.LastUsed)
 	}
+}
+
+// The thing with accounts is an "agent" everywhere a person reads the
+// dashboard: the strip title, the key hints, the login picker, the help
+// screen, the palette and the empty states never say "provider" or "tool".
+func TestDashboardCallsTheThingWithAccountsAnAgent(t *testing.T) {
+	h := &newAccountHooks{identity: "new@example.com"}
+	m := modelWithLimits(t, 159, 42)
+	m.hooks = h.hooks(t)
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"Agents (1)", ":agent]"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("dashboard lacks %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(strings.ToLower(view), "provider") {
+		t.Errorf("dashboard still says provider:\n%s", view)
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	picker := ansi.Strip(updated.(Model).View())
+	if !strings.Contains(picker, "Log in to which agent?") {
+		t.Errorf("picker should ask which agent:\n%s", picker)
+	}
+
+	empty := New()
+	empty.width, empty.height = 159, 42
+	empty.syncProfilesPanel()
+	emptyView := ansi.Strip(empty.View())
+	if !strings.Contains(emptyView, "Agents (0)") || !strings.Contains(emptyView, "log in to an agent") {
+		t.Errorf("empty dashboard should say agent:\n%s", emptyView)
+	}
+
+	for name, text := range map[string]string{
+		"help screen":         MainHelpMarkdown(),
+		"key help":            keyHelpText(defaultKeyMap()),
+		"palette":             paletteText(DefaultCommands()),
+		"no-accounts hint":    noAccountsHint,
+		"no-accounts message": emptyProfilesMessage("claude"),
+	} {
+		lower := strings.ToLower(text)
+		if strings.Contains(lower, "provider") || toolWord.MatchString(lower) {
+			t.Errorf("%s still says provider or tool:\n%s", name, text)
+		}
+	}
+}
+
+// toolWord matches "tool"/"tools" as a whole word.
+var toolWord = regexp.MustCompile(`\btools?\b`)
+
+func keyHelpText(km keyMap) string {
+	var b strings.Builder
+	for _, binding := range km.ShortHelp() {
+		b.WriteString(binding.Help().Desc + "\n")
+	}
+	for _, row := range km.FullHelp() {
+		for _, binding := range row {
+			b.WriteString(binding.Help().Desc + "\n")
+		}
+	}
+	return b.String()
+}
+
+func paletteText(cmds []CommandAction) string {
+	var b strings.Builder
+	for _, c := range cmds {
+		b.WriteString(c.Name + " " + c.Description + "\n")
+	}
+	return b.String()
 }

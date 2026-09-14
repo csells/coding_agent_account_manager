@@ -210,16 +210,16 @@ func MainHelpMarkdown() string {
 |-----|--------|
 | ↑/k | Move up |
 | ↓/j | Move down |
-| ←/h | Previous provider |
-| →/l | Next provider |
-| Tab | Cycle providers |
+| ←/h | Previous agent |
+| →/l | Next agent |
+| Tab | Cycle agents |
 | / | Search accounts |
 
 ### Account Actions
 | Key | Action |
 |-----|--------|
 | Enter | Switch to the selected account (instant, with confirmation) |
-| n | Log in to a new account (captures the current one, clears it, runs the provider's login, captures the new one) |
+| n | Log in to a new account (captures the current one, clears it, runs the agent's login, captures the new one) |
 | r | Refresh limits, and an expired token first |
 | i | Full account card |
 | e | Edit account settings |
@@ -258,11 +258,11 @@ func MainHelpMarkdown() string {
 ## Smart Profile Features (CLI)
 
 ` + "```" + `bash
-caam activate <tool> --auto     # Smart rotation picks best profile
-caam run <tool> -- <args>       # Wrap CLI with auto-failover on rate limits
+caam activate <agent> --auto    # Smart rotation picks best profile
+caam run <agent> -- <args>      # Wrap the agent with auto-failover on rate limits
 caam cooldown set <profile>     # Mark profile as rate-limited
 caam cooldown list              # View active cooldowns
-caam next <tool>                # Preview which profile rotation would pick
+caam next <agent>               # Preview which profile rotation would pick
 ` + "```" + `
 
 ### Rotation Algorithms
@@ -281,10 +281,10 @@ caam uses the associated profile automatically.
 
 ---
 
-## Provider Notes
+## Agent Notes
 
-To add an account to any provider, press n: the dashboard captures the
-account that is signed in now, clears it so the provider's login cannot
+To add an account to any agent, press n: the dashboard captures the
+account that is signed in now, clears it so the agent's login cannot
 revoke it, runs the login, and captures the new account under its identity.
 
 ### Claude Code

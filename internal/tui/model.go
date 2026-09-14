@@ -1020,7 +1020,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.refreshRefused[limitsKey(msg.provider, msg.profile)] = true
 			if sessionEnded(msg.err) {
-				return m.offerRelogin(msg.provider, msg.profile, "the provider has ended its session and a refresh cannot revive it")
+				return m.offerRelogin(msg.provider, msg.profile, "the agent's service has ended its session and a refresh cannot revive it")
 			}
 			m.showError(msg.err, "Refresh")
 			return m, nil
@@ -1469,7 +1469,7 @@ func (m Model) handleDeleteProfile() (tea.Model, tea.Cmd) {
 func (m Model) openNameDialog(provider string) (tea.Model, tea.Cmd) {
 	fileSet, ok := authFileSetForProvider(provider)
 	if !ok {
-		m.statusMsg = fmt.Sprintf("Unknown provider: %s", provider)
+		m.statusMsg = fmt.Sprintf("Unknown agent: %s", provider)
 		return m, nil
 	}
 	if !authfile.HasAuthFiles(fileSet) {
@@ -3249,11 +3249,11 @@ func (m Model) statusKeyHints() string {
 	var hints string
 	switch {
 	case m.width < 70:
-		hints = hint("←/→", "provider")
+		hints = hint("←/→", "agent")
 	case m.width < 100:
-		hints = hint("←/→", "provider") + " " + hint("/", "search")
+		hints = hint("←/→", "agent") + " " + hint("/", "search")
 	default:
-		hints = hint("←/→", "provider") + " " + hint("↑/↓", "account") + " " + hint("enter", "switch") + " " + hint("n", "new login") + " " + hint("/", "search")
+		hints = hint("←/→", "agent") + " " + hint("↑/↓", "account") + " " + hint("enter", "switch") + " " + hint("n", "new login") + " " + hint("/", "search")
 	}
 
 	if m.debugEnabled() {

@@ -856,13 +856,13 @@ func TestStatusBar_HonoursShowKeyHints(t *testing.T) {
 	}
 
 	on := config.DefaultSPMConfig()
-	if bar := hints(on); !strings.Contains(bar, ":switch]") || !strings.Contains(bar, ":provider]") {
+	if bar := hints(on); !strings.Contains(bar, ":switch]") || !strings.Contains(bar, ":agent]") {
 		t.Fatalf("by default the status bar carries key hints:\n%s", bar)
 	}
 
 	off := config.DefaultSPMConfig()
 	off.TUI.ShowKeyHints = false
-	if bar := hints(off); strings.Contains(bar, ":switch]") || strings.Contains(bar, ":provider]") {
+	if bar := hints(off); strings.Contains(bar, ":switch]") || strings.Contains(bar, ":agent]") {
 		t.Fatalf("show_key_hints: false should leave the status bar without hints:\n%s", bar)
 	}
 }
@@ -1046,24 +1046,24 @@ func TestRenderStatusBar(t *testing.T) {
 	m.statusMsg = ""
 	m.width = 50
 	view = m.renderStatusBar()
-	// Narrow view shows only provider hint, not quit
-	if !strings.Contains(view, "provider") {
-		t.Errorf("expected 'provider' hint in narrow view, got %q", view)
+	// Narrow view shows only the agent hint, not quit
+	if !strings.Contains(view, "agent") {
+		t.Errorf("expected 'agent' hint in narrow view, got %q", view)
 	}
 
 	// Test with medium width (70-99)
 	m.width = 80
 	view = m.renderStatusBar()
-	if !strings.Contains(view, "provider") {
-		t.Errorf("expected 'provider' hint in medium view, got %q", view)
+	if !strings.Contains(view, "agent") {
+		t.Errorf("expected 'agent' hint in medium view, got %q", view)
 	}
 
 	// Test with full width (>= 100)
 	m.width = 120
 	view = m.renderStatusBar()
-	// Updated: status bar now shows "provider" not "switch provider" for conciseness
-	if !strings.Contains(view, "provider") {
-		t.Errorf("expected 'provider' hint in full view, got %q", view)
+	// The status bar says "agent", not "switch agent", for conciseness
+	if !strings.Contains(view, "agent") {
+		t.Errorf("expected 'agent' hint in full view, got %q", view)
 	}
 	if !strings.Contains(view, "switch") {
 		t.Errorf("expected 'switch' hint in full view, got %q", view)
@@ -1077,7 +1077,7 @@ func TestStatusBarSeveritySnapshots(t *testing.T) {
 	m.width = 120
 
 	// Status bar now has 3 segments: mode indicator | center message | key hints
-	// The format is: " CLAUDE  message  [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ n  :new login] [ /  :search]"
+	// The format is: " CLAUDE  message  [ ←/→  :agent] [ ↑/↓  :account] [ enter  :switch] [ n  :new login] [ /  :search]"
 	tests := []struct {
 		name    string
 		message string
@@ -1087,19 +1087,19 @@ func TestStatusBarSeveritySnapshots(t *testing.T) {
 			name:    "success",
 			message: "Exported",
 			want: "" +
-				"  CLAUDE CODE   Exported            [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ n  :new login] [ /  :search]",
+				"  CLAUDE CODE   Exported               [ ←/→  :agent] [ ↑/↓  :account] [ enter  :switch] [ n  :new login] [ /  :search]",
 		},
 		{
 			name:    "warning",
 			message: "No profile selected",
 			want: "" +
-				"  CLAUDE CODE   No profile sele...  [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ n  :new login] [ /  :search]",
+				"  CLAUDE CODE   No profile selected    [ ←/→  :agent] [ ↑/↓  :account] [ enter  :switch] [ n  :new login] [ /  :search]",
 		},
 		{
 			name:    "error",
 			message: "Export failed",
 			want: "" +
-				"  CLAUDE CODE   Export failed       [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ n  :new login] [ /  :search]",
+				"  CLAUDE CODE   Export failed          [ ←/→  :agent] [ ↑/↓  :account] [ enter  :switch] [ n  :new login] [ /  :search]",
 		},
 	}
 
@@ -1384,8 +1384,8 @@ func TestStatusKeyHints(t *testing.T) {
 	hints := m.statusKeyHints()
 	plainHints := ansi.Strip(hints)
 	plainHints = strings.ReplaceAll(plainHints, " ", "")
-	if !strings.Contains(plainHints, "[←/→:provider]") {
-		t.Errorf("expected '[←/→:provider]' in narrow hints, got %q", plainHints)
+	if !strings.Contains(plainHints, "[←/→:agent]") {
+		t.Errorf("expected '[←/→:agent]' in narrow hints, got %q", plainHints)
 	}
 
 	// Test wide width
@@ -1442,8 +1442,8 @@ func TestRenderStatusBarThreeSegments(t *testing.T) {
 	}
 
 	// Should contain key hints (new format: [key:action])
-	if !strings.Contains(plainBar, "provider") {
-		t.Errorf("expected 'provider' key hint in status bar, got %q", plainBar)
+	if !strings.Contains(plainBar, "agent") {
+		t.Errorf("expected 'agent' key hint in status bar, got %q", plainBar)
 	}
 
 	// Add a status message and verify layout
@@ -1455,8 +1455,8 @@ func TestRenderStatusBarThreeSegments(t *testing.T) {
 	if !strings.Contains(plainBar, "CLAUDE") {
 		t.Errorf("expected CLAUDE mode indicator with status message, got %q", plainBar)
 	}
-	if !strings.Contains(plainBar, "provider") {
-		t.Errorf("expected 'provider' hint with status message, got %q", plainBar)
+	if !strings.Contains(plainBar, "agent") {
+		t.Errorf("expected 'agent' hint with status message, got %q", plainBar)
 	}
 	// Should have status message
 	if !strings.Contains(plainBar, "Test status") {
