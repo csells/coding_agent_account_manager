@@ -763,12 +763,12 @@ PROFILE                                 5-HOUR                    WEEKLY        
 up/down select   enter switch   r refresh   q quit     * = active account
 ```
 
-- **Columns come from what each provider reports.** A 5-hour window, a weekly
-  window, a per-model weekly window (`WEEKLY FABLE`, `WEEKLY OPUS`), a monthly
-  one where a provider has it. Nothing is invented: a provider without a
+- **Columns come from what each agent's service reports.** A 5-hour window, a
+  weekly window, a per-model weekly window (`WEEKLY FABLE`, `WEEKLY OPUS`), a
+  monthly one where an agent has it. Nothing is invented: an agent without a
   window leaves the cell as `-`, and neither Anthropic nor OpenAI publishes a
   monthly cap.
-- **The active account per provider is starred.** Select any other row and
+- **The active account per agent is starred.** Select any other row and
   press Enter; the dashboard asks first, then switches through the same path
   as `caam activate`: the outgoing account is re-captured into the vault
   before the incoming one is installed, and a failed re-capture aborts the
@@ -789,23 +789,23 @@ Piped or run with `--once`, `caam monitor` prints the plain table it always
 did; `--format brief|json|alerts` are unchanged.
 
 The main TUI (`caam` with no arguments) is split top to bottom. A strip of
-providers runs across the top as a tab strip: every provider with a
+agents runs across the top as a tab strip: every agent with a
 captured account has a slot, in a fixed order, and ←/→ (or tab) move the
 selection along it. The slots
-sit in one row that scrolls sideways; when providers are off either edge
+sit in one row that scrolls sideways; when agents are off either edge
 the strip says how many (`‹ 2`, `3 ›`), and the row scrolls only when the
 selection would leave it, so nothing shifts under the cursor. Each slot shows
-the provider's account count, active account and tightest windows
-(`5h 53% · wk 44% · Fable 0%`). The selected provider's accounts fill the
-pane below, one row each, with every rate-limit window the provider
+the agent's account count, active account and tightest windows
+(`5h 53% · wk 44% · Fable 0%`). The selected agent's accounts fill the
+pane below, one row each, with every rate-limit window the agent's service
 reports as a column (`53% left · 6:10 PM`) and the active account marked
 `●`. ↑/↓ move between them, and the selected account expands in place,
 like a tree node, with the lines its row cannot hold: auth, plan, health
 and token, its vault path, and what the keys do. Move on and it folds up
-again, so a provider with many accounts is one list to scroll through:
+again, so an agent with many accounts is one list to scroll through:
 
 ```
-╭─ Providers (8) ──────────────────────────────────────────────────────────╮
+╭─ Agents (8) ─────────────────────────────────────────────────────────────╮
 │ ▸ Claude (2)          Codex (1)             Antigravity (1)               │
 │ ● chris@gascity.com   ● ops+chris-claude-1… ● chris@gascity.com     5 › │
 │ 5h 53% · wk 44% · …   wk 30%                auth expired (re-login)      │
@@ -820,34 +820,34 @@ again, so a provider with many accounts is one list to scroll through:
 ╰──────────────────────────────────────────────────────────────────────────╯
 ```
 
-Only providers with a captured account are on the strip; there is
-nothing to switch between on the others. `n` asks which provider to log
-in to — every provider caam manages, the selected one preselected, and
-those whose CLI is not on `PATH` say so — then logs a new account in
-without leaving the dashboard: that provider's active account is
+Only agents with a captured account are on the strip; there is
+nothing to switch between on the others. `n` asks which agent to log
+in to — every agent caam manages, the selected one preselected, and
+those not on `PATH` say so — then logs a new account in
+without leaving the dashboard: that agent's active account is
 re-captured first, so its newest tokens are in the vault, and its live
-credential is then cleared, because a tool's login is a logout first —
+credential is then cleared, because an agent's login is a logout first —
 Codex revokes the session it finds, refresh-token family and vault copy
 included, and a login that finds nothing has nothing to revoke (a live
 credential caam cannot match to a vault profile is filed as a backup first,
 then cleared, so it is neither lost nor left for the login to revoke); the
-terminal goes to the provider's own login
+terminal goes to the agent's own login
 (`codex login`, Claude Code with `/login`, `zcode login`, …); and when it
 returns, the live credential is captured under the account it now belongs
-to and selected, which puts a first-time provider on the strip. A
-provider whose credential carries no identity asks for a profile name
+to and selected, which puts a first-time agent on the strip. An
+agent whose credential carries no identity asks for a profile name
 instead. `r` refreshes what is on screen: the limits are re-fetched, and
-when the selected account's token has expired or the provider just
+when the selected account's token has expired or the agent's service just
 refused it, the token is refreshed first (Codex and Gemini; the other
-tools renew their own) and the limits follow. When a refresh cannot help
-— the provider has ended the session, or renews its own tokens — `r`
+agents renew their own) and the limits follow. When a refresh cannot help
+— the agent's service has ended the session, or the agent renews its own tokens — `r`
 offers the login instead, right there, and yes runs it the way `n` does.
 `i` opens the full card as an overlay. Every question — switch this
 account? delete it? log in again? — and every outcome — switched, logged
 in, refused, failed — is a dialog in the middle of the screen; the status
 bar carries progress only.
-Limits are fetched for the accounts on screen — the selected provider's
-rows and every provider's active account — at most once a minute each,
+Limits are fetched for the accounts on screen — the selected agent's
+rows and every agent's active account — at most once a minute each,
 failures included, through the same credential resolution as
 `caam limits`; a failed fetch keeps the last
 known figures, marked `*`, and says so in the expansion. Keys typed into
@@ -860,7 +860,7 @@ listed as `No credential`, cannot be activated from the TUI, and is
 refused by `caam activate` too: installing it would change nothing while
 reporting success.
 
-The layout follows the terminal. At 150 columns and up the provider
+The layout follows the terminal. At 150 columns and up the agent
 slots are three-line cards and every window column shows with LAST USED
 (the activity log's last switch to, away from, or login of the account);
 from 100 columns the slots are one-line chips and the window cells
