@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/bundle"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
 	"github.com/spf13/cobra"
@@ -132,7 +133,7 @@ func runDBStats(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Database: %s\n", stats.Path)
-	fmt.Printf("Size: %s\n", formatBytes(stats.SizeBytes))
+	fmt.Printf("Size: %s\n", bundle.FormatSize(stats.SizeBytes))
 	fmt.Printf("Activity logs: %d entries\n", stats.ActivityLogCount)
 	fmt.Printf("Profile stats: %d entries\n", stats.ProfileStatsCount)
 
@@ -144,18 +145,4 @@ func runDBStats(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
-}
-
-// formatBytes formats a byte count as a human-readable string.
-func formatBytes(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }

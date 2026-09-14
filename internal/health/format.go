@@ -123,7 +123,7 @@ func StatusReasons(h *ProfileHealth) []string {
 	rateLimited := h.RateLimited(now)
 
 	if rateLimited {
-		reasons = append(reasons, fmt.Sprintf("Rate limited (resets in %s)", formatDurationNatural(h.RateLimitedUntil.Sub(now))))
+		reasons = append(reasons, fmt.Sprintf("Rate limited (resets in %s)", FormatDurationNatural(h.RateLimitedUntil.Sub(now))))
 	}
 
 	// Check token expiry. A renewable credential is skipped: it is renewed in
@@ -138,7 +138,7 @@ func StatusReasons(h *ProfileHealth) []string {
 				reasons = append(reasons, "Token expired")
 			}
 		} else if ttl < time.Hour {
-			reasons = append(reasons, fmt.Sprintf("Token expires in %s", formatDurationNatural(ttl)))
+			reasons = append(reasons, fmt.Sprintf("Token expires in %s", FormatDurationNatural(ttl)))
 		}
 	}
 
@@ -204,7 +204,7 @@ func FormatRecommendation(provider, profile string, health *ProfileHealth) strin
 		// lift it, and a login is disruptive (claude login is machine-wide),
 		// so never steer a rate-limited profile toward "caam login" (PR #82).
 		recs = append(recs, fmt.Sprintf("%s/%s is rate limited - wait %s for the cap to reset (re-login will not clear it)",
-			provider, profile, formatDurationNatural(health.RateLimitedUntil.Sub(now))))
+			provider, profile, FormatDurationNatural(health.RateLimitedUntil.Sub(now))))
 	} else if !health.TokenExpiresAt.IsZero() && !health.SelfRefreshing {
 		// Check token expiry. Nothing to recommend for a self-refreshing
 		// credential: the provider's CLI renews it on next use, "caam
@@ -273,8 +273,8 @@ func colorizeStatus(status HealthStatus, text string) string {
 	}
 }
 
-// formatDurationNatural formats a duration in a natural way.
-func formatDurationNatural(d time.Duration) string {
+// FormatDurationNatural formats a duration in a natural way.
+func FormatDurationNatural(d time.Duration) string {
 	if d < time.Minute {
 		return "less than a minute"
 	}

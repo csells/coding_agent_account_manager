@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -176,15 +177,9 @@ func runLimits(cmd *cobra.Command, args []string) error {
 	// with credential readers + API fetchers). Be explicit about scope: default
 	// to the supported set, and reject an explicit unsupported provider with a
 	// clear message rather than silently returning empty data (issue #32).
-	var providers []string
-	if len(args) > 0 {
-		p := strings.ToLower(args[0])
-		if !isLimitsProvider(p) {
-			return fmt.Errorf("limits not supported for agent: %s (supported: %s)", p, strings.Join(limitsProviders, ", "))
-		}
-		providers = []string{p}
-	} else {
-		providers = append([]string(nil), limitsProviders...)
+	providers, err := resolveProviderArg(args, limitsProviders, "limits")
+	if err != nil {
+		return err
 	}
 
 	// Only Claude keeps a usage snapshot on disk, so --cached has nothing to
@@ -364,6 +359,18 @@ func isLimitsProvider(p string) bool {
 		}
 	}
 	return false
+}
+
+// resolveProviderArg is the optional agent argument lowercased, or every supported provider when absent.
+func resolveProviderArg(args, supported []string, feature string) ([]string, error) {
+	if len(args) == 0 {
+		return append([]string(nil), supported...), nil
+	}
+	p := strings.ToLower(args[0])
+	if !slices.Contains(supported, p) {
+		return nil, fmt.Errorf("%s not supported for agent: %s (supported: %s)", feature, p, strings.Join(supported, ", "))
+	}
+	return []string{p}, nil
 }
 
 // buildCredentialLookup wires the credential namespaces from caam's process

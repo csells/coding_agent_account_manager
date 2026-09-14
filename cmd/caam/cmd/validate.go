@@ -181,28 +181,11 @@ func validateVaultProfile(tool, profileName string) ValidationOutput {
 	default:
 		out.Valid = true
 		if !info.ExpiresAt.IsZero() {
-			out.ExpiresAt = formatExpiryTime(info.ExpiresAt)
+			out.ExpiresAt = formatExpiryDuration(info.ExpiresAt)
 		}
 	}
 
 	return out
-}
-
-func formatExpiryTime(t time.Time) string {
-	now := time.Now()
-	diff := t.Sub(now)
-
-	if diff < 0 {
-		return "expired"
-	}
-
-	if diff < time.Hour {
-		return fmt.Sprintf("in %d minutes", int(diff.Minutes()))
-	}
-	if diff < 24*time.Hour {
-		return fmt.Sprintf("in %d hours", int(diff.Hours()))
-	}
-	return fmt.Sprintf("in %d days", int(diff.Hours()/24))
 }
 
 func outputJSON(results []ValidationOutput) error {

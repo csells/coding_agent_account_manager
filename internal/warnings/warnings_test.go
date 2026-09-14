@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 )
 
 func TestLevelString(t *testing.T) {
@@ -50,8 +51,8 @@ func TestFormatDuration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
-			if got := formatDuration(tt.d); got != tt.want {
-				t.Errorf("formatDuration(%v) = %q, want %q", tt.d, got, tt.want)
+			if got := health.FormatDurationNatural(tt.d); got != tt.want {
+				t.Errorf("health.FormatDurationNatural(%v) = %q, want %q", tt.d, got, tt.want)
 			}
 		})
 	}
