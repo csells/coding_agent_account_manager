@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/bundle"
 )
 
 // =============================================================================
@@ -375,9 +377,9 @@ func TestFormatFileSize(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
-			got := formatFileSize(tt.bytes)
+			got := bundle.FormatSize(tt.bytes)
 			if got != tt.want {
-				t.Errorf("formatFileSize(%d) = %q, want %q", tt.bytes, got, tt.want)
+				t.Errorf("bundle.FormatSize(%d) = %q, want %q", tt.bytes, got, tt.want)
 			}
 		})
 	}

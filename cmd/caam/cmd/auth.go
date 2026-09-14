@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/bundle"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider"
 )
 
@@ -276,7 +277,7 @@ func printAuthDetectReport(report *AuthDetectReport) {
 					fmt.Printf("    Last modified: %s\n", t.Format("2006-01-02 15:04:05"))
 				}
 			}
-			fmt.Printf("    Size: %s\n", formatFileSize(loc.FileSize))
+			fmt.Printf("    Size: %s\n", bundle.FormatSize(loc.FileSize))
 			fmt.Printf("    Status: %s\n", status)
 		}
 
@@ -350,19 +351,6 @@ func getEnv(key string) string {
 // envLookup is a variable so it can be mocked in tests
 var envLookup = func(key string) string {
 	return os.Getenv(key)
-}
-
-func formatFileSize(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
 // runAuthImport implements the auth import command.

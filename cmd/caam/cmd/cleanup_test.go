@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"testing"
+
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/bundle"
 )
 
 // =============================================================================
@@ -87,9 +89,9 @@ func TestFormatBytes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
-			got := formatBytes(tt.bytes)
+			got := bundle.FormatSize(tt.bytes)
 			if got != tt.want {
-				t.Errorf("formatBytes(%d) = %q, want %q", tt.bytes, got, tt.want)
+				t.Errorf("bundle.FormatSize(%d) = %q, want %q", tt.bytes, got, tt.want)
 			}
 		})
 	}
