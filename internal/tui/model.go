@@ -546,22 +546,37 @@ func (m *Model) clearActivitySpinner() {
 	m.activityMessage = ""
 }
 
-// loadProfiles loads profiles for all providers.
-func (m Model) loadProfiles() tea.Msg {
-	vault := authfile.NewVault(m.vaultPath)
-	profiles := make(map[string][]Profile)
-	meta := make(map[string]map[string]*profile.Profile)
-	vaultMeta := make(map[string]map[string]vaultProfileMeta)
+// vaultScan is one pass over every provider's vault: the profiles in name
+// order with the active one marked, and (when requested) each profile's
+// store record and vault metadata.
+type vaultScan struct {
+	profiles  map[string][]Profile
+	meta      map[string]map[string]*profile.Profile
+	vaultMeta map[string]map[string]vaultProfileMeta
+}
 
-	store := m.profileStore
-	if store == nil {
-		store = profile.NewStore(profile.DefaultStorePath())
+// scanVault lists every provider's vault profiles. With withMeta it also
+// loads each profile's store record and vault metadata and stamps last use
+// from the activity log; without it meta and vaultMeta stay nil and neither
+// the profile store nor the activity database is touched.
+func (m Model) scanVault(withMeta bool) (vaultScan, error) {
+	vault := authfile.NewVault(m.vaultPath)
+	scan := vaultScan{profiles: make(map[string][]Profile)}
+
+	var store *profile.Store
+	if withMeta {
+		scan.meta = make(map[string]map[string]*profile.Profile)
+		scan.vaultMeta = make(map[string]map[string]vaultProfileMeta)
+		store = m.profileStore
+		if store == nil {
+			store = profile.NewStore(profile.DefaultStorePath())
+		}
 	}
 
 	for _, name := range m.allProviders {
 		names, err := vault.List(name)
 		if err != nil {
-			return errMsg{err: fmt.Errorf("list vault profiles for %s: %w", name, err)}
+			return vaultScan{}, fmt.Errorf("list vault profiles for %s: %w", name, err)
 		}
 
 		active := ""
@@ -575,26 +590,39 @@ func (m Model) loadProfiles() tea.Msg {
 
 		sort.Strings(names)
 		ps := make([]Profile, 0, len(names))
-		meta[name] = make(map[string]*profile.Profile)
-		vaultMeta[name] = make(map[string]vaultProfileMeta)
+		if withMeta {
+			scan.meta[name] = make(map[string]*profile.Profile)
+			scan.vaultMeta[name] = make(map[string]vaultProfileMeta)
+		}
 		for _, prof := range names {
 			ps = append(ps, Profile{
 				Name:     prof,
 				Provider: name,
 				IsActive: prof == active,
 			})
-			if store != nil {
+			if withMeta {
 				if loaded, err := store.Load(name, prof); err == nil && loaded != nil {
-					meta[name][prof] = loaded
+					scan.meta[name][prof] = loaded
 				}
+				scan.vaultMeta[name][prof] = loadVaultProfileMeta(vault, name, prof)
 			}
-			vaultMeta[name][prof] = loadVaultProfileMeta(vault, name, prof)
 		}
-		profiles[name] = ps
+		scan.profiles[name] = ps
 	}
 
-	applyLastUsed(vaultMeta)
-	return profilesLoadedMsg{profiles: profiles, meta: meta, vaultMeta: vaultMeta, health: m.computeHealthMap(profiles)}
+	if withMeta {
+		applyLastUsed(scan.vaultMeta)
+	}
+	return scan, nil
+}
+
+// loadProfiles loads profiles for all providers.
+func (m Model) loadProfiles() tea.Msg {
+	scan, err := m.scanVault(true)
+	if err != nil {
+		return errMsg{err: err}
+	}
+	return profilesLoadedMsg{profiles: scan.profiles, meta: scan.meta, vaultMeta: scan.vaultMeta, health: m.computeHealthMap(scan.profiles)}
 }
 
 // applyLastUsed stamps each vault profile with the activity log's last use
@@ -3531,56 +3559,11 @@ type profilesRefreshedMsg struct {
 // while preserving selection context for intelligent index restoration.
 func (m Model) refreshProfiles(ctx refreshContext) tea.Cmd {
 	return func() tea.Msg {
-		vault := authfile.NewVault(m.vaultPath)
-		profiles := make(map[string][]Profile)
-		meta := make(map[string]map[string]*profile.Profile)
-		vaultMeta := make(map[string]map[string]vaultProfileMeta)
-
-		store := m.profileStore
-		if store == nil {
-			store = profile.NewStore(profile.DefaultStorePath())
+		scan, err := m.scanVault(true)
+		if err != nil {
+			return profilesRefreshedMsg{err: err, ctx: ctx}
 		}
-
-		for _, name := range m.allProviders {
-			names, err := vault.List(name)
-			if err != nil {
-				return profilesRefreshedMsg{
-					err: fmt.Errorf("list vault profiles for %s: %w", name, err),
-					ctx: ctx,
-				}
-			}
-
-			active := ""
-			if len(names) > 0 {
-				if fileSet, ok := authFileSetForProvider(name); ok {
-					if ap, err := vault.ActiveProfile(fileSet); err == nil {
-						active = ap
-					}
-				}
-			}
-
-			sort.Strings(names)
-			ps := make([]Profile, 0, len(names))
-			meta[name] = make(map[string]*profile.Profile)
-			vaultMeta[name] = make(map[string]vaultProfileMeta)
-			for _, prof := range names {
-				ps = append(ps, Profile{
-					Name:     prof,
-					Provider: name,
-					IsActive: prof == active,
-				})
-				if store != nil {
-					if loaded, err := store.Load(name, prof); err == nil && loaded != nil {
-						meta[name][prof] = loaded
-					}
-				}
-				vaultMeta[name][prof] = loadVaultProfileMeta(vault, name, prof)
-			}
-			profiles[name] = ps
-		}
-
-		applyLastUsed(vaultMeta)
-		return profilesRefreshedMsg{profiles: profiles, meta: meta, vaultMeta: vaultMeta, health: m.computeHealthMap(profiles), ctx: ctx}
+		return profilesRefreshedMsg{profiles: scan.profiles, meta: scan.meta, vaultMeta: scan.vaultMeta, health: m.computeHealthMap(scan.profiles), ctx: ctx}
 	}
 }
 
@@ -3776,50 +3759,22 @@ func (m Model) formatError(err error) string {
 // sets the selection to the specified index after refresh.
 func (m Model) refreshProfilesWithIndex(provider string, index int) tea.Cmd {
 	return func() tea.Msg {
-		vault := authfile.NewVault(m.vaultPath)
-		profiles := make(map[string][]Profile)
-
-		for _, name := range m.allProviders {
-			names, err := vault.List(name)
-			if err != nil {
-				return profilesRefreshedMsg{
-					err: fmt.Errorf("list vault profiles for %s: %w", name, err),
-					ctx: refreshContext{provider: provider},
-				}
-			}
-
-			active := ""
-			if len(names) > 0 {
-				if fileSet, ok := authFileSetForProvider(name); ok {
-					if ap, err := vault.ActiveProfile(fileSet); err == nil {
-						active = ap
-					}
-				}
-			}
-
-			sort.Strings(names)
-			ps := make([]Profile, 0, len(names))
-			for _, prof := range names {
-				ps = append(ps, Profile{
-					Name:     prof,
-					Provider: name,
-					IsActive: prof == active,
-				})
-			}
-			profiles[name] = ps
-		}
-
 		// Create context that will set the selection index after refresh
 		ctx := refreshContext{
 			provider: provider,
 		}
 
+		scan, err := m.scanVault(false)
+		if err != nil {
+			return profilesRefreshedMsg{err: err, ctx: ctx}
+		}
+
 		// Set the selected profile name based on the index
-		if providerProfiles := profiles[provider]; index >= 0 && index < len(providerProfiles) {
+		if providerProfiles := scan.profiles[provider]; index >= 0 && index < len(providerProfiles) {
 			ctx.selectedProfile = providerProfiles[index].Name
 		}
 
-		return profilesRefreshedMsg{profiles: profiles, health: m.computeHealthMap(profiles), ctx: ctx}
+		return profilesRefreshedMsg{profiles: scan.profiles, health: m.computeHealthMap(scan.profiles), ctx: ctx}
 	}
 }
 
