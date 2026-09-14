@@ -75,6 +75,8 @@ func RefreshProfile(ctx context.Context, provider, profile string, vault *authfi
 		err = refreshCodex(ctx, vaultPath)
 	case "gemini":
 		err = refreshGemini(ctx, provider, profile, store, vaultPath)
+	case "kimi":
+		err = refreshKimi(ctx, vaultPath)
 	case "opencode", "cursor":
 		// Token refresh not yet supported for these providers
 		return nil
@@ -137,6 +139,28 @@ func refreshCodex(ctx context.Context, vaultPath string) error {
 	}
 
 	if err := UpdateCodexAuth(authPath, resp); err != nil {
+		return fmt.Errorf("update auth: %w", err)
+	}
+
+	return nil
+}
+
+// refreshKimi spends the vault copy's refresh token and writes the new
+// tokens back into the vault's kimi-code.json.
+func refreshKimi(ctx context.Context, vaultPath string) error {
+	authPath := filepath.Join(vaultPath, kimiCredentialFile)
+
+	refreshToken, err := getRefreshTokenFromJSON(authPath)
+	if err != nil {
+		return fmt.Errorf("read refresh token: %w", err)
+	}
+
+	resp, err := RefreshKimiToken(ctx, refreshToken)
+	if err != nil {
+		return fmt.Errorf("refresh api: %w", err)
+	}
+
+	if err := UpdateKimiAuth(authPath, resp); err != nil {
 		return fmt.Errorf("update auth: %w", err)
 	}
 

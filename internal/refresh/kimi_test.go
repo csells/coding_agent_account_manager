@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 )
 
 // kimiTokenServer answers the token endpoint with status and body and
@@ -244,4 +247,112 @@ func readJSONMap(t *testing.T, path string) map[string]any {
 		t.Fatalf("parse %s: %v", path, err)
 	}
 	return m
+}
+
+// RefreshProfile for a Kimi account spends the vault copy's refresh token
+// and stores the new tokens in the vault; when the account is the Active
+// one (the live kimi-code.json is the vault copy) the live file gets them
+// too, and a live file that has moved on is left alone.
+func TestRefreshProfile_KimiUpdatesTheVaultCopy(t *testing.T) {
+	kimiHome := t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", kimiHome)
+	livePath := filepath.Join(kimiHome, "credentials", kimiCredentialFile)
+	if err := os.MkdirAll(filepath.Dir(livePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	vault := authfile.NewVault(filepath.Join(t.TempDir(), "vault"))
+	vaultPath := filepath.Join(vault.ProfilePath("kimi", "work"), kimiCredentialFile)
+	if err := os.MkdirAll(filepath.Dir(vaultPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := []byte(`{"access_token":"old-access","refresh_token":"old-refresh","expires_at":1000,"expires_in":900,"scope":"kimi-code","token_type":"Bearer"}`)
+	if err := os.WriteFile(vaultPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var presented []string
+	oldRefresh := RefreshKimiToken
+	RefreshKimiToken = func(ctx context.Context, refreshToken string) (*TokenResponse, error) {
+		presented = append(presented, refreshToken)
+		return &TokenResponse{AccessToken: "new-access-" + refreshToken, RefreshToken: "new-refresh", ExpiresIn: 3600}, nil
+	}
+	t.Cleanup(func() { RefreshKimiToken = oldRefresh })
+
+	// Not active: no live file. Only the vault copy changes.
+	if err := RefreshProfile(context.Background(), "kimi", "work", vault, nil); err != nil {
+		t.Fatalf("RefreshProfile: %v", err)
+	}
+	if len(presented) != 1 || presented[0] != "old-refresh" {
+		t.Fatalf("presented %v, want the vault copy's refresh token once", presented)
+	}
+	got := readJSONMap(t, vaultPath)
+	if got["access_token"] != "new-access-old-refresh" || got["refresh_token"] != "new-refresh" || got["scope"] != "kimi-code" {
+		t.Errorf("vault copy = %v", got)
+	}
+	if _, err := os.Stat(livePath); !os.IsNotExist(err) {
+		t.Errorf("a refresh must not create a live credential (stat err %v)", err)
+	}
+
+	// Active: the live file is the vault copy, so the new tokens go there too.
+	current, err := os.ReadFile(vaultPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(livePath, current, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RefreshProfile(context.Background(), "kimi", "work", vault, nil); err != nil {
+		t.Fatalf("RefreshProfile (active): %v", err)
+	}
+	if len(presented) != 2 || presented[1] != "new-refresh" {
+		t.Fatalf("presented %v, want the rotated refresh token second", presented)
+	}
+	live := readJSONMap(t, livePath)
+	if live["access_token"] != "new-access-new-refresh" {
+		t.Errorf("live file not updated for the Active account: %v", live)
+	}
+
+	// Somebody else's session is live: the vault copy refreshes, the live file stays.
+	if err := os.WriteFile(livePath, []byte(`{"access_token":"other-access","refresh_token":"other-refresh","expires_at":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RefreshProfile(context.Background(), "kimi", "work", vault, nil); err != nil {
+		t.Fatalf("RefreshProfile (inactive): %v", err)
+	}
+	live = readJSONMap(t, livePath)
+	if live["access_token"] != "other-access" {
+		t.Errorf("live file of another account was overwritten: %v", live)
+	}
+}
+
+// A refresh the provider refuses surfaces as the profile-aware
+// RefreshTokenReusedError, the class every caller answers with a login.
+func TestRefreshProfile_KimiSessionGoneNamesTheProfile(t *testing.T) {
+	t.Setenv("KIMI_CODE_HOME", t.TempDir())
+	vault := authfile.NewVault(filepath.Join(t.TempDir(), "vault"))
+	vaultPath := filepath.Join(vault.ProfilePath("kimi", "work"), kimiCredentialFile)
+	if err := os.MkdirAll(filepath.Dir(vaultPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(vaultPath, []byte(`{"access_token":"a","refresh_token":"r","expires_at":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldRefresh := RefreshKimiToken
+	RefreshKimiToken = func(ctx context.Context, refreshToken string) (*TokenResponse, error) {
+		return nil, fmt.Errorf("%w: kimi refresh refused with status 401", ErrRefreshTokenReused)
+	}
+	t.Cleanup(func() { RefreshKimiToken = oldRefresh })
+
+	err := RefreshProfile(context.Background(), "kimi", "work", vault, nil)
+	var reused *RefreshTokenReusedError
+	if !errors.As(err, &reused) || reused.Provider != "kimi" || reused.Profile != "work" {
+		t.Fatalf("err = %v, want RefreshTokenReusedError for kimi/work", err)
+	}
+	if !strings.Contains(err.Error(), "caam login kimi work") {
+		t.Errorf("the error should say how to log in again: %v", err)
+	}
+	if got := readJSONMap(t, vaultPath); got["access_token"] != "a" {
+		t.Errorf("a refused refresh must not touch the vault copy: %v", got)
+	}
 }
