@@ -560,7 +560,7 @@ func TestRefreshKey_KimiTokenIsRefreshedWhenRefused(t *testing.T) {
 	}
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
 	m = updated.(Model)
-	if m.state == stateReloginConfirm || !strings.Contains(m.statusMsg, "token, then its limits") {
+	if m.state == stateConfirm || !strings.Contains(m.statusMsg, "token, then its limits") {
 		t.Fatalf("r should refresh the token, not offer a login: state=%v status=%q", m.state, m.statusMsg)
 	}
 }

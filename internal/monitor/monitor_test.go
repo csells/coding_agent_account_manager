@@ -233,6 +233,41 @@ func TestMonitorRefreshMarksActiveAndReadsItsLiveCredential(t *testing.T) {
 	}
 }
 
+// TestMonitorRefreshActiveFallsBackToVaultCopy: when the live credential
+// cannot be read, the active profile's row is built from its vault copy,
+// and it is still the starred row.
+func TestMonitorRefreshActiveFallsBackToVaultCopy(t *testing.T) {
+	tmpDir := t.TempDir()
+	vault := authfile.NewVault(tmpDir)
+	writeProfileFile(t, vault, "codex", "a", "auth.json", `{"tokens":{"access_token":"vault-a"}}`)
+	writeProfileFile(t, vault, "codex", "b", "auth.json", `{"tokens":{"access_token":"vault-b"}}`)
+
+	fetcher := &recordingFetcher{}
+	asked := 0
+	mon := NewMonitor(
+		WithVault(vault),
+		WithFetcher(fetcher),
+		WithProviders([]string{"codex", "claude"}),
+		WithHealthStore(nil),
+		WithActiveProfile(func(provider string) string { asked++; return "b" }),
+		WithLiveCredential(func(provider, name string) (string, bool) { return "", false }),
+	)
+	_ = mon.Refresh(context.Background())
+
+	state := mon.GetState()
+	if !state.Profiles["codex/b"].Active || state.Profiles["codex/a"].Active {
+		t.Fatalf("active flags wrong: a=%v b=%v", state.Profiles["codex/a"].Active, state.Profiles["codex/b"].Active)
+	}
+	if fetcher.seen["codex/b"] != "vault-b" {
+		t.Fatalf("active row fetched with %q, want its vault copy when nothing is live", fetcher.seen["codex/b"])
+	}
+	// The hook is asked once per provider with profiles, not once per
+	// loop that needs the answer; claude has no profiles and is not asked.
+	if asked != 1 {
+		t.Fatalf("active profile asked %d times, want once", asked)
+	}
+}
+
 // TestMonitorRefreshReadsEveryProviderWithACredentialReader: the monitor
 // used to know only claude and codex; the other providers with usage APIs
 // are read through the same credential readers `caam limits` uses.

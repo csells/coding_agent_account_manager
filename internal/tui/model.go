@@ -50,7 +50,6 @@ const (
 	stateSearch
 	stateHelp
 	stateNameDialog
-	stateConfirmOverwrite
 	stateExportConfirm
 	stateImportPath
 	stateImportConfirm
@@ -60,7 +59,6 @@ const (
 	stateCommandPalette
 	stateProviderPicker
 	stateMessage
-	stateReloginConfirm
 )
 
 const (
@@ -78,6 +76,11 @@ const (
 	// confirmSyncSend: copy vault credentials to and from the machine in
 	// pendingSyncMachine over SSH.
 	confirmSyncSend
+	// confirmOverwrite: the name typed into the name dialog is already in
+	// the vault (pendingProfile); replace its credential.
+	confirmOverwrite
+	// confirmRelogin: start pendingRelogin's login again, the way n does.
+	confirmRelogin
 )
 
 // Profile represents a saved auth profile for display.
@@ -223,6 +226,12 @@ type Model struct {
 	// stripOffset is the first provider slot the strip shows. It moves
 	// only when the selection leaves the visible window (settleStrip).
 	stripOffset int
+	// stripSettled is what the strip looked like when stripOffset was
+	// last settled; settleStrip does nothing while it is unchanged.
+	stripSettled stripInputs
+	// limitsGen counts changes to limits, so a settled strip knows when
+	// the summaries it was measured with have changed.
+	limitsGen int
 }
 
 // computeHealthMap builds the health verdict for every listed profile. With
@@ -1028,7 +1037,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delete(m.refreshRefused, limitsKey(msg.provider, msg.profile))
 		m.showRefreshSuccess(msg.profile, time.Time{}) // TODO: pass actual expiry time
 		// The new token changes what the limits API will say: fetch again.
-		delete(m.limits, limitsKey(msg.provider, msg.profile))
+		m.forgetLimits(msg.provider, msg.profile)
 		ctx := refreshContext{
 			provider:        msg.provider,
 			selectedProfile: msg.profile,
@@ -1111,8 +1120,6 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case stateNameDialog:
 		return m.handleNameDialogKeys(msg)
-	case stateConfirmOverwrite:
-		return m.handleConfirmOverwriteKeys(msg)
 	case stateExportConfirm:
 		return m.handleExportConfirmKeys(msg)
 	case stateImportPath:
@@ -1131,8 +1138,6 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleProviderPickerKeys(msg)
 	case stateMessage:
 		return m.handleMessageKeys(msg)
-	case stateReloginConfirm:
-		return m.handleReloginConfirmKeys(msg)
 	}
 
 	// The detail card overlay: ↑/↓ keep working underneath it; i, esc and
@@ -1295,13 +1300,6 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleConfirmKeys handles keys in confirmation state.
 func (m Model) handleConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	cancel := func() (tea.Model, tea.Cmd) {
-		m.confirmDialog = nil
-		m.state = stateList
-		m.pendingAction = confirmNone
-		m.statusMsg = "Cancelled"
-		return m, nil
-	}
 	if m.confirmDialog != nil {
 		var cmd tea.Cmd
 		m.confirmDialog, cmd = m.confirmDialog.Update(msg)
@@ -1311,9 +1309,9 @@ func (m Model) handleConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.confirmDialog = nil
 				return m.executeConfirmedAction()
 			}
-			return cancel()
+			return m.cancelConfirmedAction()
 		case DialogResultCancel:
-			return cancel()
+			return m.cancelConfirmedAction()
 		}
 		return m, cmd
 	}
@@ -1321,8 +1319,28 @@ func (m Model) handleConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Confirm):
 		return m.executeConfirmedAction()
 	case key.Matches(msg, m.keys.Cancel):
-		return cancel()
+		return m.cancelConfirmedAction()
 	}
+	return m, nil
+}
+
+// cancelConfirmedAction closes the question unanswered. What the status
+// line says is what was declined.
+func (m Model) cancelConfirmedAction() (tea.Model, tea.Cmd) {
+	m.confirmDialog = nil
+	m.state = stateList
+	switch m.pendingAction {
+	case confirmOverwrite:
+		m.pendingProfile = ""
+		m.nameProvider = ""
+		m.statusMsg = "Login cancelled: the new account stays signed in, but is not in the vault"
+	case confirmRelogin:
+		m.pendingRelogin = ""
+		m.statusMsg = "Login not started"
+	default:
+		m.statusMsg = "Cancelled"
+	}
+	m.pendingAction = confirmNone
 	return m, nil
 }
 
@@ -1541,12 +1559,12 @@ func (m Model) processNameSubmit(name string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Only letters, numbers, underscore, hyphen and period: the vault's own
-	// rule (authfile.go, profile.go), which keeps names out of shell and
-	// filesystem trouble.
+	// The vault's own rule (authfile.isNameRune), which keeps names out of
+	// shell and filesystem trouble while admitting the emails accounts are
+	// filed under.
 	for _, r := range name {
 		if !isProfileNameRune(r) {
-			m.statusMsg = "The name can only contain letters, numbers, underscore, hyphen, and period"
+			m.statusMsg = "The name can only contain letters, numbers, underscore, hyphen, period, @ and +"
 			m.nameDialog.Reset()
 			return m, nil
 		}
@@ -1565,59 +1583,13 @@ func (m Model) processNameSubmit(name string) (tea.Model, tea.Cmd) {
 		if p == name {
 			m.nameDialog = nil
 			m.pendingProfile = name
-			m.confirmDialog = NewConfirmDialog(
-				"Account exists",
-				fmt.Sprintf("%s is already in the vault. Replace its credential with the one just logged in?", name),
-			)
-			m.confirmDialog.SetStyles(m.styles)
-			m.confirmDialog.SetLabels("Replace", "Cancel")
+			m.openConfirm(confirmOverwrite, "Account exists", fmt.Sprintf("%s is already in the vault. Replace its credential with the one just logged in?", name), "Replace")
 			m.confirmDialog.SetWidth(m.dialogWidth(56))
-			m.state = stateConfirmOverwrite
 			return m, nil
 		}
 	}
 
 	return m.captureNamed(name)
-}
-
-// handleConfirmOverwriteKeys handles key input for the overwrite confirmation dialog.
-func (m Model) handleConfirmOverwriteKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.confirmDialog == nil {
-		m.state = stateList
-		return m, nil
-	}
-
-	// Update the dialog with the key press
-	var cmd tea.Cmd
-	m.confirmDialog, cmd = m.confirmDialog.Update(msg)
-
-	// Check dialog result
-	switch m.confirmDialog.Result() {
-	case DialogResultSubmit:
-		if m.confirmDialog.Confirmed() {
-			name := m.pendingProfile
-			m.confirmDialog = nil
-			m.pendingProfile = ""
-			return m.captureNamed(name)
-		}
-		// User selected "No" - cancel overwrite
-		m.confirmDialog = nil
-		m.pendingProfile = ""
-		m.nameProvider = ""
-		m.state = stateList
-		m.statusMsg = "Login cancelled: the new account stays signed in, but is not in the vault"
-		return m, nil
-
-	case DialogResultCancel:
-		m.confirmDialog = nil
-		m.pendingProfile = ""
-		m.nameProvider = ""
-		m.state = stateList
-		m.statusMsg = "Login cancelled: the new account stays signed in, but is not in the vault"
-		return m, nil
-	}
-
-	return m, cmd
 }
 
 // handleSyncPanelKeys handles keys when the sync panel is visible.
@@ -1707,7 +1679,7 @@ func (m Model) captureNamed(name string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.selectedProfileName = name
-	delete(m.limits, limitsKey(provider, name))
+	m.forgetLimits(provider, name)
 	m.setNotice(provider, name, "Logged in and captured "+name, false)
 	m.showMessage(StatusSuccess, "Logged in", "Logged in to %s as %s; its credential is in the vault.", providerLabel(provider), name)
 	return m, m.refreshProfiles(refreshContext{provider: provider, selectedProfile: name})
@@ -1782,46 +1754,9 @@ func sessionEnded(err error) bool {
 func (m Model) offerRelogin(provider, name, why string) (tea.Model, tea.Cmd) {
 	m.setNotice(provider, name, "Needs a new login: "+why, true)
 	m.pendingRelogin = provider
-	m.confirmDialog = NewConfirmDialog(
-		"Log in again?",
-		fmt.Sprintf("%s needs a new login: %s.\n\nStart the %s login now? The signed-in account is captured first, and the new session is filed under the account that signs in.", name, why, providerLabel(provider)),
-	)
-	m.confirmDialog.SetStyles(m.styles)
-	m.confirmDialog.SetWidth(m.dialogWidth(64))
-	m.confirmDialog.yesLabel, m.confirmDialog.noLabel = "Log in", "Not now"
-	m.state = stateReloginConfirm
-	m.statusMsg = ""
+	m.openConfirm(confirmRelogin, "Log in again?", fmt.Sprintf("%s needs a new login: %s.\n\nStart the %s login now? The signed-in account is captured first, and the new session is filed under the account that signs in.", name, why, providerLabel(provider)), "Log in")
+	m.confirmDialog.SetLabels("Log in", "Not now")
 	return m, nil
-}
-
-// handleReloginConfirmKeys starts the login on yes.
-func (m Model) handleReloginConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.confirmDialog == nil {
-		m.state = stateList
-		return m, nil
-	}
-	var cmd tea.Cmd
-	m.confirmDialog, cmd = m.confirmDialog.Update(msg)
-	switch m.confirmDialog.Result() {
-	case DialogResultSubmit:
-		confirmed := m.confirmDialog.Confirmed()
-		provider := m.pendingRelogin
-		m.confirmDialog = nil
-		m.pendingRelogin = ""
-		m.state = stateList
-		if confirmed {
-			return m.startNewAccountLogin(provider)
-		}
-		m.statusMsg = "Login not started"
-		return m, nil
-	case DialogResultCancel:
-		m.confirmDialog = nil
-		m.pendingRelogin = ""
-		m.state = stateList
-		m.statusMsg = "Login not started"
-		return m, nil
-	}
-	return m, cmd
 }
 
 // doRefreshProfile returns a tea.Cmd that performs the token refresh.
@@ -2254,6 +2189,19 @@ func (m Model) executeConfirmedAction() (tea.Model, tea.Cmd) {
 			}
 			return m, m.refreshProfiles(ctx)
 		}
+
+	case confirmOverwrite:
+		name := m.pendingProfile
+		m.pendingProfile = ""
+		m.pendingAction = confirmNone
+		return m.captureNamed(name)
+
+	case confirmRelogin:
+		provider := m.pendingRelogin
+		m.pendingRelogin = ""
+		m.state = stateList
+		m.pendingAction = confirmNone
+		return m.startNewAccountLogin(provider)
 
 	case confirmSyncSend:
 		id := m.pendingSyncMachine
@@ -2725,13 +2673,6 @@ func (m Model) View() string {
 			return m.dialogOverlayView(m.confirmDialog.View())
 		}
 		return m.mainView()
-	case stateReloginConfirm:
-		if m.confirmDialog != nil {
-			return m.dialogOverlayView(m.confirmDialog.View())
-		}
-		return m.mainView()
-	case stateConfirmOverwrite:
-		return m.dialogOverlayView(m.confirmDialog.View())
 	case stateExportConfirm:
 		if m.confirmDialog != nil {
 			return m.dialogOverlayView(m.confirmDialog.View())
@@ -3892,8 +3833,9 @@ func (m Model) refreshProfilesWithIndex(provider string, index int) tea.Cmd {
 }
 
 // isProfileNameRune reports whether r may appear in a profile name typed
-// into the dashboard: letters, digits, underscore, hyphen and period.
+// into the dashboard: the vault's rule (authfile.isNameRune) — letters,
+// digits, underscore, hyphen, period, @ and +, so an email is a name.
 func isProfileNameRune(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-		(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.'
+		(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' || r == '@' || r == '+'
 }

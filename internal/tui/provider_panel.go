@@ -1,9 +1,6 @@
 package tui
 
 import (
-	"unicode"
-	"unicode/utf8"
-
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider"
@@ -65,17 +62,4 @@ func NewProviderPanelStyles(theme Theme) ProviderPanelStyles {
 // vocabulary every other caam surface prints (provider.Label).
 func providerLabel(id string) string {
 	return provider.Label(id)
-}
-
-// capitalizeFirst capitalizes the first letter of a string, with
-// Unicode-aware rune handling.
-func capitalizeFirst(s string) string {
-	if s == "" {
-		return s
-	}
-	r, size := utf8.DecodeRuneInString(s)
-	if r == utf8.RuneError {
-		return s
-	}
-	return string(unicode.ToUpper(r)) + s[size:]
 }

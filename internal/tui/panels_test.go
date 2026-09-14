@@ -38,30 +38,6 @@ func TestDefaultProviderPanelStyles(t *testing.T) {
 	}
 }
 
-func TestCapitalizeFirst_ProviderPanel(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"claude", "Claude"},
-		{"codex", "Codex"},
-		{"gemini", "Gemini"},
-		{"", ""},
-		{"a", "A"},
-		{"ABC", "ABC"},
-		{"über", "Über"}, // Unicode test
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := capitalizeFirst(tt.input)
-			if got != tt.want {
-				t.Errorf("capitalizeFirst(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
 // =============================================================================
 // detail_panel.go Tests
 // =============================================================================

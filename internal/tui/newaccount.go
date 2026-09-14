@@ -274,7 +274,7 @@ func (m Model) newAccountIdentified(msg newAccountIdentifiedMsg) (tea.Model, tea
 		return m, nil
 	}
 	m.selectedProfileName = msg.name
-	delete(m.limits, limitsKey(msg.provider, msg.name))
+	m.forgetLimits(msg.provider, msg.name)
 	m.setNotice(msg.provider, msg.name, "Logged in and captured "+msg.name, false)
 	m.showMessage(StatusSuccess, "Logged in", "%s now uses %s, and its credential is in the vault.", providerLabel(msg.provider), msg.name)
 	return m, m.refreshProfiles(refreshContext{provider: msg.provider, selectedProfile: msg.name})

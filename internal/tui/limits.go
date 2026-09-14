@@ -49,7 +49,10 @@ const limitsTTL = 60 * time.Second
 
 // limitsEntry is the cached result for one provider/profile.
 type limitsEntry struct {
-	info    *usage.UsageInfo
+	info *usage.UsageInfo
+	// cells is info's windows in display order (usage.WindowsOf), worked
+	// out once when the entry is stored; every frame reads it.
+	cells   []usage.WindowCell
 	err     error
 	at      time.Time
 	loading bool
@@ -101,6 +104,7 @@ func (m *Model) limitsFetchFor(provider, profile string) tea.Cmd {
 	}
 	e.loading = true
 	m.limits[key] = e
+	m.limitsGen++
 
 	fetch := m.hooks.Limits
 	return func() tea.Msg {
@@ -145,15 +149,22 @@ func (m *Model) limitsPrefetchCmd() tea.Cmd {
 func (m *Model) limitsRefresh() {
 	provider := m.currentProvider()
 	for _, p := range m.profiles[provider] {
-		delete(m.limits, limitsKey(provider, p.Name))
+		m.forgetLimits(provider, p.Name)
 	}
 	for _, id := range m.providers {
 		for _, p := range m.profiles[id] {
 			if p.IsActive {
-				delete(m.limits, limitsKey(id, p.Name))
+				m.forgetLimits(id, p.Name)
 			}
 		}
 	}
+}
+
+// forgetLimits drops one profile's cached limits so the next prefetch
+// asks again.
+func (m *Model) forgetLimits(provider, profile string) {
+	delete(m.limits, limitsKey(provider, profile))
+	m.limitsGen++
 }
 
 // applyLimitsLoaded stores a fetch result. A failed fetch keeps the
@@ -164,16 +175,18 @@ func (m *Model) applyLimitsLoaded(msg limitsLoadedMsg) {
 	}
 	key := limitsKey(msg.provider, msg.profile)
 	prev := m.limits[key]
-	entry := limitsEntry{info: msg.info, err: msg.err, at: time.Now()}
+	entry := limitsEntry{info: msg.info, cells: usage.WindowsOf(msg.info), err: msg.err, at: time.Now()}
 	if msg.err == nil && msg.info != nil && msg.info.Error != "" {
 		entry.err = errors.New(msg.info.Error)
 	}
-	if entry.err != nil && (entry.info == nil || len(usage.WindowsOf(entry.info)) == 0) && prev.info != nil {
+	if entry.err != nil && len(entry.cells) == 0 && prev.info != nil {
 		entry.info = prev.info
+		entry.cells = prev.cells
 		entry.at = prev.at
 		entry.stale = true
 	}
 	m.limits[key] = entry
+	m.limitsGen++
 }
 
 // limitsInfoFor builds the detail card's Limits section for a profile.
@@ -190,7 +203,7 @@ func (m Model) limitsInfoFor(provider, profile string) *LimitsInfo {
 		out.Err = e.err.Error()
 	}
 	now := time.Now()
-	for _, c := range usage.WindowsOf(e.info) {
+	for _, c := range e.cells {
 		out.Rows = append(out.Rows, LimitRow{
 			Label:    c.Label,
 			Value:    usage.WindowLeftText(c.Window, now),
