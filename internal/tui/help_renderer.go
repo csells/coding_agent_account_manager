@@ -138,7 +138,7 @@ func GetContextualHints(state viewState) []ContextualHint {
 			{"Esc", "Cancel"},
 		}, base...)
 
-	case stateConfirm, stateConfirmOverwrite, stateExportConfirm, stateImportConfirm:
+	case stateConfirm, stateExportConfirm, stateImportConfirm:
 		return []ContextualHint{
 			{"y/Enter", "Confirm"},
 			{"n/Esc", "Cancel"},

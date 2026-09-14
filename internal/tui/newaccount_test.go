@@ -434,7 +434,7 @@ func TestRefresh_OffersTheLoginWhenTheSessionIsDead(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
 	m = updated.(Model)
-	if m.state != stateReloginConfirm || m.confirmDialog == nil {
+	if m.state != stateConfirm || m.pendingAction != confirmRelogin || m.confirmDialog == nil {
 		t.Fatalf("r should offer a login, state=%v status=%q", m.state, m.statusMsg)
 	}
 	if view := ansi.Strip(m.View()); !strings.Contains(view, "Log in again?") || !strings.Contains(view, "z@example.com") {
@@ -451,7 +451,7 @@ func TestRefresh_OffersTheLoginWhenTheSessionIsDead(t *testing.T) {
 	m.syncProfilesPanel()
 	updated, _ = m.Update(refreshResultMsg{provider: "codex", profile: "c@example.com", err: errors.New("codex refresh error 401: refresh_token_invalidated")})
 	m = updated.(Model)
-	if m.state != stateReloginConfirm {
+	if m.state != stateConfirm || m.pendingAction != confirmRelogin {
 		t.Fatalf("an invalidated refresh should offer a login, state=%v", m.state)
 	}
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
