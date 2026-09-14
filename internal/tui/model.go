@@ -1553,12 +1553,12 @@ func (m Model) processNameSubmit(name string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Only letters, numbers, underscore, hyphen and period: the vault's own
-	// rule (authfile.go, profile.go), which keeps names out of shell and
-	// filesystem trouble.
+	// The vault's own rule (authfile.isNameRune), which keeps names out of
+	// shell and filesystem trouble while admitting the emails accounts are
+	// filed under.
 	for _, r := range name {
 		if !isProfileNameRune(r) {
-			m.statusMsg = "The name can only contain letters, numbers, underscore, hyphen, and period"
+			m.statusMsg = "The name can only contain letters, numbers, underscore, hyphen, period, @ and +"
 			m.nameDialog.Reset()
 			return m, nil
 		}
@@ -3827,8 +3827,9 @@ func (m Model) refreshProfilesWithIndex(provider string, index int) tea.Cmd {
 }
 
 // isProfileNameRune reports whether r may appear in a profile name typed
-// into the dashboard: letters, digits, underscore, hyphen and period.
+// into the dashboard: the vault's rule (authfile.isNameRune) — letters,
+// digits, underscore, hyphen, period, @ and +, so an email is a name.
 func isProfileNameRune(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-		(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.'
+		(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' || r == '@' || r == '+'
 }

@@ -460,3 +460,36 @@ func TestRefresh_OffersTheLoginWhenTheSessionIsDead(t *testing.T) {
 		t.Fatalf("esc should decline without starting anything, state=%v", m.state)
 	}
 }
+
+// TestNameDialog_TakesAnEmail: the name dialog follows the vault's own
+// naming rule, so the email the dashboard files identified accounts under
+// is a valid name to type; a space is still refused, and the status line
+// names every character the rule allows.
+func TestNameDialog_TakesAnEmail(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(`{"tokens":{"access_token":"SYNTHETIC-N","refresh_token":"SYNTHETIC-N"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := &newAccountHooks{identity: ""}
+	m := modelWithTwoClaudeProfiles(h.hooks(t))
+	m.width, m.height = 170, 40
+
+	updated, _ := m.Update(newAccountIdentifiedMsg{provider: "codex", name: ""})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("me two")})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.state != stateNameDialog || len(h.captured) != 0 || !strings.Contains(m.statusMsg, "letters, numbers, underscore, hyphen, period, @ and +") {
+		t.Fatalf("a space should be refused with the rule: state=%v status=%q captured=%v", m.state, m.statusMsg, h.captured)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("me+work@example.com")})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if len(h.captured) != 1 || h.captured[0] != "codex/me+work@example.com" {
+		t.Fatalf("captured = %v, want the account under the typed email", h.captured)
+	}
+}
