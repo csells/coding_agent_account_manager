@@ -55,14 +55,11 @@ func newKimiTokenServer(t *testing.T, status int, body string) *kimiTokenServer 
 }
 
 // pointKimiAt sends RefreshKimiToken to the test server for the test's
-// duration and clears the CLI's host overrides so they cannot interfere.
+// duration through the CLI's own host override.
 func pointKimiAt(t *testing.T, s *kimiTokenServer) {
 	t.Helper()
-	t.Setenv("KIMI_CODE_OAUTH_HOST", "")
+	t.Setenv("KIMI_CODE_OAUTH_HOST", s.URL)
 	t.Setenv("KIMI_OAUTH_HOST", "")
-	old := KimiTokenURL
-	KimiTokenURL = s.URL + KimiTokenPath
-	t.Cleanup(func() { KimiTokenURL = old })
 }
 
 // The refresh is the Kimi Code CLI's own: a form-encoded POST to
@@ -155,10 +152,6 @@ func TestRefreshKimiToken_HonoursTheCLIsOAuthHost(t *testing.T) {
 	code := newKimiTokenServer(t, http.StatusOK, `{"access_token":"a","expires_in":60}`)
 	plain := newKimiTokenServer(t, http.StatusOK, `{"access_token":"a","expires_in":60}`)
 
-	old := KimiTokenURL
-	KimiTokenURL = defaultKimiTokenURL
-	t.Cleanup(func() { KimiTokenURL = old })
-
 	t.Setenv("KIMI_CODE_OAUTH_HOST", "")
 	t.Setenv("KIMI_OAUTH_HOST", plain.URL+"/")
 	if _, err := RefreshKimiToken(context.Background(), "rt"); err != nil {
@@ -181,10 +174,7 @@ func TestRefreshKimiToken_HonoursTheCLIsOAuthHost(t *testing.T) {
 // a stray override cannot send the refresh token anywhere else.
 func TestRefreshKimiToken_RefusesAForeignHost(t *testing.T) {
 	t.Setenv("KIMI_CODE_OAUTH_HOST", "")
-	t.Setenv("KIMI_OAUTH_HOST", "")
-	old := KimiTokenURL
-	KimiTokenURL = "https://auth.example.com/api/oauth/token"
-	t.Cleanup(func() { KimiTokenURL = old })
+	t.Setenv("KIMI_OAUTH_HOST", "https://auth.example.com")
 	if _, err := RefreshKimiToken(context.Background(), "rt"); err == nil || !strings.Contains(err.Error(), "not allowlisted") {
 		t.Fatalf("expected the host to be refused, got %v", err)
 	}

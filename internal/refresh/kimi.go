@@ -26,18 +26,10 @@ const (
 	KimiTokenPath = "/api/oauth/token"
 	// kimiDefaultOAuthHost is the CLI's default OAuth host.
 	kimiDefaultOAuthHost = "https://auth.kimi.com"
-	// defaultKimiTokenURL is the stock endpoint, the value KimiTokenURL
-	// starts at.
-	defaultKimiTokenURL = kimiDefaultOAuthHost + KimiTokenPath
 	// kimiCredentialFile is the token file in the vault and under the
 	// CLI's credentials directory alike.
 	kimiCredentialFile = "kimi-code.json"
 )
-
-// KimiTokenURL is the token endpoint. It is a variable so tests can point
-// it at a local server; while it is the stock endpoint, the CLI's own host
-// overrides (KimiOAuthHost) apply to it.
-var KimiTokenURL = defaultKimiTokenURL
 
 // kimiTokenHosts are the only hosts a Kimi refresh token is presented to
 // (plus loopback, for tests).
@@ -45,6 +37,8 @@ var kimiTokenHosts = []string{"auth.kimi.com", "auth.kimi.ai"}
 
 // KimiOAuthHost is the OAuth host the Kimi Code CLI would refresh against:
 // KIMI_CODE_OAUTH_HOST, then KIMI_OAUTH_HOST, then https://auth.kimi.com.
+// The token endpoint is KimiTokenPath under it; tests point the CLI's
+// override at a loopback server.
 func KimiOAuthHost() string {
 	for _, key := range []string{"KIMI_CODE_OAUTH_HOST", "KIMI_OAUTH_HOST"} {
 		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
@@ -52,15 +46,6 @@ func KimiOAuthHost() string {
 		}
 	}
 	return kimiDefaultOAuthHost
-}
-
-// kimiTokenURL resolves the endpoint for this call: an explicit
-// KimiTokenURL wins; the stock one follows the CLI's host overrides.
-func kimiTokenURL() string {
-	if KimiTokenURL != defaultKimiTokenURL {
-		return KimiTokenURL
-	}
-	return KimiOAuthHost() + KimiTokenPath
 }
 
 // RefreshKimiToken presents a Kimi Code refresh token and returns the new
@@ -71,7 +56,7 @@ var RefreshKimiToken = func(ctx context.Context, refreshToken string) (*TokenRes
 		return nil, fmt.Errorf("refresh token is empty")
 	}
 
-	endpoint := kimiTokenURL()
+	endpoint := KimiOAuthHost() + KimiTokenPath
 	if err := validateTokenEndpoint(endpoint, kimiTokenHosts); err != nil {
 		return nil, err
 	}
