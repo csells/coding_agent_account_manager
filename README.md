@@ -1033,9 +1033,9 @@ caam project set claude work@company.com
 # Now whenever you're in this directory (or subdirectories)
 caam activate claude  # Automatically uses work@company.com
 
-# The TUI also shows the project association
-caam tui
-# Status bar shows: Project: ~/projects/work-app → work@company.com
+# The dashboard also shows the project association
+caam
+# Header shows: Project: ~/projects/work-app → work@company.com
 ```
 
 Associations cascade: if you set an association on `/home/user/projects`, it applies to all subdirectories unless a more specific association exists.

@@ -51,18 +51,28 @@ func (m Model) handleExportVault() (tea.Model, tea.Cmd) {
 	}
 
 	if totalProfiles == 0 {
-		m.statusMsg = "No profiles to export"
+		m.statusMsg = "No accounts to export"
 		return m, nil
 	}
 
-	// Create confirmation dialog
+	// The person saying yes should know where the credentials go and that
+	// nothing protects them there.
+	outputDir, err := exportDir()
+	if err != nil {
+		m.showError(err, "Export")
+		return m, nil
+	}
+	accounts := "1 account"
+	if totalProfiles != 1 {
+		accounts = fmt.Sprintf("%d accounts", totalProfiles)
+	}
 	m.confirmDialog = NewConfirmDialog(
-		"Export Vault",
-		fmt.Sprintf("Export all %d profiles to a zip bundle?", totalProfiles),
+		"Export vault?",
+		fmt.Sprintf("Copy the credentials of all %s into a zip bundle in\n%s\n\nThe bundle is not encrypted: anyone who can read the file can use every account in it.", accounts, outputDir),
 	)
 	m.confirmDialog.SetStyles(m.styles)
 	m.confirmDialog.SetLabels("Export", "Cancel")
-	m.confirmDialog.SetWidth(m.dialogWidth(50))
+	m.confirmDialog.SetWidth(m.dialogWidth(64))
 	m.state = stateExportConfirm
 	m.statusMsg = ""
 	return m, nil
@@ -105,16 +115,25 @@ func (m Model) handleExportConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// exportDir is where E writes the bundle: the directory caam was started
+// in, which the confirmation names.
+func exportDir() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("get current directory: %w", err)
+	}
+	return dir, nil
+}
+
 // executeExport performs the actual bundle export operation.
 func (m Model) executeExport() tea.Cmd {
 	return func() tea.Msg {
 		// Build export options with defaults
 		opts := bundle.DefaultExportOptions()
 
-		// Set output directory to current working directory
-		outputDir, err := os.Getwd()
+		outputDir, err := exportDir()
 		if err != nil {
-			return exportErrorMsg{err: fmt.Errorf("get current directory: %w", err)}
+			return exportErrorMsg{err: err}
 		}
 		opts.OutputDir = outputDir
 		opts.VerboseFilename = true // Use descriptive filename with timestamp
@@ -160,7 +179,7 @@ func (m Model) handleImportBundle() (tea.Model, tea.Cmd) {
 	dialog.SetStyles(m.styles)
 	dialog.SetPlaceholder("~/backup.zip or /path/to/bundle.zip")
 	dialog.SetWidth(m.dialogWidth(60))
-	m.backupDialog = dialog // Reuse backup dialog field
+	m.importPathDialog = dialog
 	m.state = stateImportPath
 	m.statusMsg = ""
 	return m, nil
@@ -168,24 +187,24 @@ func (m Model) handleImportBundle() (tea.Model, tea.Cmd) {
 
 // handleImportPathKeys handles key input for the import path dialog.
 func (m Model) handleImportPathKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.backupDialog == nil {
+	if m.importPathDialog == nil {
 		m.state = stateList
 		return m, nil
 	}
 
 	// Update the dialog with the key press
 	var cmd tea.Cmd
-	m.backupDialog, cmd = m.backupDialog.Update(msg)
+	m.importPathDialog, cmd = m.importPathDialog.Update(msg)
 
 	// Check dialog result
-	switch m.backupDialog.Result() {
+	switch m.importPathDialog.Result() {
 	case DialogResultSubmit:
-		bundlePath := m.backupDialog.Value()
-		m.backupDialog = nil
+		bundlePath := m.importPathDialog.Value()
+		m.importPathDialog = nil
 		return m.validateAndPreviewImport(bundlePath)
 
 	case DialogResultCancel:
-		m.backupDialog = nil
+		m.importPathDialog = nil
 		m.state = stateList
 		m.statusMsg = "Import cancelled"
 		return m, nil

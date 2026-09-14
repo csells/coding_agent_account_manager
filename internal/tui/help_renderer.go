@@ -132,7 +132,7 @@ func GetContextualHints(state viewState) []ContextualHint {
 			{"Any key", "Return"},
 		}
 
-	case stateBackupDialog:
+	case stateNameDialog:
 		return append([]ContextualHint{
 			{"Enter", "Save"},
 			{"Esc", "Cancel"},
@@ -211,19 +211,20 @@ func MainHelpMarkdown() string {
 | ↑/k | Move up |
 | ↓/j | Move down |
 | ←/h | Previous provider |
-| → | Next provider |
+| →/l | Next provider |
 | Tab | Cycle providers |
-| / | Search/filter profiles |
+| / | Search accounts |
 
-### Profile Actions
+### Account Actions
 | Key | Action |
 |-----|--------|
-| Enter | Activate selected profile (instant switch!) |
+| Enter | Switch to the selected account (instant, with confirmation) |
+| n | Log in to a new account (captures the current one, clears it, runs the provider's login, captures the new one) |
 | r | Refresh limits, and an expired token first |
-| n | Log in to a new account |
-| e | Edit profile settings |
+| i | Full account card |
+| e | Edit account settings |
 | o | Open account page in browser |
-| d | Delete profile (with confirmation) |
+| d | Delete account (with confirmation) |
 | p | Set project association for current directory |
 
 ### Vault & Data
@@ -231,12 +232,13 @@ func MainHelpMarkdown() string {
 |-----|--------|
 | u | Toggle usage stats panel (1/2/3/4 for time ranges) |
 | S | Toggle sync panel |
-| E | Export vault to encrypted bundle |
+| E | Export vault to a zip bundle in the current directory (not encrypted) |
 | I | Import vault from bundle |
 
 ### General
 | Key | Action |
 |-----|--------|
+| ctrl+p | Command palette |
 | ? | Toggle this help |
 | q/Esc | Quit |
 
@@ -281,20 +283,21 @@ caam uses the associated profile automatically.
 
 ## Provider Notes
 
+To add an account to any provider, press n: the dashboard captures the
+account that is signed in now, clears it so the provider's login cannot
+revoke it, runs the login, and captures the new account under its identity.
+
 ### Claude Code
-- **Identity:** Email/account ID not available in current Claude auth format.
-  Profile names will be auto-generated (` + "`auto-YYYYMMDD-HHMMSS`" + `) unless specified.
-- **Token Refresh:** Claude manages tokens internally. Use ` + "`/login`" + ` in Claude Code
-  to re-authenticate if needed.
-- **Recommended Workflow:** ` + "`backup`" + ` → ` + "`clear`" + ` → ` + "`/login`" + ` → ` + "`backup`" + ` → ` + "`activate`" + `
+- Identity is read from the credential; the new account is filed under its email.
+- Claude renews its own tokens; when a session has ended, r offers the login.
 
 ### Codex CLI
-- Full identity detection via JWT tokens
-- Token refresh supported
+- Identity is read from the JWT; the new account is filed under its email.
+- r refreshes an expired token before fetching limits.
 
 ### Gemini CLI
-- Full identity detection
-- Token refresh supported
+- Identity is read from the credential; the new account is filed under its email.
+- r refreshes an expired token before fetching limits.
 
 ---
 

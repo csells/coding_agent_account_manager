@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/key"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // =============================================================================
@@ -465,6 +468,75 @@ func TestKeyBindingsHaveHelp(t *testing.T) {
 				t.Errorf("%s help key should not be empty", tt.name)
 			}
 		})
+	}
+}
+
+// The keys the dashboard teaches are the keys it has: h/l pair with ←/→
+// across the strip; the palette offers every dashboard action (a new
+// login, the full card, search) and speaks of accounts; and the full card
+// closes on esc, not on every cancel key, so n over it opens the picker
+// like n anywhere else.
+func TestKeys_VimPairAndPalette(t *testing.T) {
+	m := nineProviders(t, 159, 42)
+	m.hooks.Login = (&newAccountHooks{}).hooks(t).Login
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	m = updated.(Model)
+	if m.currentProvider() != "codex" {
+		t.Fatalf("l should select the next provider, got %s", m.currentProvider())
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	m = updated.(Model)
+	if m.currentProvider() != "claude" {
+		t.Fatalf("h should select the previous provider, got %s", m.currentProvider())
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = updated.(Model)
+	if m.state != stateCommandPalette || m.commandPalette == nil {
+		t.Fatalf("ctrl+p should open the palette, state=%v", m.state)
+	}
+	palette := ansi.Strip(m.commandPalette.View())
+	for _, want := range []string{"New Login", "Full Card", "Search", "account"} {
+		if !strings.Contains(palette, want) {
+			t.Errorf("palette lacks %q:\n%s", want, palette)
+		}
+	}
+	if strings.Contains(strings.ToLower(palette), "profile") {
+		t.Errorf("palette still says profile:\n%s", palette)
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "New Login") {
+		t.Errorf("the palette is not on screen")
+	}
+
+	// Choosing New Login from the palette opens the picker.
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("new login")})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.state != stateProviderPicker {
+		t.Fatalf("New Login should open the provider picker, state=%v", m.state)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = updated.(Model)
+
+	// The card: i opens it, esc closes it and nothing more; n over it
+	// opens the picker.
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	m = updated.(Model)
+	if !m.showDetailCard {
+		t.Fatalf("i should open the full card")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = updated.(Model)
+	if m.showDetailCard || m.state != stateList {
+		t.Fatalf("esc should only close the card: card=%v state=%v", m.showDetailCard, m.state)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m = updated.(Model)
+	if m.state != stateProviderPicker {
+		t.Fatalf("n over the card should open the provider picker, state=%v card=%v", m.state, m.showDetailCard)
 	}
 }
 

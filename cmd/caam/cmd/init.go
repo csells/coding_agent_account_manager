@@ -134,8 +134,10 @@ func printDiscoveryResults(result *discovery.ScanResult) {
 		fmt.Println("  No existing sessions found.")
 		fmt.Println()
 		fmt.Println("  To get started:")
-		fmt.Println("    1. Log in to your AI tool (claude, codex, or gemini)")
-		fmt.Println("    2. Run: caam backup <tool> <profile-name>")
+		fmt.Println("    1. Run: caam            (the dashboard)")
+		fmt.Println("    2. Press n and log in; the account is captured under its identity")
+		fmt.Println()
+		fmt.Println("  Or from the CLI: log in with the tool itself, then run: caam backup <tool> <name>")
 		fmt.Println()
 		return
 	}
@@ -491,6 +493,7 @@ func printSetupSummary(result *discovery.ScanResult, savedCount int, browserConf
 	fmt.Println()
 
 	fmt.Println("  Quick commands:")
+	fmt.Println("    caam             - The dashboard: accounts and their limits; enter switches, n logs in")
 	fmt.Println("    caam status      - Show current profiles and status")
 	fmt.Println("    caam ls          - List all saved profiles")
 	fmt.Println("    caam activate <tool> <profile> - Switch to a profile")
@@ -498,7 +501,8 @@ func printSetupSummary(result *discovery.ScanResult, savedCount int, browserConf
 	fmt.Println()
 
 	if len(result.NotFound) > 0 {
-		fmt.Println("  To add more accounts:")
+		fmt.Println("  To add more accounts: run caam, press n, and pick the tool.")
+		fmt.Println("  Or from the CLI:")
 		for _, tool := range result.NotFound {
 			fmt.Printf("    1. Log in to %s\n", tool)
 			fmt.Printf("    2. Run: caam backup %s <profile-name>\n", tool)

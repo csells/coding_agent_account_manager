@@ -468,7 +468,7 @@ func (m Model) renderSlot(kind stripKind, it stripItem, width int) []string {
 		switch {
 		case it.count == 0:
 			l2 = paint("no accounts yet")
-			l3 = paint(fmt.Sprintf("caam backup %s <email>", it.id))
+			l3 = paint("press n to log in")
 		case it.active == "":
 			l2 = paint("no active account")
 			l3 = paint(it.summary)
@@ -557,9 +557,13 @@ func (m Model) renderAccountsPane(g paneGeometry, height int) string {
 	}
 	lines := []string{titleRow}
 	if len(profiles) == 0 {
-		if provider == "" {
+		switch {
+		case provider == "":
 			lines = append(lines, "", ps.Empty.Render(noAccountsHint))
-		} else {
+		case m.searchQuery != "" && len(m.profiles[provider]) > 0:
+			// The provider has accounts; the search just misses them all.
+			lines = append(lines, ps.Empty.Render(fmt.Sprintf("No accounts match %q", m.searchQuery)))
+		default:
 			lines = append(lines, ps.Empty.Render(emptyProfilesMessage(provider)))
 		}
 		return frame(lines)
@@ -841,7 +845,7 @@ func (m Model) expandedLines(provider string, info *ProfileInfo, inner int, tier
 		items = append(items, style.Render(m.notice))
 	}
 	if info.NoCredential {
-		items = append(items, m.styles.StatusError.Render(fmt.Sprintf("no credential captured — log in as this account, then: caam backup %s %s", provider, info.Name)))
+		items = append(items, m.styles.StatusError.Render("no credential captured — press n and log in as this account"))
 	}
 
 	if e, ok := m.limits[limitsKey(provider, info.Name)]; ok && m.hooks.Limits != nil {

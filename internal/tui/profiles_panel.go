@@ -350,8 +350,7 @@ func (p *ProfilesPanel) MoveDown() {
 }
 
 func emptyProfilesMessage(provider string) string {
-	label := providerLabel(provider)
-	return fmt.Sprintf("📭 No profiles for %s yet\n\nRun: caam backup %s <email>", label, provider)
+	return fmt.Sprintf("📭 No %s accounts yet\n\npress n to log in", providerLabel(provider))
 }
 
 // formatRelativeTime formats a time as a relative string (e.g., "2h ago", "1d ago").

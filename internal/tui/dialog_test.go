@@ -524,7 +524,7 @@ func TestCommandPaletteDialog_Filter(t *testing.T) {
 
 	// The filter should narrow down to the delete command
 	view := d.View()
-	if !strings.Contains(view, "Delete") || strings.Contains(view, "Activate") {
+	if !strings.Contains(view, "Delete") || strings.Contains(view, "Switch") {
 		t.Errorf("expected the filter to leave only the delete command:\n%s", view)
 	}
 }
@@ -614,8 +614,8 @@ func TestCommandPaletteDialog_View(t *testing.T) {
 	}
 
 	// Should contain at least one command
-	if !strings.Contains(view, "Activate") {
-		t.Error("expected view to contain Activate command")
+	if !strings.Contains(view, "Switch") {
+		t.Error("expected view to contain the Switch command")
 	}
 }
 

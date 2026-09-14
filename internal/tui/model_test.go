@@ -2,10 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/profile"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/watcher"
 	tea "github.com/charmbracelet/bubbletea"
@@ -824,8 +826,8 @@ func TestHandleExportVault(t *testing.T) {
 	m.profiles = map[string][]Profile{}
 	result, _ := m.handleExportVault()
 	updated := result.(Model)
-	if !strings.Contains(updated.statusMsg, "No profiles") {
-		t.Errorf("expected 'No profiles' message, got %q", updated.statusMsg)
+	if !strings.Contains(updated.statusMsg, "No accounts") {
+		t.Errorf("expected 'No accounts' message, got %q", updated.statusMsg)
 	}
 
 	// Test with profiles - should show confirmation dialog
@@ -842,6 +844,60 @@ func TestHandleExportVault(t *testing.T) {
 	}
 }
 
+// tui.show_key_hints (and CAAM_TUI_KEY_HINTS) is documented as switching
+// the status bar's key hints off; the bar honours it.
+func TestStatusBar_HonoursShowKeyHints(t *testing.T) {
+	hints := func(cfg *config.SPMConfig) string {
+		m := NewWithProvidersAndConfig(DefaultProviders(), cfg)
+		m.width, m.height = 120, 40
+		m.profiles = map[string][]Profile{"claude": {{Name: "a@example.com", Provider: "claude", IsActive: true}}}
+		m.syncProfilesPanel()
+		return ansi.Strip(m.renderStatusBar())
+	}
+
+	on := config.DefaultSPMConfig()
+	if bar := hints(on); !strings.Contains(bar, ":switch]") || !strings.Contains(bar, ":provider]") {
+		t.Fatalf("by default the status bar carries key hints:\n%s", bar)
+	}
+
+	off := config.DefaultSPMConfig()
+	off.TUI.ShowKeyHints = false
+	if bar := hints(off); strings.Contains(bar, ":switch]") || strings.Contains(bar, ":provider]") {
+		t.Fatalf("show_key_hints: false should leave the status bar without hints:\n%s", bar)
+	}
+}
+
+// The E dialog says where the bundle lands and that it is plaintext: the
+// vault's credentials are copied into a zip in the working directory with
+// no encryption, and the person confirming should know both before saying
+// yes.
+func TestExportDialog_SaysWhereAndThatItIsPlaintext(t *testing.T) {
+	m := modelWithTwoClaudeProfiles(Hooks{})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("E")})
+	m = updated.(Model)
+	if m.state != stateExportConfirm || m.confirmDialog == nil {
+		t.Fatalf("E should open the export confirmation, state=%v", m.state)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The header behind the overlay shows the cwd too, so the directory is
+	// looked for in the dialog itself; it wraps a long path across lines,
+	// so compare without the wrapping, padding and box border.
+	dialog := ansi.Strip(m.confirmDialog.View())
+	flat := strings.NewReplacer("\n", "", " ", "", "║", "").Replace(dialog)
+	if !strings.Contains(flat, cwd) {
+		t.Errorf("export dialog does not name the output directory %q:\n%s", cwd, dialog)
+	}
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"not encrypted", "2 accounts"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("export dialog lacks %q:\n%s", want, view)
+		}
+	}
+}
+
 // TestHandleImportBundle tests the handleImportBundle method.
 func TestHandleImportBundle(t *testing.T) {
 	m := New()
@@ -852,8 +908,8 @@ func TestHandleImportBundle(t *testing.T) {
 	if updated.state != stateImportPath {
 		t.Errorf("expected stateImportPath, got %v", updated.state)
 	}
-	if updated.backupDialog == nil {
-		t.Error("expected backupDialog to be set")
+	if updated.importPathDialog == nil {
+		t.Error("expected importPathDialog to be set")
 	}
 }
 
@@ -917,7 +973,7 @@ func TestHandleExportConfirmKeysNilDialog(t *testing.T) {
 func TestHandleImportPathKeysNilDialog(t *testing.T) {
 	m := New()
 	m.state = stateImportPath
-	m.backupDialog = nil
+	m.importPathDialog = nil
 
 	result, _ := m.handleImportPathKeys(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := result.(Model)

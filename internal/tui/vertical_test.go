@@ -300,6 +300,71 @@ func modelWithLimits(t *testing.T, w, h int) Model {
 	return m
 }
 
+// Every empty state points at the dashboard's own key, n, not at the CLI:
+// a provider with no accounts (strip card and accounts pane), an account
+// whose credential was never captured (row expansion and full card), and
+// a search that matches nothing says so instead of pretending the vault
+// is empty.
+func TestEmptyStates_SayPressN(t *testing.T) {
+	assertPressN := func(t *testing.T, what, view string) {
+		t.Helper()
+		if !strings.Contains(view, "press n") {
+			t.Errorf("%s does not say press n:\n%s", what, view)
+		}
+		if strings.Contains(view, "caam backup") {
+			t.Errorf("%s still points at caam backup:\n%s", what, view)
+		}
+	}
+
+	t.Run("provider without accounts", func(t *testing.T) {
+		m := modelWithLimits(t, 170, 40)
+		m.providers = []string{"codex"}
+		m.activeProvider = 0
+		m.profilesPanel.SetProvider("codex")
+		m.profilesPanel.SetProfiles(nil)
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "Codex accounts") {
+			t.Fatalf("expected the codex pane:\n%s", view)
+		}
+		assertPressN(t, "the empty accounts pane and strip card", view)
+	})
+
+	t.Run("account without a credential", func(t *testing.T) {
+		m := modelWithLimits(t, 170, 40)
+		m.vaultMeta = map[string]map[string]vaultProfileMeta{
+			"claude": {"b@example.com": {NoCredential: true}},
+		}
+		m.syncProfilesPanel()
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = updated.(Model)
+		assertPressN(t, "the row expansion", ansi.Strip(m.View()))
+
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+		m = updated.(Model)
+		if !m.showDetailCard {
+			t.Fatalf("i should open the full card")
+		}
+		assertPressN(t, "the full card", ansi.Strip(m.View()))
+	})
+
+	t.Run("search that matches nothing", func(t *testing.T) {
+		m := modelWithLimits(t, 170, 40)
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+		m = updated.(Model)
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("zzz")})
+		m = updated.(Model)
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "No accounts match") {
+			t.Errorf("a fruitless search should say no accounts match:\n%s", view)
+		}
+		for _, wrong := range []string{"caam backup", "press n", "yet"} {
+			if strings.Contains(view, wrong) {
+				t.Errorf("a fruitless search must not claim the provider has no accounts (%q):\n%s", wrong, view)
+			}
+		}
+	})
+}
+
 func TestVerticalLayout_ProvidersAboveAccountsWithWindowColumns(t *testing.T) {
 	m := modelWithLimits(t, 170, 40)
 	view := ansi.Strip(m.View())
