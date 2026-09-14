@@ -8,7 +8,6 @@ import (
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authpool"
-	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/prediction"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/rotation"
@@ -112,11 +111,6 @@ func TestIntegration_AuthPoolSmartRunner_SmartRunnerUsesPool(t *testing.T) {
 	sr := NewSmartRunner(runner, SmartRunnerOptions{
 		Vault:    vault,
 		AuthPool: pool,
-		HandoffConfig: &config.HandoffConfig{
-			AutoTrigger:      true,
-			MaxRetries:       3,
-			FallbackToManual: true,
-		},
 	})
 
 	// Verify SmartRunner was created with pool
@@ -201,20 +195,20 @@ func TestIntegration_PredictionAlerts_TimeBasedAlerts(t *testing.T) {
 
 	predictions := []*prediction.Prediction{
 		{
-			Provider:         "claude",
-			Profile:          "alice",
-			CurrentPercent:   60,
-			TimeToDepletion:  15 * time.Minute, // Below rotation threshold
-			Confidence:       0.8,
-			Warning:          prediction.WarningNone,
+			Provider:        "claude",
+			Profile:         "alice",
+			CurrentPercent:  60,
+			TimeToDepletion: 15 * time.Minute, // Below rotation threshold
+			Confidence:      0.8,
+			Warning:         prediction.WarningNone,
 		},
 		{
-			Provider:         "claude",
-			Profile:          "bob",
-			CurrentPercent:   50,
-			TimeToDepletion:  2 * time.Hour, // Above rotation threshold
-			Confidence:       0.8,
-			Warning:          prediction.WarningNone,
+			Provider:        "claude",
+			Profile:         "bob",
+			CurrentPercent:  50,
+			TimeToDepletion: 2 * time.Hour, // Above rotation threshold
+			Confidence:      0.8,
+			Warning:         prediction.WarningNone,
 		},
 	}
 
@@ -311,11 +305,6 @@ func TestIntegration_SmartRunnerRotation_UsesRotationAlgorithm(t *testing.T) {
 	sr := NewSmartRunner(runner, SmartRunnerOptions{
 		Vault:    vault,
 		Rotation: selector,
-		HandoffConfig: &config.HandoffConfig{
-			AutoTrigger:      true,
-			MaxRetries:       3,
-			FallbackToManual: true,
-		},
 	})
 
 	require.NotNil(t, sr)

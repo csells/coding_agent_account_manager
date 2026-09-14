@@ -11,7 +11,6 @@ import (
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authpool"
-	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/handoff"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/notify"
@@ -44,7 +43,6 @@ type SmartRunner struct {
 	authPool      *authpool.AuthPool
 	ptyController pty.Controller
 	loginHandler  handoff.LoginHandler
-	handoffConfig *config.HandoffConfig
 	notifier      notify.Notifier
 
 	// Cooldown duration to apply when rate limit is detected
@@ -55,7 +53,11 @@ type SmartRunner struct {
 	currentProfile  string
 	previousProfile string // For rollback
 	handoffCount    int
-	state           HandoffState
+	// restartArgs/restartPending: a handoff asked Run to end the session and
+	// respawn it on its history with these args.
+	restartArgs    []string
+	restartPending bool
+	state          HandoffState
 
 	// WaitGroup to track background goroutines (handleRateLimit)
 	wg sync.WaitGroup
@@ -65,7 +67,6 @@ type SmartRunner struct {
 
 // SmartRunnerOptions configures the SmartRunner.
 type SmartRunnerOptions struct {
-	HandoffConfig    *config.HandoffConfig
 	Notifier         notify.Notifier
 	Vault            *authfile.Vault
 	DB               *caamdb.DB
@@ -88,7 +89,6 @@ func NewSmartRunner(runner *Runner, opts SmartRunnerOptions) *SmartRunner {
 		db:               opts.DB,
 		authPool:         opts.AuthPool,
 		rotation:         opts.Rotation,
-		handoffConfig:    opts.HandoffConfig,
 		notifier:         notifier,
 		cooldownDuration: opts.CooldownDuration,
 		state:            Running,
@@ -216,11 +216,7 @@ func (r *SmartRunner) Run(ctx context.Context, opts RunOptions) (err error) {
 		}
 	}
 
-	// Build command
-	bin := opts.Provider.DefaultBin()
-	cmd := ExecCommand(ctx, bin, opts.Args...)
-
-	// Apply env (same as Runner.Run)
+	// Build the spawn once; a resumed session reuses it with resume args.
 	envMap := make(map[string]string)
 	for _, e := range os.Environ() {
 		parts := splitEnv(e)
@@ -234,12 +230,69 @@ func (r *SmartRunner) Run(ctx context.Context, opts RunOptions) (err error) {
 	for k, v := range opts.Env {
 		envMap[k] = v
 	}
-	cmd.Env = make([]string, 0, len(envMap))
+	spawn := childSpawn{bin: opts.Provider.DefaultBin(), workDir: opts.WorkDir}
 	for k, v := range envMap {
-		cmd.Env = append(cmd.Env, k+"="+v)
+		spawn.env = append(spawn.env, k+"="+v)
 	}
-	if opts.WorkDir != "" {
-		cmd.Dir = opts.WorkDir
+	var capture *codexSessionCapture
+	if opts.Provider.ID() == "codex" {
+		capture = &codexSessionCapture{}
+	}
+
+	// Run the session; when a handoff switched the account under it, the
+	// session is ended and respawned on its own history (the tool's resume
+	// flags), so the new credential is in use at once.
+	args := opts.Args
+	var exitCode int
+	var waitErr error
+	for {
+		exitCode, waitErr = r.runChild(ctx, spawn, args, capture)
+		if resume, ok := r.takeRestart(); ok {
+			args = resume
+			continue
+		}
+		break
+	}
+
+	// Update profile metadata
+	now := time.Now()
+	opts.Profile.LastUsedAt = now
+	if capture != nil {
+		if sessionID := capture.ID(); sessionID != "" {
+			opts.Profile.LastSessionID = sessionID
+			opts.Profile.LastSessionTS = now.UTC()
+		}
+	}
+	if saveErr := opts.Profile.Save(); saveErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to save profile metadata: %v\n", saveErr)
+	}
+
+	if waitErr != nil {
+		return fmt.Errorf("command failed: %w", waitErr)
+	}
+	if exitCode != 0 {
+		return &ExitCodeError{Code: exitCode}
+	}
+
+	return nil
+}
+
+// childSpawn is what does not change between a session and its resumed
+// successor: the binary, its environment and working directory.
+type childSpawn struct {
+	bin     string
+	env     []string
+	workDir string
+}
+
+// runChild spawns the tool under a PTY with args, proxies the terminal,
+// monitors its output for a rate limit, and returns its exit code once it
+// is gone and every handoff goroutine has finished.
+func (r *SmartRunner) runChild(ctx context.Context, spawn childSpawn, args []string, capture *codexSessionCapture) (int, error) {
+	cmd := ExecCommand(ctx, spawn.bin, args...)
+	cmd.Env = spawn.env
+	if spawn.workDir != "" {
+		cmd.Dir = spawn.workDir
 	}
 
 	// Terminal proxying (issue #74): when stdin is a real terminal, the child's
@@ -258,14 +311,14 @@ func (r *SmartRunner) Run(ctx context.Context, opts RunOptions) (err error) {
 	// Create PTY controller
 	ctrl, err := pty.NewController(cmd, ptyOpts)
 	if err != nil {
-		return fmt.Errorf("create pty controller: %w", err)
+		return 0, fmt.Errorf("create pty controller: %w", err)
 	}
 	r.ptyController = ctrl
 	defer ctrl.Close()
 
 	// Start the PTY (this executes the command)
 	if err := ctrl.Start(); err != nil {
-		return fmt.Errorf("start pty: %w", err)
+		return 0, fmt.Errorf("start pty: %w", err)
 	}
 
 	// restoreTerminal puts the real terminal back into its pre-run state. It
@@ -289,11 +342,6 @@ func (r *SmartRunner) Run(ctx context.Context, opts RunOptions) (err error) {
 	// ends when stdin is exhausted or the PTY closes.
 	go relayStdin(os.Stdin, ctrl)
 
-	var capture *codexSessionCapture
-	if opts.Provider.ID() == "codex" {
-		capture = &codexSessionCapture{}
-	}
-
 	// Start output monitoring in background
 	monitorCtx, cancelMonitor := context.WithCancel(ctx)
 	defer cancelMonitor()
@@ -316,28 +364,31 @@ func (r *SmartRunner) Run(ctx context.Context, opts RunOptions) (err error) {
 	// The child is gone and its output fully drained: give the terminal back
 	// before any further (cooked-mode) output such as warnings below.
 	restoreTerminal()
+	return exitCode, waitErr
+}
 
-	// Update profile metadata
-	now := time.Now()
-	opts.Profile.LastUsedAt = now
-	if capture != nil {
-		if sessionID := capture.ID(); sessionID != "" {
-			opts.Profile.LastSessionID = sessionID
-			opts.Profile.LastSessionTS = now.UTC()
-		}
+// requestRestart asks Run to end the current session and respawn it with
+// args once it has exited.
+func (r *SmartRunner) requestRestart(args []string) {
+	r.mu.Lock()
+	r.restartArgs = args
+	r.restartPending = true
+	ctrl := r.ptyController
+	r.mu.Unlock()
+	if ctrl != nil {
+		_ = ctrl.Signal(pty.SIGTERM)
 	}
-	if saveErr := opts.Profile.Save(); saveErr != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to save profile metadata: %v\n", saveErr)
-	}
+}
 
-	if waitErr != nil {
-		return fmt.Errorf("command failed: %w", waitErr)
+// takeRestart returns the pending resume args, once.
+func (r *SmartRunner) takeRestart() ([]string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.restartPending {
+		return nil, false
 	}
-	if exitCode != 0 {
-		return &ExitCodeError{Code: exitCode}
-	}
-
-	return nil
+	r.restartPending = false
+	return r.restartArgs, true
 }
 
 // handleRateLimit handles the rate limit detection and handoff flow.
@@ -418,8 +469,9 @@ func (r *SmartRunner) handleRateLimit(ctx context.Context) {
 
 	// 5. No login: the restored credential is a session already, and a
 	// tool's login is a logout first — it would revoke what was just
-	// installed (docs/ACCOUNT_SWITCHER.md §2). The running session picks
-	// the new credential up on its next token refresh, or on restart.
+	// installed (docs/ACCOUNT_SWITCHER.md §2). The running session holds
+	// its credential in memory, so it is ended and respawned on its own
+	// history with the new one.
 	r.setState(Switched)
 	r.currentProfile = nextProfile
 	r.handoffCount++
@@ -427,8 +479,9 @@ func (r *SmartRunner) handleRateLimit(ctx context.Context) {
 	r.notifier.Notify(&notify.Alert{
 		Level:   notify.Info,
 		Title:   "Profile switched",
-		Message: fmt.Sprintf("Switched to %s. The running session picks it up on its next token refresh; restart it to switch now.", nextProfile),
+		Message: fmt.Sprintf("Switched to %s and resumed the session on its history.", nextProfile),
 	})
+	r.requestRestart(r.loginHandler.ResumeArgs())
 
 	// Reset detector state so we don't immediately trigger again
 	r.detector.Reset()

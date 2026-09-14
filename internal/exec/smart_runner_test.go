@@ -8,7 +8,6 @@ import (
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authpool"
-	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/notify"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/profile"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider"
@@ -74,17 +73,11 @@ func TestNewSmartRunner(t *testing.T) {
 		vault := authfile.NewVault(t.TempDir())
 		pool := authpool.NewAuthPool()
 		notifier := &notify.TerminalNotifier{}
-		handoffCfg := &config.HandoffConfig{
-			AutoTrigger:      true,
-			MaxRetries:       3,
-			FallbackToManual: true,
-		}
 
 		sr := NewSmartRunner(runner, SmartRunnerOptions{
 			Vault:            vault,
 			AuthPool:         pool,
 			Notifier:         notifier,
-			HandoffConfig:    handoffCfg,
 			CooldownDuration: 30 * time.Minute,
 		})
 
@@ -96,9 +89,6 @@ func TestNewSmartRunner(t *testing.T) {
 		}
 		if sr.notifier != notifier {
 			t.Error("notifier not set correctly")
-		}
-		if sr.handoffConfig != handoffCfg {
-			t.Error("handoffConfig not set correctly")
 		}
 		if sr.cooldownDuration != 30*time.Minute {
 			t.Errorf("cooldownDuration = %v, want 30m", sr.cooldownDuration)

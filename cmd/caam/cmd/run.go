@@ -199,7 +199,6 @@ func runWrap(cmd *cobra.Command, args []string) error {
 
 	// Create SmartRunner
 	opts := exec.SmartRunnerOptions{
-		HandoffConfig:    &spmCfg.Handoff,
 		Notifier:         notifier,
 		Vault:            vault,
 		DB:               db,

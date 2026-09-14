@@ -5,8 +5,6 @@ package handoff
 
 import (
 	"sync"
-
-	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/pty"
 )
 
 // LoginHandler defines the interface for provider-specific login handling.
@@ -19,8 +17,9 @@ type LoginHandler interface {
 	// LoginCommand returns the command to trigger login (e.g., "/login").
 	LoginCommand() string
 
-	// TriggerLogin injects the login command into the PTY.
-	TriggerLogin(ctrl pty.Controller) error
+	// ResumeArgs are the flags that reopen the tool's most recent session,
+	// so a switched account is in use at once with the conversation kept.
+	ResumeArgs() []string
 
 	// IsLoginInProgress returns true if the output indicates
 	// a login flow has started (e.g., waiting for browser auth).

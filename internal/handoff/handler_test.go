@@ -166,7 +166,7 @@ func TestClaudeLoginHandler(t *testing.T) {
 
 	t.Run("IsLoginFailed", func(t *testing.T) {
 		tests := []struct {
-			output  string
+			output   string
 			wantFail bool
 			wantMsg  string
 		}{

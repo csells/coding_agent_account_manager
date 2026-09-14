@@ -2,8 +2,6 @@ package handoff
 
 import (
 	"strings"
-
-	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/pty"
 )
 
 // ClaudeLoginHandler handles login for Claude Code CLI.
@@ -21,9 +19,10 @@ func (h *ClaudeLoginHandler) LoginCommand() string {
 	return "/login"
 }
 
-// TriggerLogin injects the login command into the PTY.
-func (h *ClaudeLoginHandler) TriggerLogin(ctrl pty.Controller) error {
-	return ctrl.InjectCommand("/login")
+// ResumeArgs are the flags that reopen the most recent session, so a
+// switched account is in use at once without losing the conversation.
+func (h *ClaudeLoginHandler) ResumeArgs() []string {
+	return []string{"--continue"}
 }
 
 // IsLoginInProgress checks if a login flow has started.

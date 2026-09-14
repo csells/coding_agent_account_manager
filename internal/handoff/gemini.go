@@ -2,8 +2,6 @@ package handoff
 
 import (
 	"strings"
-
-	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/pty"
 )
 
 // GeminiLoginHandler handles login for Google Gemini CLI.
@@ -21,9 +19,10 @@ func (h *GeminiLoginHandler) LoginCommand() string {
 	return "/auth"
 }
 
-// TriggerLogin injects the login command into the PTY.
-func (h *GeminiLoginHandler) TriggerLogin(ctrl pty.Controller) error {
-	return ctrl.InjectCommand("/auth")
+// ResumeArgs are the flags that reopen the most recent session, so a
+// switched account is in use at once without losing the conversation.
+func (h *GeminiLoginHandler) ResumeArgs() []string {
+	return []string{"--resume", "latest"}
 }
 
 // IsLoginInProgress checks if a login flow has started.

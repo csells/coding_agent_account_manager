@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
-	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/notify"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/profile"
@@ -29,6 +28,15 @@ func TestMockCLI_Handoff(t *testing.T) {
 		return
 	}
 
+	// A respawn on the session's history (gemini's --resume) does not hit the
+	// limit again: it says it resumed and runs a moment.
+	for _, a := range os.Args {
+		if a == "--resume" {
+			fmt.Println("Resumed session; ready.")
+			time.Sleep(300 * time.Millisecond)
+			os.Exit(0)
+		}
+	}
 	// 1. Output rate limit message
 	fmt.Println("Processing...")
 	time.Sleep(100 * time.Millisecond)
@@ -45,8 +53,8 @@ func TestMockCLI_Handoff(t *testing.T) {
 		}
 	}()
 
-	// Keep running a bit
-	time.Sleep(500 * time.Millisecond)
+	// Keep running until the handoff ends this session (or 5s).
+	time.Sleep(5 * time.Second)
 }
 
 type MockNotifier struct {
@@ -121,7 +129,6 @@ func TestSmartRunner_E2E(t *testing.T) {
 	}
 
 	// Setup SmartRunner
-	cfg := config.DefaultSPMConfig().Handoff
 	notifier := &MockNotifier{}
 
 	// Need mock provider registry?
@@ -145,11 +152,10 @@ func TestSmartRunner_E2E(t *testing.T) {
 	runner := &Runner{}
 
 	opts := SmartRunnerOptions{
-		HandoffConfig: &cfg,
-		Vault:         vault,
-		DB:            db,
-		Rotation:      selector,
-		Notifier:      notifier,
+		Vault:    vault,
+		DB:       db,
+		Rotation: selector,
+		Notifier: notifier,
 	}
 
 	sr := NewSmartRunner(runner, opts)
@@ -196,11 +202,11 @@ func TestSmartRunner_E2E(t *testing.T) {
 	require.NotEmpty(t, notifier.Alerts)
 	foundSwitch := false
 	for _, a := range notifier.Alerts {
-		if strings.Contains(a.Message, "Switched to backup") {
+		if strings.Contains(a.Message, "Switched to backup") && strings.Contains(a.Message, "resumed") {
 			foundSwitch = true
 		}
 	}
-	assert.True(t, foundSwitch, "Did not notify about switch")
+	assert.True(t, foundSwitch, "Did not notify about the switch and resume")
 
 	// Check DB for Activation Event
 	activations, err := db.GetEvents("gemini", "active", time.Now().Add(-1*time.Hour), 10)

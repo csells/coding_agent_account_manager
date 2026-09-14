@@ -2,8 +2,6 @@ package handoff
 
 import (
 	"strings"
-
-	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/pty"
 )
 
 // CodexLoginHandler handles login for OpenAI Codex CLI.
@@ -22,9 +20,10 @@ func (h *CodexLoginHandler) LoginCommand() string {
 	return "codex login"
 }
 
-// TriggerLogin injects the login command into the PTY.
-func (h *CodexLoginHandler) TriggerLogin(ctrl pty.Controller) error {
-	return ctrl.InjectCommand("codex login")
+// ResumeArgs are the flags that reopen the most recent session, so a
+// switched account is in use at once without losing the conversation.
+func (h *CodexLoginHandler) ResumeArgs() []string {
+	return []string{"resume", "--last"}
 }
 
 // IsLoginInProgress checks if a login flow has started.
