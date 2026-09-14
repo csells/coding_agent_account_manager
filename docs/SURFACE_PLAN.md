@@ -267,7 +267,7 @@ method: red → green, one slice at a time; same closing checks.
 5. `SPMConfig.GetRefreshThreshold` (no caller) goes.
 6. `ACCOUNT_SWITCHER.md` §5 drops the history of `b` and `l`.
 
-## R2 — Kimi refreshes its own token (`internal/refresh/kimi.go`)
+## R2 — Kimi refreshes its own token (`internal/refresh/kimi.go`) (done)
 
 Kimi's access token lives about an hour; the CLI renews it with the
 refresh token at `POST {oauthHost}/api/oauth/token` (form-encoded:
@@ -287,6 +287,11 @@ by `KIMI_CODE_OAUTH_HOST`/`KIMI_OAUTH_HOST`; the CLI also sends its
 3. `caam refresh kimi <account>` works; the dashboard's `refreshableProvider`
    includes kimi, so `r` refreshes instead of offering a login; the refresh
    still happens only behind `NeedsRefresh` (expired or refused).
+
+Status: landed 2026-09-14 (`internal/refresh/kimi.go`, `caam refresh kimi`,
+`--all` includes kimi, the dashboard's `r` refreshes a refused Kimi token).
+Kimi's health entry is no longer marked self-refreshing, so an expired
+vault copy warns and points at the refresh, as Codex's does.
 
 ## R3 — Switch, then resume: the handoff and the pane tools (done)
 
