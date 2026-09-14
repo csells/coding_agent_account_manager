@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/identity"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/keychain"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/zcodecred"
 )
@@ -726,17 +727,7 @@ func (v *Vault) RecordProfileIdentity(tool, profile, identity string) error {
 // profileMetaIdentity reads the identity Backup (or RecordProfileIdentity)
 // stored in a profile's meta.json, "" when absent.
 func profileMetaIdentity(profileDir string) string {
-	data, err := os.ReadFile(filepath.Join(profileDir, "meta.json"))
-	if err != nil {
-		return ""
-	}
-	var meta struct {
-		Identity string `json:"identity"`
-	}
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(meta.Identity)
+	return identity.MetaIdentity(profileDir)
 }
 
 // optionalFilesCarryAuth reports whether a file set's optional files hold a
