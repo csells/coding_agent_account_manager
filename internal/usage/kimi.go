@@ -274,7 +274,7 @@ func (f *KimiFetcher) Fetch(ctx context.Context, accessToken string) (*UsageInfo
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusUnauthorized, http.StatusForbidden:
-		info.Error = "unauthorized: token expired or invalid" + kimiErrorDetail(body) + "; Kimi Code renews its token when it runs — start kimi once, then retry"
+		info.Error = "unauthorized: token expired or invalid" + kimiErrorDetail(body) + "; refresh it (caam refresh kimi <account>, or r in the dashboard), then retry"
 		return info, fmt.Errorf("unauthorized: status %d%s", resp.StatusCode, kimiErrorDetail(body))
 	default:
 		info.Error = fmt.Sprintf("API error: status %d%s", resp.StatusCode, kimiErrorDetail(body))

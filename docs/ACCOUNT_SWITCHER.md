@@ -194,7 +194,7 @@ the selected agent's Accounts below.
 - **Keys**: ←/→ agent, ↑/↓ Account, Enter switch (confirm), `n` new Login
   (picker of every agent, install status shown), `r` refresh (limits; the
   token first only when it has expired or the provider just refused it, and
-  only for Codex and Gemini; when a refresh cannot help — session ended, or
+  only for Codex, Gemini and Kimi; when a refresh cannot help — session ended, or
   an agent that renews its own tokens — `r` offers the Login instead and
   yes runs the `n` flow for that agent), `i` full card, `/` search, `e`
   edit, `o` browser, `d` delete, `?` help.
@@ -232,18 +232,22 @@ path, rows whose fetch fails keep their last good numbers. Piped or with
 ## 6. Refreshing a token is spending it
 
 `caam refresh`, `caam activate` and the dashboard's `r` use
-`internal/refresh`, which for Codex and Gemini presents the vault copy's
-refresh token to get a fresh access token and stores the new family in the
-vault (and, if the Account is Active and the live file has not moved,
-restores it to the live file too). Every such refresh consumes the refresh
+`internal/refresh`, which for Codex, Gemini and Kimi presents the vault
+copy's refresh token to get a fresh access token and stores the new family
+in the vault (and, if the Account is Active and the live file has not
+moved, restores it to the live file too). Kimi's refresh is the CLI's own
+call — a form-encoded `POST {oauthHost}/api/oauth/token` with the CLI's
+client id and `X-Msh-*` device headers, `oauthHost` following
+`KIMI_CODE_OAUTH_HOST` then `KIMI_OAUTH_HOST` — and 401, 403 or
+`invalid_grant` from it is the session-gone class that offers a login. Every such refresh consumes the refresh
 token. So there is one gate, `refresh.NeedsRefresh`: expired, or just
 refused by the provider — never early, never on a timer, never on a plain
 keypress. The daemon keeps the vault-backup schedule and does not refresh;
 the pool monitor tends cooldowns on its tick, and its explicit `RefreshAll`
 takes expired profiles only — a refused refresh is terminal until a person
-acts. `caam refresh --all --force` is refused. Claude Code, Kimi,
-Antigravity, zcode and OpenCode renew their own; a refresh cannot revive a
-revoked family (§2).
+acts. `caam refresh --all --force` is refused. Claude Code, Antigravity,
+zcode and OpenCode renew their own; a refresh cannot revive a revoked
+family (§2).
 
 ## 7. Verifying changes
 

@@ -1217,7 +1217,10 @@ func TestParseKimiExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseKimiExpiry: %v", err)
 	}
-	if info.ExpiresAt.Unix() != 1893456000 || !info.HasRefreshToken || !info.Renewable || !info.SelfRefreshing || info.Source != path {
+	// Renewable — caam refreshes it (internal/refresh) — but not
+	// self-refreshing: like Codex, an expired vault copy is caam's to renew,
+	// so it must not be waved through as routine lifecycle.
+	if info.ExpiresAt.Unix() != 1893456000 || !info.HasRefreshToken || !info.Renewable || info.SelfRefreshing || info.Source != path {
 		t.Errorf("info = %+v", info)
 	}
 	if info2, err := ParseKimiExpiry(path); err != nil || info2.ExpiresAt != info.ExpiresAt {

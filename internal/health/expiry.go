@@ -883,10 +883,12 @@ func parseAgyTokenJSON(data []byte) (*ExpiryInfo, error) {
 // ParseKimiExpiry extracts token expiry from a Kimi Code token file —
 // authPath, or the live $KIMI_CODE_HOME/credentials/kimi-code.json when "".
 // The file is a flat OAuth token ({access_token, refresh_token, expires_at
-// in epoch seconds, ...}); the CLI renews the access token itself from the
-// refresh token, so a credential that carries one is renewable and
-// self-refreshing (caam does not refresh it). A file with empty tokens is
-// the CLI's logged-out state and reports ErrNoAuthFile.
+// in epoch seconds, ...}). A credential that carries a refresh token is
+// renewable: the CLI renews the live one when it runs, and caam renews a
+// vault copy through internal/refresh (like Codex, so it is not marked
+// self-refreshing: an expired copy is caam's to refresh, not routine
+// lifecycle to wave through). A file with empty tokens is the CLI's
+// logged-out state and reports ErrNoAuthFile.
 func ParseKimiExpiry(authPath string) (*ExpiryInfo, error) {
 	if authPath == "" {
 		home := strings.TrimSpace(os.Getenv("KIMI_CODE_HOME"))
@@ -917,7 +919,6 @@ func ParseKimiExpiry(authPath string) (*ExpiryInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	info.SelfRefreshing = info.HasRefreshToken
 	info.Renewable = info.HasRefreshToken
 	info.Source = authPath
 	return info, nil
