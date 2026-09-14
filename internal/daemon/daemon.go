@@ -458,10 +458,12 @@ func (d *Daemon) runLoop() {
 		return d.poolMonitor != nil && d.poolMonitor.IsRunning()
 	}
 
-	// Do an initial check immediately
-	if !shouldUsePoolRefresh() {
-		d.checkAndRefresh()
-	}
+	// The daemon never spends a refresh token on a timer (a refresh
+	// consumes it; the families rotate). It keeps the vault backed up and,
+	// with the pool, the cooldown bookkeeping current; refreshing is a
+	// person's ask, when a token has expired or been refused.
+	_ = shouldUsePoolRefresh
+	d.recordCheck()
 	d.checkAndBackup()
 
 	interval := d.getCheckInterval()
@@ -487,10 +489,7 @@ func (d *Daemon) runLoop() {
 				d.logger.Printf("Updated check interval to %v", interval)
 			}
 		case <-ticker.C:
-			// Check each iteration in case pool monitor state changed
-			if !shouldUsePoolRefresh() {
-				d.checkAndRefresh()
-			}
+			d.recordCheck()
 			d.checkAndBackup()
 		}
 	}
@@ -595,100 +594,12 @@ func (d *Daemon) checkAndBackup() {
 	}
 }
 
-// checkAndRefresh checks all profiles and refreshes those that need it.
-func (d *Daemon) checkAndRefresh() {
+// recordCheck counts one pass of the loop.
+func (d *Daemon) recordCheck() {
 	d.mu.Lock()
 	d.stats.LastCheck = time.Now()
 	d.stats.CheckCount++
 	d.mu.Unlock()
-
-	if d.isVerbose() {
-		d.logger.Println("Checking profiles for refresh...")
-	}
-
-	providers := []string{"claude", "codex", "gemini", "opencode", "cursor"}
-	var totalChecked int64
-
-	// Use a semaphore to limit concurrency
-	sem := make(chan struct{}, 5)
-	var wg sync.WaitGroup
-
-	for _, provider := range providers {
-		profiles, err := d.vault.List(provider)
-		if err != nil {
-			if d.isVerbose() {
-				d.logger.Printf("Could not list %s profiles: %v", provider, err)
-			}
-			continue
-		}
-
-		for _, profile := range profiles {
-			totalChecked++
-			wg.Add(1)
-			sem <- struct{}{} // Acquire token
-			go func(pProvider, pProfile string) {
-				defer wg.Done()
-				defer func() { <-sem }() // Release token
-				d.checkProfile(pProvider, pProfile)
-			}(provider, profile)
-		}
-	}
-
-	wg.Wait()
-
-	d.mu.Lock()
-	d.stats.ProfilesChecked += totalChecked
-	d.mu.Unlock()
-
-	if d.isVerbose() {
-		d.logger.Printf("Checked %d profiles", totalChecked)
-	}
-}
-
-// checkProfile checks a single profile and refreshes if needed.
-func (d *Daemon) checkProfile(provider, profile string) {
-	// Get health data for this profile
-	ph := d.getProfileHealth(provider, profile)
-	if ph == nil {
-		return
-	}
-
-	// Check if refresh is needed
-	if !refresh.ShouldRefresh(ph, d.getRefreshThreshold()) {
-		if d.isVerbose() && !ph.TokenExpiresAt.IsZero() {
-			ttl := time.Until(ph.TokenExpiresAt)
-			d.logger.Printf("%s/%s: token OK (expires in %v)", provider, profile, ttl.Round(time.Minute))
-		}
-		return
-	}
-
-	ttl := time.Until(ph.TokenExpiresAt)
-	d.logger.Printf("%s/%s: refreshing token (expires in %v)", provider, profile, ttl.Round(time.Minute))
-
-	ctx, cancel := context.WithTimeout(d.ctx, 30*time.Second)
-	defer cancel()
-
-	err := refresh.RefreshProfile(ctx, provider, profile, d.vault, d.healthStore)
-
-	d.mu.Lock()
-	if err != nil {
-		d.stats.RefreshErrors++
-		d.mu.Unlock()
-
-		// Don't log unsupported errors as failures
-		var unsupErr *refresh.UnsupportedError
-		if ok := isUnsupportedError(err, &unsupErr); ok {
-			if d.isVerbose() {
-				d.logger.Printf("%s/%s: refresh not supported (%s)", provider, profile, unsupErr.Reason)
-			}
-		} else {
-			d.logger.Printf("%s/%s: refresh failed: %v", provider, profile, err)
-		}
-	} else {
-		d.stats.RefreshCount++
-		d.mu.Unlock()
-		d.logger.Printf("%s/%s: token refreshed successfully", provider, profile)
-	}
 }
 
 // getProfileHealth returns the health data for a profile.

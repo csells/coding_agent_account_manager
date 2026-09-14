@@ -39,7 +39,7 @@ var poolStatusCmd = &cobra.Command{
 
 var poolRefreshCmd = &cobra.Command{
 	Use:   "refresh [provider/profile]",
-	Short: "Force refresh a profile or all profiles",
+	Short: "Refresh a profile, or with --all every profile whose token has expired",
 	RunE:  runPoolRefresh,
 }
 

@@ -17,11 +17,14 @@ import (
 
 var daemonCmd = &cobra.Command{
 	Use:   "daemon <command>",
-	Short: "Manage the background token refresh daemon",
-	Long: `Start, stop, and monitor the background daemon for proactive token management.
+	Short: "Manage the background vault-backup daemon",
+	Long: `Start, stop, and monitor the background daemon.
 
-The daemon runs in the background and automatically refreshes tokens before they expire,
-ensuring your AI tools always have valid authentication.
+The daemon keeps the vault backed up on a schedule and, with --pool, keeps
+the auth pool's cooldown bookkeeping current. It never refreshes a token
+on its own: a refresh consumes the account's refresh token, and the
+families rotate, so refreshing is something you ask for (caam refresh,
+or r in the dashboard) when a token has expired or been refused.
 
 Examples:
   caam daemon start          # Start the daemon in the background
@@ -34,9 +37,9 @@ Examples:
 var daemonStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the background daemon",
-	Long: `Start the background token refresh daemon.
+	Long: `Start the background daemon.
 
-The daemon will periodically check all profiles and refresh tokens before they expire.
+The daemon runs the vault-backup schedule; it does not refresh tokens.
 By default, it runs in the background. Use --fg to run in the foreground (useful for debugging).`,
 	RunE: runDaemonStart,
 }
@@ -69,7 +72,7 @@ func init() {
 	// Start flags
 	daemonStartCmd.Flags().Bool("fg", false, "run in foreground (don't daemonize)")
 	daemonStartCmd.Flags().Duration("interval", daemon.DefaultCheckInterval, "check interval")
-	daemonStartCmd.Flags().Duration("threshold", daemon.DefaultRefreshThreshold, "refresh threshold (how long before expiry to refresh)")
+	daemonStartCmd.Flags().Duration("threshold", daemon.DefaultRefreshThreshold, "kept for compatibility; the daemon no longer refreshes tokens")
 	daemonStartCmd.Flags().BoolP("verbose", "v", false, "verbose logging")
 	daemonStartCmd.Flags().Bool("pool", false, "enable auth pool for proactive token monitoring")
 

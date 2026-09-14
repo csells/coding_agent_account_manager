@@ -47,6 +47,9 @@ func TestNoRealHomeWrites(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		if info.IsDir() && (info.Name() == ".git" || info.Name() == ".claude") {
+			return filepath.SkipDir
+		}
 		if strings.HasSuffix(path, "_test.go") {
 			testFiles = append(testFiles, path)
 		}
@@ -173,6 +176,9 @@ func TestNoHardcodedAuthPaths(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		if info.IsDir() && (info.Name() == ".git" || info.Name() == ".claude") {
+			return filepath.SkipDir
+		}
 		if strings.HasSuffix(path, "_test.go") {
 			testFiles = append(testFiles, path)
 		}
@@ -235,6 +241,9 @@ func TestTempDirUsage(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		if info.IsDir() && (info.Name() == ".git" || info.Name() == ".claude") {
+			return filepath.SkipDir
+		}
 		if strings.HasSuffix(path, "_test.go") {
 			testFiles = append(testFiles, path)
 		}
@@ -296,7 +305,7 @@ func TestEveryTestPackageIsolatesHome(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() && (info.Name() == ".git" || info.Name() == "vendor" || info.Name() == "testdata") {
+		if info.IsDir() && (info.Name() == ".git" || info.Name() == ".claude" || info.Name() == "vendor" || info.Name() == "testdata") {
 			return filepath.SkipDir
 		}
 		if strings.HasSuffix(path, "_test.go") {

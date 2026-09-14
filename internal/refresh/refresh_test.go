@@ -2,6 +2,7 @@ package refresh
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,123 +15,6 @@ import (
 // =============================================================================
 // ShouldRefresh Tests
 // =============================================================================
-
-func TestShouldRefresh_NilHealth(t *testing.T) {
-	// Nil health should return false - we don't know if refresh is needed
-	result := ShouldRefresh(nil, DefaultRefreshThreshold)
-	if result {
-		t.Error("ShouldRefresh(nil) = true, want false")
-	}
-}
-
-func TestShouldRefresh_ZeroExpiry(t *testing.T) {
-	// Zero expiry time means unknown - should return false
-	h := &health.ProfileHealth{
-		TokenExpiresAt: time.Time{}, // zero time
-	}
-	result := ShouldRefresh(h, DefaultRefreshThreshold)
-	if result {
-		t.Error("ShouldRefresh with zero expiry = true, want false")
-	}
-}
-
-func TestShouldRefresh_NotExpiring(t *testing.T) {
-	// Token expiring in 2 hours with 10min threshold - should not refresh
-	h := &health.ProfileHealth{
-		TokenExpiresAt: time.Now().Add(2 * time.Hour),
-	}
-	result := ShouldRefresh(h, 10*time.Minute)
-	if result {
-		t.Errorf("ShouldRefresh with 2h TTL and 10min threshold = true, want false")
-	}
-}
-
-func TestShouldRefresh_Expiring(t *testing.T) {
-	// Token expiring in 5 minutes with 10min threshold - should refresh
-	h := &health.ProfileHealth{
-		TokenExpiresAt: time.Now().Add(5 * time.Minute),
-	}
-	result := ShouldRefresh(h, 10*time.Minute)
-	if !result {
-		t.Errorf("ShouldRefresh with 5min TTL and 10min threshold = false, want true")
-	}
-}
-
-func TestShouldRefresh_AlreadyExpired(t *testing.T) {
-	// Token already expired - should return false (ttl <= 0)
-	h := &health.ProfileHealth{
-		TokenExpiresAt: time.Now().Add(-5 * time.Minute),
-	}
-	result := ShouldRefresh(h, 10*time.Minute)
-	if result {
-		t.Errorf("ShouldRefresh with expired token = true, want false")
-	}
-}
-
-func TestShouldRefresh_DefaultThreshold(t *testing.T) {
-	// When threshold is 0, should use DefaultRefreshThreshold (10 minutes)
-	// Token expiring in 5 minutes should trigger refresh
-	h := &health.ProfileHealth{
-		TokenExpiresAt: time.Now().Add(5 * time.Minute),
-	}
-	result := ShouldRefresh(h, 0) // 0 means use default
-	if !result {
-		t.Errorf("ShouldRefresh with 5min TTL and default threshold = false, want true")
-	}
-
-	// Token expiring in 15 minutes should NOT trigger refresh with default threshold
-	h2 := &health.ProfileHealth{
-		TokenExpiresAt: time.Now().Add(15 * time.Minute),
-	}
-	result2 := ShouldRefresh(h2, 0)
-	if result2 {
-		t.Errorf("ShouldRefresh with 15min TTL and default threshold = true, want false")
-	}
-}
-
-func TestShouldRefresh_CustomThreshold(t *testing.T) {
-	// Custom 30-minute threshold
-	h := &health.ProfileHealth{
-		TokenExpiresAt: time.Now().Add(20 * time.Minute),
-	}
-
-	// With 30min threshold, 20min TTL should trigger refresh
-	result := ShouldRefresh(h, 30*time.Minute)
-	if !result {
-		t.Errorf("ShouldRefresh with 20min TTL and 30min threshold = false, want true")
-	}
-
-	// With 10min threshold, 20min TTL should NOT trigger refresh
-	result2 := ShouldRefresh(h, 10*time.Minute)
-	if result2 {
-		t.Errorf("ShouldRefresh with 20min TTL and 10min threshold = true, want false")
-	}
-}
-
-func TestShouldRefresh_EdgeCaseJustAboveThreshold(t *testing.T) {
-	// Token expiring just above threshold - should NOT refresh (ttl must be < threshold)
-	threshold := 10 * time.Minute
-	// Add a buffer to account for test execution time
-	h := &health.ProfileHealth{
-		TokenExpiresAt: time.Now().Add(threshold + 1*time.Second),
-	}
-	result := ShouldRefresh(h, threshold)
-	if result {
-		t.Errorf("ShouldRefresh with TTL above threshold = true, want false")
-	}
-}
-
-func TestShouldRefresh_EdgeCaseJustBelowThreshold(t *testing.T) {
-	// Token expiring just below threshold - should refresh (ttl < threshold)
-	threshold := 10 * time.Minute
-	h := &health.ProfileHealth{
-		TokenExpiresAt: time.Now().Add(threshold - 1*time.Second),
-	}
-	result := ShouldRefresh(h, threshold)
-	if !result {
-		t.Errorf("ShouldRefresh with TTL below threshold = false, want true")
-	}
-}
 
 // =============================================================================
 // getRefreshTokenFromJSON Tests
@@ -562,5 +446,31 @@ func writeJSON(t *testing.T, path string, data interface{}) {
 	}
 	if err := os.WriteFile(path, jsonBytes, 0600); err != nil {
 		t.Fatalf("failed to write file: %v", err)
+	}
+}
+
+// NeedsRefresh is the one gate for spending a refresh token: only when the
+// token has expired, or the provider just refused it. A token with time
+// left is left alone — a refresh consumes the refresh token, and the
+// families rotate.
+func TestNeedsRefresh_OnlyWhenExpiredOrRefused(t *testing.T) {
+	valid := &health.ProfileHealth{TokenExpiresAt: time.Now().Add(5 * time.Minute)}
+	expired := &health.ProfileHealth{TokenExpiresAt: time.Now().Add(-time.Minute)}
+	unknown := &health.ProfileHealth{}
+
+	if NeedsRefresh(valid, nil) {
+		t.Error("a token with five minutes left must not be refreshed")
+	}
+	if !NeedsRefresh(expired, nil) {
+		t.Error("an expired token needs a refresh")
+	}
+	if !NeedsRefresh(valid, errors.New("unauthorized: status 401")) {
+		t.Error("a token the provider just refused needs a refresh")
+	}
+	if NeedsRefresh(unknown, nil) || NeedsRefresh(nil, nil) {
+		t.Error("with no expiry known and no refusal there is no reason to refresh")
+	}
+	if NeedsRefresh(valid, errors.New("API error: status 500")) {
+		t.Error("a server error is not a refusal of the token")
 	}
 }

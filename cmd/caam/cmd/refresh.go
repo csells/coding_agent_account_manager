@@ -56,6 +56,9 @@ func runRefresh(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
 	if all {
+		if force && !dryRun {
+			return fmt.Errorf("refusing --all with --force: a refresh consumes each account's refresh token, and forcing every vaulted account at once spends them all for no reason; force one profile (caam refresh <tool> <profile> --force), or run --all without --force to refresh only what has expired")
+		}
 		return refreshAll(ctx, threshold, dryRun, force, quiet)
 	}
 
@@ -299,14 +302,12 @@ func shouldRefreshProfile(tool, profile string, threshold time.Duration, force b
 		return false, "unknown expiry", nil
 	}
 
-	ttl := time.Until(info.ExpiresAt)
-	if ttl <= 0 {
+	// One gate everywhere (refresh.NeedsRefresh): expired, or refused. A
+	// token with time left is not spent early, whatever the threshold.
+	if refresh.NeedsRefresh(&health.ProfileHealth{TokenExpiresAt: info.ExpiresAt}, nil) {
 		return true, "expired", nil
 	}
-	if ttl < threshold {
-		return true, "expires " + health.FormatTimeRemaining(info.ExpiresAt), nil
-	}
-
+	_ = threshold
 	return false, "expires " + health.FormatTimeRemaining(info.ExpiresAt), nil
 }
 

@@ -558,7 +558,7 @@ func refreshIfNeeded(ctx context.Context, provider, profile string, quiet bool) 
 	// We should use that logic? `getProfileHealth` is in `root.go` (same package).
 	h := getProfileHealth(provider, profile)
 
-	if !refresh.ShouldRefresh(h, 0) {
+	if !refresh.NeedsRefresh(h, nil) {
 		return false
 	}
 

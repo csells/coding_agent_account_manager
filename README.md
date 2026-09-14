@@ -1420,7 +1420,7 @@ Special thanks to **[@darvell](https://github.com/darvell)** for inspiring this 
 
 While codex-pool answers "which account should handle THIS request?" (real-time proxy), caam answers "which account should I USE for my work session?" (profile manager). The Smart Profile Management features adapt codex-pool's intelligence to caam's architecture:
 
-- **Proactive Token Refresh** — Automatically refreshes OAuth tokens before they expire, preventing mid-session auth failures *(not available for Claude—use `/login` to re-authenticate)*
+- **On-demand Token Refresh** — `caam refresh` and the dashboard's `r` refresh a token only when it has expired or the provider refused it, never early and never on a timer: a refresh consumes the refresh token, and the families rotate *(Codex and Gemini; Claude Code and the others renew their own)*
 - **Profile Health Scoring** — Visual indicators (🟢🟡🔴) showing token status, error history, penalty decay, and plan type *(Claude profiles may show limited identity info)*
 - **Smart Rotation** — Multi-factor algorithm picks the best available profile based on health, cooldown, recency, and usage patterns
 - **Cooldown Tracking** — Database-backed tracking of rate limit hits with configurable cooldown windows

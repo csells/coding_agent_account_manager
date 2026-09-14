@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
@@ -22,18 +23,22 @@ const maxErrorBodySize = 64 * 1024 // 64KB
 // DefaultRefreshThreshold is the time before expiry to trigger a refresh.
 const DefaultRefreshThreshold = 10 * time.Minute
 
-// ShouldRefresh determines if a profile needs refreshing.
-func ShouldRefresh(h *health.ProfileHealth, threshold time.Duration) bool {
+// NeedsRefresh is the one gate for spending a refresh token: true only when
+// the token has expired, or the provider just refused it (lastErr from a
+// limits fetch or an API call). A token with time left is left alone — a
+// refresh consumes the refresh token, and the families rotate — so nothing
+// refreshes early, on a timer, or "just in case".
+func NeedsRefresh(h *health.ProfileHealth, lastErr error) bool {
+	if lastErr != nil {
+		msg := strings.ToLower(lastErr.Error())
+		if strings.Contains(msg, "unauthorized") || strings.Contains(msg, "401") || strings.Contains(msg, "token expired") || strings.Contains(msg, "invalid_grant") {
+			return true
+		}
+	}
 	if h == nil || h.TokenExpiresAt.IsZero() {
-		return false // Unknown expiry, do not assume refresh needed (avoid loops)
+		return false // Unknown expiry, no refusal: no reason.
 	}
-
-	if threshold == 0 {
-		threshold = DefaultRefreshThreshold
-	}
-
-	ttl := time.Until(h.TokenExpiresAt)
-	return ttl > 0 && ttl < threshold
+	return !time.Now().Before(h.TokenExpiresAt)
 }
 
 // RefreshProfile orchestrates the refresh for a specific provider/profile.

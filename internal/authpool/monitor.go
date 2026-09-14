@@ -53,7 +53,7 @@ type Monitor struct {
 	// State
 	mu        sync.Mutex
 	running   bool
-	stopping  bool      // Set when Stop() is called, prevents new refreshes
+	stopping  bool // Set when Stop() is called, prevents new refreshes
 	stopCh    chan struct{}
 	stopOnce  sync.Once // Ensures stopCh is only closed once
 	refreshWg sync.WaitGroup
@@ -141,8 +141,11 @@ func (m *Monitor) runLoop(ctx context.Context) {
 	ticker := time.NewTicker(m.config.CheckInterval)
 	defer ticker.Stop()
 
-	// Run initial check immediately
-	m.checkAndRefresh(ctx)
+	// The loop keeps the cooldown bookkeeping current. It never spends a
+	// refresh token on a tick: a refresh consumes it, and the families
+	// rotate. Refreshing is an explicit ask (RefreshAll), for what has
+	// expired.
+	m.pool.CheckAndUpdateCooldowns()
 
 	for {
 		select {
@@ -151,31 +154,24 @@ func (m *Monitor) runLoop(ctx context.Context) {
 		case <-m.stopCh:
 			return
 		case <-ticker.C:
-			m.checkAndRefresh(ctx)
+			m.pool.CheckAndUpdateCooldowns()
 		}
 	}
 }
 
-// checkAndRefresh checks all profiles and triggers refresh for those needing it.
-func (m *Monitor) checkAndRefresh(ctx context.Context) {
-	// Clear expired cooldowns first
+// refreshExpired refreshes the profiles whose token has expired, and
+// nothing else: not one with time left (spending it early gains nothing),
+// and not one whose last refresh was refused — re-presenting a refused
+// token is what trips reuse detection, so a refusal is terminal until a
+// person acts.
+func (m *Monitor) refreshExpired(ctx context.Context) {
 	m.pool.CheckAndUpdateCooldowns()
-
-	// Get profiles that need refresh
-	profiles := m.pool.GetProfilesNeedingRefresh("")
-
-	for _, profile := range profiles {
-		// Skip if already refreshing
-		if profile.Status == PoolStatusRefreshing {
+	for _, profile := range m.pool.GetProfilesNeedingRefresh("") {
+		if profile.Status == PoolStatusRefreshing || profile.Status == PoolStatusError {
 			continue
 		}
-
-		// Check if expiring soon or already expired/error
-		needsRefresh := profile.IsExpiringSoon(m.config.RefreshThreshold) ||
-			profile.Status == PoolStatusExpired ||
-			profile.Status == PoolStatusError
-
-		if needsRefresh {
+		expired := profile.Status == PoolStatusExpired || profile.IsExpired()
+		if expired {
 			m.triggerRefresh(ctx, profile.Provider, profile.ProfileName, profile.Status)
 		}
 	}
@@ -310,10 +306,10 @@ func (m *Monitor) ForceRefresh(ctx context.Context, provider, profile string) er
 	return nil
 }
 
-// RefreshAll triggers refresh for all profiles that need it.
-// This is useful for startup or manual refresh.
+// RefreshAll refreshes every profile whose token has expired; see
+// refreshExpired for what it leaves alone.
 func (m *Monitor) RefreshAll(ctx context.Context) {
-	m.checkAndRefresh(ctx)
+	m.refreshExpired(ctx)
 }
 
 // Stats returns current monitor statistics.

@@ -350,28 +350,6 @@ func TestDaemon_ReloadConfig(t *testing.T) {
 	d.ReloadConfig()
 }
 
-func TestDaemon_CheckAndRefresh_EmptyVault(t *testing.T) {
-	tmpDir := t.TempDir()
-	v := authfile.NewVault(tmpDir)
-	hs := health.NewStorage(filepath.Join(tmpDir, "health.json"))
-
-	cfg := &Config{
-		CheckInterval:    50 * time.Millisecond,
-		RefreshThreshold: 1 * time.Minute,
-		Verbose:          true,
-	}
-
-	d := New(v, hs, cfg)
-
-	// Should not panic with empty vault
-	d.checkAndRefresh()
-
-	stats := d.GetStats()
-	if stats.CheckCount != 1 {
-		t.Errorf("CheckCount should be 1, got %d", stats.CheckCount)
-	}
-}
-
 func TestDaemon_CheckAndBackup_NoScheduler(t *testing.T) {
 	tmpDir := t.TempDir()
 	v := authfile.NewVault(tmpDir)
@@ -436,54 +414,6 @@ func TestDaemon_GetProfileHealth_FromHealthStore(t *testing.T) {
 	}
 }
 
-func TestDaemon_CheckProfile_NonExistentProfile(t *testing.T) {
-	tmpDir := t.TempDir()
-	v := authfile.NewVault(tmpDir)
-	hs := health.NewStorage(filepath.Join(tmpDir, "health.json"))
-
-	cfg := &Config{
-		CheckInterval:    50 * time.Millisecond,
-		RefreshThreshold: 1 * time.Minute,
-		Verbose:          true,
-	}
-
-	d := New(v, hs, cfg)
-
-	// Should not panic for non-existent profile
-	d.checkProfile("claude", "nonexistent")
-}
-
-func TestDaemon_CheckProfile_TokenNotExpiring(t *testing.T) {
-	tmpDir := t.TempDir()
-	v := authfile.NewVault(tmpDir)
-	hs := health.NewStorage(filepath.Join(tmpDir, "health.json"))
-
-	// Store health data with token expiring in 2 hours (not due for refresh)
-	expiry := time.Now().Add(2 * time.Hour)
-	ph := &health.ProfileHealth{
-		TokenExpiresAt: expiry,
-	}
-	if err := hs.UpdateProfile("claude", "test", ph); err != nil {
-		t.Fatalf("failed to update profile health: %v", err)
-	}
-
-	cfg := &Config{
-		CheckInterval:    50 * time.Millisecond,
-		RefreshThreshold: 10 * time.Minute, // Only refresh if < 10 min
-		Verbose:          true,
-	}
-
-	d := New(v, hs, cfg)
-
-	// Should not attempt refresh (TTL > threshold)
-	d.checkProfile("claude", "test")
-
-	stats := d.GetStats()
-	if stats.RefreshCount != 0 {
-		t.Errorf("RefreshCount should be 0 (token not expiring), got %d", stats.RefreshCount)
-	}
-}
-
 func TestSetPIDFilePath(t *testing.T) {
 	// Save original
 	original := PIDFilePath()
@@ -499,41 +429,6 @@ func TestSetPIDFilePath(t *testing.T) {
 	SetPIDFilePath("")
 	if got := PIDFilePath(); got == "/custom/path.pid" {
 		t.Error("PIDFilePath should not be /custom/path.pid after reset")
-	}
-}
-
-func TestDaemon_CheckProfile_ExpiringToken(t *testing.T) {
-	tmpDir := t.TempDir()
-	v := authfile.NewVault(tmpDir)
-	hs := health.NewStorage(filepath.Join(tmpDir, "health.json"))
-
-	// Store health data with token expiring soon (below refresh threshold)
-	expiry := time.Now().Add(5 * time.Minute)
-	ph := &health.ProfileHealth{
-		TokenExpiresAt: expiry,
-	}
-	if err := hs.UpdateProfile("claude", "test", ph); err != nil {
-		t.Fatalf("failed to update profile health: %v", err)
-	}
-
-	cfg := &Config{
-		CheckInterval:    50 * time.Millisecond,
-		RefreshThreshold: 10 * time.Minute, // Token is expiring in 5min, threshold is 10min
-		Verbose:          true,
-	}
-
-	d := New(v, hs, cfg)
-	d.ctx, d.cancel = context.WithCancel(context.Background())
-	defer d.cancel()
-
-	// This will attempt to refresh, but fail because there's no actual profile
-	// The important thing is that it exercises the code path
-	d.checkProfile("claude", "test")
-
-	stats := d.GetStats()
-	// Should have recorded an error (refresh fails because profile doesn't exist in vault)
-	if stats.RefreshErrors != 1 {
-		t.Errorf("RefreshErrors should be 1, got %d", stats.RefreshErrors)
 	}
 }
 
@@ -764,28 +659,6 @@ func TestDaemon_GetProfileHealth_GeminiProfile(t *testing.T) {
 	gotPh := d.getProfileHealth("gemini", "test")
 	if gotPh == nil {
 		t.Fatal("getProfileHealth should return health data from store")
-	}
-}
-
-func TestDaemon_CheckAndRefresh_VerboseMode(t *testing.T) {
-	tmpDir := t.TempDir()
-	v := authfile.NewVault(tmpDir)
-	hs := health.NewStorage(filepath.Join(tmpDir, "health.json"))
-
-	cfg := &Config{
-		CheckInterval:    50 * time.Millisecond,
-		RefreshThreshold: 1 * time.Minute,
-		Verbose:          true,
-	}
-
-	d := New(v, hs, cfg)
-
-	// Should not panic with verbose mode
-	d.checkAndRefresh()
-
-	stats := d.GetStats()
-	if stats.CheckCount != 1 {
-		t.Errorf("CheckCount should be 1, got %d", stats.CheckCount)
 	}
 }
 
@@ -1045,36 +918,6 @@ func TestDaemon_CheckAndBackup_NotDue(t *testing.T) {
 	}
 }
 
-func TestDaemon_CheckAndRefresh_WithProfiles(t *testing.T) {
-	tmpDir := t.TempDir()
-	v := authfile.NewVault(tmpDir)
-	hs := health.NewStorage(filepath.Join(tmpDir, "health.json"))
-
-	// Create some profile directories (empty, but they'll be listed)
-	os.MkdirAll(filepath.Join(tmpDir, "claude", "test@example.com"), 0700)
-	os.MkdirAll(filepath.Join(tmpDir, "codex", "work@company.com"), 0700)
-
-	cfg := &Config{
-		CheckInterval:    50 * time.Millisecond,
-		RefreshThreshold: 1 * time.Minute,
-		Verbose:          true,
-	}
-
-	d := New(v, hs, cfg)
-
-	// This should check the profiles (they won't need refresh since no health data)
-	d.checkAndRefresh()
-
-	stats := d.GetStats()
-	if stats.CheckCount != 1 {
-		t.Errorf("CheckCount = %d, want 1", stats.CheckCount)
-	}
-	// ProfilesChecked should reflect the number of profiles found
-	if stats.ProfilesChecked < 2 {
-		t.Errorf("ProfilesChecked = %d, expected at least 2", stats.ProfilesChecked)
-	}
-}
-
 func TestDaemon_Start_WithAuthPool(t *testing.T) {
 	tmpDir := t.TempDir()
 	pidPath := filepath.Join(tmpDir, "test-daemon.pid")
@@ -1226,39 +1069,6 @@ func TestDaemon_GetStats_AfterRunning(t *testing.T) {
 	}
 
 	d.Stop()
-}
-
-func TestDaemon_checkProfile_Concurrent(t *testing.T) {
-	tmpDir := t.TempDir()
-	v := authfile.NewVault(tmpDir)
-	hs := health.NewStorage(filepath.Join(tmpDir, "health.json"))
-
-	// Store health data with token not expiring soon
-	expiry := time.Now().Add(2 * time.Hour) // Well beyond threshold
-	ph := &health.ProfileHealth{
-		TokenExpiresAt: expiry,
-	}
-	if err := hs.UpdateProfile("claude", "test", ph); err != nil {
-		t.Fatalf("failed to update profile health: %v", err)
-	}
-
-	cfg := &Config{
-		CheckInterval:    50 * time.Millisecond,
-		RefreshThreshold: 10 * time.Minute,
-		Verbose:          true,
-	}
-
-	d := New(v, hs, cfg)
-	d.ctx, d.cancel = context.WithCancel(context.Background())
-	defer d.cancel()
-
-	// Profile is not expiring, so checkProfile should not refresh
-	d.checkProfile("claude", "test")
-
-	stats := d.GetStats()
-	if stats.RefreshCount != 0 {
-		t.Errorf("RefreshCount = %d, want 0 (token not expiring)", stats.RefreshCount)
-	}
 }
 
 func TestBackupScheduler_SaveState_Successful(t *testing.T) {
@@ -1418,39 +1228,6 @@ func TestDaemon_Stop_WithPIDFile(t *testing.T) {
 	}
 }
 
-func TestDaemon_checkProfile_VerboseOK(t *testing.T) {
-	tmpDir := t.TempDir()
-	v := authfile.NewVault(tmpDir)
-	hs := health.NewStorage(filepath.Join(tmpDir, "health.json"))
-
-	// Store health data with token not expiring soon (2 hours)
-	expiry := time.Now().Add(2 * time.Hour)
-	ph := &health.ProfileHealth{
-		TokenExpiresAt: expiry,
-	}
-	if err := hs.UpdateProfile("claude", "test", ph); err != nil {
-		t.Fatalf("failed to update profile health: %v", err)
-	}
-
-	cfg := &Config{
-		CheckInterval:    50 * time.Millisecond,
-		RefreshThreshold: 10 * time.Minute,
-		Verbose:          true, // Enable verbose logging
-	}
-
-	d := New(v, hs, cfg)
-	d.ctx, d.cancel = context.WithCancel(context.Background())
-	defer d.cancel()
-
-	// Should log "token OK" message
-	d.checkProfile("claude", "test")
-
-	stats := d.GetStats()
-	if stats.RefreshCount != 0 {
-		t.Errorf("RefreshCount = %d, want 0", stats.RefreshCount)
-	}
-}
-
 func TestDaemon_Start_SignalHandling(t *testing.T) {
 	tmpDir := t.TempDir()
 	pidPath := filepath.Join(tmpDir, "test-daemon.pid")
@@ -1580,5 +1357,35 @@ func TestDaemon_getProfileHealth_ParseGeminiExpiry(t *testing.T) {
 	ph := d.getProfileHealth("gemini", "test@example.com")
 	if ph != nil {
 		t.Error("getProfileHealth should return nil for invalid gemini auth file")
+	}
+}
+
+// The daemon never spends a refresh token on a timer. A profile whose
+// token is about to expire is left alone across several check intervals;
+// refreshing is something a person asks for, when the token has expired
+// or been refused.
+func TestDaemon_NeverRefreshesOnATimer(t *testing.T) {
+	tmpDir := t.TempDir()
+	v := authfile.NewVault(tmpDir)
+	hs := health.NewStorage(filepath.Join(tmpDir, "health.json"))
+	if err := hs.UpdateProfile("claude", "test", &health.ProfileHealth{TokenExpiresAt: time.Now().Add(2 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, "claude", "test"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "claude", "test", ".credentials.json"), []byte(`{"claudeAiOauth":{"refreshToken":"SYNTHETIC"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	d := New(v, hs, &Config{CheckInterval: 20 * time.Millisecond, RefreshThreshold: 10 * time.Minute})
+	d.ctx, d.cancel = context.WithCancel(context.Background())
+	go d.runLoop()
+	time.Sleep(120 * time.Millisecond)
+	d.cancel()
+
+	stats := d.GetStats()
+	if stats.RefreshCount != 0 || stats.RefreshErrors != 0 {
+		t.Fatalf("the daemon attempted %d refreshes (%d failed) on a timer; it must attempt none", stats.RefreshCount+stats.RefreshErrors, stats.RefreshErrors)
 	}
 }

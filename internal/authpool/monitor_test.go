@@ -128,116 +128,6 @@ func TestMonitor_StartStop(t *testing.T) {
 	monitor.Stop()
 }
 
-func TestMonitor_RefreshesExpiringSoon(t *testing.T) {
-	pool := NewAuthPool()
-	refresher := NewMockRefresher()
-	config := DefaultMonitorConfig()
-	config.CheckInterval = 10 * time.Millisecond
-	config.RefreshThreshold = 10 * time.Minute
-
-	monitor := NewMonitor(pool, refresher, config)
-
-	// Add profile expiring soon (within threshold)
-	pool.AddProfile("claude", "expiring")
-	pool.SetStatus("claude", "expiring", PoolStatusReady)
-	pool.UpdateTokenExpiry("claude", "expiring", time.Now().Add(5*time.Minute))
-
-	// Add profile not expiring soon
-	pool.AddProfile("claude", "fresh")
-	pool.SetStatus("claude", "fresh", PoolStatusReady)
-	pool.UpdateTokenExpiry("claude", "fresh", time.Now().Add(time.Hour))
-
-	ctx := context.Background()
-	monitor.Start(ctx)
-
-	// Wait for check cycle
-	time.Sleep(100 * time.Millisecond)
-
-	monitor.Stop()
-
-	// Should have refreshed the expiring profile
-	calls := refresher.Calls()
-	foundExpiring := false
-	foundFresh := false
-	for _, call := range calls {
-		if call == "claude/expiring" {
-			foundExpiring = true
-		}
-		if call == "claude/fresh" {
-			foundFresh = true
-		}
-	}
-
-	if !foundExpiring {
-		t.Error("should have refreshed expiring profile")
-	}
-	if foundFresh {
-		t.Error("should not have refreshed fresh profile")
-	}
-}
-
-func TestMonitor_RefreshesExpired(t *testing.T) {
-	pool := NewAuthPool()
-	refresher := NewMockRefresher()
-	config := DefaultMonitorConfig()
-	config.CheckInterval = 10 * time.Millisecond
-
-	monitor := NewMonitor(pool, refresher, config)
-
-	// Add expired profile
-	pool.AddProfile("claude", "expired")
-	pool.SetStatus("claude", "expired", PoolStatusExpired)
-
-	ctx := context.Background()
-	monitor.Start(ctx)
-	time.Sleep(100 * time.Millisecond)
-	monitor.Stop()
-
-	calls := refresher.Calls()
-	found := false
-	for _, call := range calls {
-		if call == "claude/expired" {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		t.Error("should have refreshed expired profile")
-	}
-}
-
-func TestMonitor_RefreshesError(t *testing.T) {
-	pool := NewAuthPool()
-	refresher := NewMockRefresher()
-	config := DefaultMonitorConfig()
-	config.CheckInterval = 10 * time.Millisecond
-
-	monitor := NewMonitor(pool, refresher, config)
-
-	// Add error profile
-	pool.AddProfile("claude", "error")
-	pool.SetStatus("claude", "error", PoolStatusError)
-
-	ctx := context.Background()
-	monitor.Start(ctx)
-	time.Sleep(100 * time.Millisecond)
-	monitor.Stop()
-
-	calls := refresher.Calls()
-	found := false
-	for _, call := range calls {
-		if call == "claude/error" {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		t.Error("should have refreshed error profile")
-	}
-}
-
 func TestMonitor_SkipsRefreshing(t *testing.T) {
 	pool := NewAuthPool()
 	refresher := NewMockRefresher()
@@ -283,8 +173,8 @@ func TestMonitor_Callbacks(t *testing.T) {
 	pool.AddProfile("claude", "test")
 	pool.SetStatus("claude", "test", PoolStatusExpired)
 
-	ctx := context.Background()
-	monitor.Start(ctx)
+	// Refreshing is an explicit ask; the callbacks fire around it.
+	monitor.RefreshAll(context.Background())
 	time.Sleep(100 * time.Millisecond)
 	monitor.Stop()
 
@@ -310,7 +200,7 @@ func TestMonitor_HandleRefreshError(t *testing.T) {
 	pool.SetStatus("claude", "failing", PoolStatusExpired)
 
 	ctx := context.Background()
-	monitor.Start(ctx)
+	monitor.RefreshAll(ctx) // refreshing is an explicit ask
 	time.Sleep(100 * time.Millisecond)
 	monitor.Stop()
 
@@ -534,7 +424,7 @@ func TestMonitor_NoRefresher(t *testing.T) {
 	pool.SetStatus("claude", "test", PoolStatusExpired)
 
 	ctx := context.Background()
-	monitor.Start(ctx)
+	monitor.RefreshAll(ctx) // refreshing is an explicit ask
 	time.Sleep(100 * time.Millisecond)
 	monitor.Stop()
 
@@ -553,4 +443,57 @@ func TestNewMonitor_NilPoolPanics(t *testing.T) {
 	}()
 
 	NewMonitor(nil, NewMockRefresher(), DefaultMonitorConfig())
+}
+
+// The pool monitor's loop keeps cooldown bookkeeping current; it never
+// spends a refresh token on a tick, however close to expiry a token is.
+func TestMonitor_StartNeverRefreshesOnATick(t *testing.T) {
+	pool := NewAuthPool()
+	refresher := NewMockRefresher()
+	config := DefaultMonitorConfig()
+	config.CheckInterval = 10 * time.Millisecond
+	monitor := NewMonitor(pool, refresher, config)
+
+	pool.AddProfile("claude", "expiring")
+	pool.SetStatus("claude", "expiring", PoolStatusReady)
+	pool.UpdateTokenExpiry("claude", "expiring", time.Now().Add(5*time.Minute))
+	pool.AddProfile("claude", "expired")
+	pool.SetStatus("claude", "expired", PoolStatusExpired)
+	pool.UpdateTokenExpiry("claude", "expired", time.Now().Add(-time.Minute))
+
+	monitor.Start(context.Background())
+	time.Sleep(100 * time.Millisecond)
+	monitor.Stop()
+
+	if n := refresher.CallCount(); n != 0 {
+		t.Fatalf("the monitor made %d refresh calls on its timer, want none: %v", n, refresher.Calls())
+	}
+}
+
+// RefreshAll — the explicit ask — refreshes what has expired and nothing
+// else: not a token with time left, and not a profile whose last refresh
+// was refused, since re-presenting a refused token is what trips reuse
+// detection. A refused refresh is terminal until a person acts.
+func TestPool_RefreshAllTakesExpiredOnlyAndARefusedRefreshIsTerminal(t *testing.T) {
+	pool := NewAuthPool()
+	refresher := NewMockRefresher()
+	monitor := NewMonitor(pool, refresher, DefaultMonitorConfig())
+
+	pool.AddProfile("claude", "expiring")
+	pool.SetStatus("claude", "expiring", PoolStatusReady)
+	pool.UpdateTokenExpiry("claude", "expiring", time.Now().Add(5*time.Minute))
+	pool.AddProfile("claude", "expired")
+	pool.SetStatus("claude", "expired", PoolStatusExpired)
+	pool.UpdateTokenExpiry("claude", "expired", time.Now().Add(-time.Minute))
+	pool.AddProfile("claude", "refused")
+	pool.UpdateTokenExpiry("claude", "refused", time.Now().Add(-time.Hour))
+	pool.SetStatus("claude", "refused", PoolStatusError) // its last refresh was refused
+
+	monitor.RefreshAll(context.Background())
+	time.Sleep(50 * time.Millisecond)
+
+	calls := refresher.Calls()
+	if len(calls) != 1 || calls[0] != "claude/expired" {
+		t.Fatalf("RefreshAll should refresh the expired profile only, got %v", calls)
+	}
 }
