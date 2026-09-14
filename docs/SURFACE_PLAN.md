@@ -245,3 +245,94 @@ windows say what is left and when it resets; JSON keeps its contract.
   limits table, ls, status, monitor brief; dashboard help, empty state,
   export dialog) and one real `caam activate` round-trip on the least
   important Codex Account.
+
+# Round 2 — the caveats and gaps left after the review
+
+Everything above landed on 2026-09-13/14 (see `SURFACE_AUDIT_2026-09-13.md`
+for status). A gap analysis on 2026-09-14 left the items below. Same
+method: red → green, one slice at a time; same closing checks.
+
+## R1 — Mechanical leftovers (no decisions)
+
+1. `robot.go`: the four "valid providers: codex, claude, gemini" hints use
+   `supportedToolsList()`.
+2. `limits --best` / `--recommend`: windows say "left, resets at" through
+   `usage.WindowLeftText`, like the table.
+3. `internal/exec`: the handoff's dead `handoffConfig` field goes; the
+   `LoginHandler` interface keeps `Provider` and gains `ResumeArgs` (R3),
+   losing `TriggerLogin`, `IsLoginComplete`, `IsLoginFailed`,
+   `LoginCommand`, `IsLoginInProgress`, `ExpectedPatterns` and their tests.
+4. `next`: the single-profile path loads config and the database before
+   switching, so it logs like the multi-profile path.
+5. `SPMConfig.GetRefreshThreshold` (no caller) goes.
+6. `ACCOUNT_SWITCHER.md` §5 drops the history of `b` and `l`.
+
+## R2 — Kimi refreshes its own token (`internal/refresh/kimi.go`)
+
+Kimi's access token lives about an hour; the CLI renews it with the
+refresh token at `POST {oauthHost}/api/oauth/token` (form-encoded:
+`client_id=17e5f671-d194-4dfb-9706-5516cb48c098`, `grant_type=refresh_token`,
+`refresh_token=…`; `oauthHost` defaults to `https://auth.kimi.com`, overridden
+by `KIMI_CODE_OAUTH_HOST`/`KIMI_OAUTH_HOST`; the CLI also sends its
+`X-Msh-*` device headers, which `internal/usage/kimi.go` already builds).
+401, 403 or `invalid_grant` means the session is gone. The response carries
+`access_token`, optionally `refresh_token`, and `expires_in`.
+
+1. `TestRefreshKimiToken_PostsTheCLIsForm` (httptest) — the form, the
+   headers, the parsed response; 401 → `ErrRefreshTokenReused`-class error.
+2. `TestRefreshProfile_KimiUpdatesTheVaultCopy` — `kimi-code.json` in the
+   vault gets the new `access_token`, `refresh_token` and `expires_at`
+   (seconds), nothing else touched; the live file too when the Account is
+   Active (the existing `RefreshProfile` rule).
+3. `caam refresh kimi <account>` works; the dashboard's `refreshableProvider`
+   includes kimi, so `r` refreshes instead of offering a login; the refresh
+   still happens only behind `NeedsRefresh` (expired or refused).
+
+## R3 — Switch, then resume: the handoff and the pane tools
+
+A running session holds its credential in memory, so switching the file
+under it is not enough, and injecting `/login` is a new OAuth login (a
+logout first, and the thing the switcher replaces). The right move is:
+switch through the core, then restart the session on its own history.
+Resume flags, verified on this machine: Claude Code `--continue`, Codex
+`resume --last`, Gemini `--resume latest`, Kimi `--continue`.
+
+1. `TestHandoff_SwitchesThenResumes` (`internal/exec`, mock CLI) — on a
+   rate limit the runner switches through the core, ends the child, and
+   respawns it with the provider's resume args; the notification says
+   "Switched to X and resumed". `LoginHandler.ResumeArgs()` supplies the
+   flags; `SmartRunner.Run` gains a restart loop around spawn-and-wait.
+2. `TestCoordinator_SwitchesAndResumesARateLimitedPane` — `Config.Recover`
+   (wired from cmd: pick the next Account by rotation, `switcher.Switch`,
+   return the resume command) replaces the `/login` injection; the
+   coordinator sends `/exit`, waits for the prompt, sends the resume
+   command. When `Recover` reports no other Account
+   (`ErrNoOtherAccount`), the old capture-first `/login` path remains.
+3. `caam wezterm switch-all <tool>` — one switch per tool through the
+   core, then `/exit` + resume in each rate-limited pane; `login-all`
+   stays for the no-other-account case and says so.
+
+## R4 — One word for the thing with accounts: "agent"
+
+`CONTEXT.md` says Agent and lists "provider" under words to avoid. Every
+string a person reads in the dashboard and in CLI help says agent
+("Agents (5)", "←/→ agent", "Log in to which agent?", `caam add <agent>`
+in help). Flag and subcommand names (`--tool`, `provider`) stay: they are
+the CLI's contract. One test per surface pins the wording.
+
+## R5 — The handoff document
+
+`caam-handoff.md` is rewritten around the product mission per ADR-0001: what
+the switcher is, where it lives (`docs/ACCOUNT_SWITCHER.md`), the rules,
+what is done, what needs Chris. The v1 file stays as history.
+
+## R6 — Waiting on Chris
+
+- Five Codex accounts need one `n` login each; then the Codex round trip
+  (`caam activate` each way, `limits codex` healthy for both, vault copies
+  rotated).
+- Two decisions: Claude's label ("Claude Code") and the `limits` table's
+  dropped SCORE/BURN/DEPLETES columns.
+- `golangci-lint migrate` on `.golangci.yml`: run it, report the count of
+  findings, decide.
+- Remove the two merged agent worktrees under `.claude/worktrees`.
