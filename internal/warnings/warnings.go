@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
@@ -133,24 +132,15 @@ func (c *Checker) checkVaultProfile(ctx context.Context, tool, profileName strin
 	vaultPath := c.vault.ProfilePath(tool, profileName)
 
 	// Parse expiry based on tool type
-	var expInfo *health.ExpiryInfo
-	var err error
-
-	switch tool {
-	case "claude":
-		expInfo, err = health.ParseClaudeExpiry(vaultPath)
-	case "codex":
-		authPath := filepath.Join(vaultPath, "auth.json")
-		expInfo, err = health.ParseCodexExpiry(authPath)
-	case "gemini":
-		// Migrate legacy vault filename before reading.
-		_ = authfile.MigrateGeminiVaultDir(vaultPath)
-		expInfo, err = health.ParseGeminiExpiry(vaultPath)
-	case "opencode", "cursor":
-		// No token expiry parsing for these providers yet
+	if tool != "claude" && tool != "codex" && tool != "gemini" {
+		// No token expiry parsing for other providers yet
 		return warnings
 	}
-
+	if tool == "gemini" {
+		// Migrate legacy vault filename before reading.
+		_ = authfile.MigrateGeminiVaultDir(vaultPath)
+	}
+	expInfo, err := health.ParseVaultExpiry(tool, vaultPath)
 	if err != nil || expInfo == nil || expInfo.ExpiresAt.IsZero() {
 		return warnings
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/refresh"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/signals"
 )
 
 // DefaultRefreshThreshold is the pool's "expiring soon" horizon for its
@@ -609,24 +610,11 @@ func (d *Daemon) getProfileHealth(provider, profile string) *health.ProfileHealt
 	}
 
 	// Fall back to parsing the auth files directly
-	vaultPath := d.vault.ProfilePath(provider, profile)
-	var expiryInfo *health.ExpiryInfo
-	var err error
-
-	switch provider {
-	case "claude":
-		expiryInfo, err = health.ParseClaudeExpiry(vaultPath)
-	case "codex":
-		expiryInfo, err = health.ParseCodexExpiry(filepath.Join(vaultPath, "auth.json"))
-	case "gemini":
-		// Migrate legacy vault filename before reading.
-		_ = authfile.MigrateGeminiVaultDir(vaultPath)
-		expiryInfo, err = health.ParseGeminiExpiry(vaultPath)
-	case "opencode", "cursor", "grok":
-		// No token expiry parsing for these providers yet
+	if provider != "claude" && provider != "codex" && provider != "gemini" {
+		// No token expiry parsing for other providers yet
 		return nil
 	}
-
+	expiryInfo, err := vaultExpiry(provider, d.vault.ProfilePath(provider, profile))
 	if err != nil || expiryInfo == nil {
 		return nil
 	}
@@ -634,6 +622,17 @@ func (d *Daemon) getProfileHealth(provider, profile string) *health.ProfileHealt
 	return &health.ProfileHealth{
 		TokenExpiresAt: expiryInfo.ExpiresAt,
 	}
+}
+
+// vaultExpiry reads the expiry of the vault copy of a profile's credential
+// through health.ParseVaultExpiry, migrating a legacy Gemini vault filename
+// first.
+func vaultExpiry(provider, vaultPath string) (*health.ExpiryInfo, error) {
+	if provider == "gemini" {
+		// Migrate legacy vault filename before reading.
+		_ = authfile.MigrateGeminiVaultDir(vaultPath)
+	}
+	return health.ParseVaultExpiry(provider, vaultPath)
 }
 
 // isUnsupportedError checks if an error is an UnsupportedError.
@@ -701,28 +700,7 @@ func ReadPIDFile() (int, error) {
 
 // IsProcessRunning checks if a process with the given PID is running.
 func IsProcessRunning(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-
-	// On Unix, FindProcess always succeeds. We need to send signal 0 to check.
-	err = proc.Signal(syscall.Signal(0))
-	if err == nil {
-		return true
-	}
-
-	// EPERM means the process exists but we can't signal it (different user).
-	// Only ESRCH means the process doesn't exist.
-	if errors.Is(err, syscall.EPERM) {
-		return true
-	}
-
-	return false
+	return signals.IsProcessAlive(pid)
 }
 
 // GetDaemonStatus returns the current daemon status.

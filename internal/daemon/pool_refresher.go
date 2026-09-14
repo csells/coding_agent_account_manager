@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
@@ -47,32 +46,20 @@ func (r *PoolRefresher) Refresh(ctx context.Context, provider, profile string) (
 func (r *PoolRefresher) getTokenExpiry(provider, profile string) (time.Time, error) {
 	vaultPath := r.vault.ProfilePath(provider, profile)
 
-	var expiryInfo *health.ExpiryInfo
-	var err error
-
 	switch provider {
-	case "claude":
-		expiryInfo, err = health.ParseClaudeExpiry(vaultPath)
-	case "codex":
-		expiryInfo, err = health.ParseCodexExpiry(filepath.Join(vaultPath, "auth.json"))
-	case "gemini":
-		// Migrate legacy vault filename before reading.
-		_ = authfile.MigrateGeminiVaultDir(vaultPath)
-		expiryInfo, err = health.ParseGeminiExpiry(vaultPath)
+	case "claude", "codex", "gemini":
+		expiryInfo, err := vaultExpiry(provider, vaultPath)
+		if err != nil {
+			return time.Time{}, err
+		}
+		if expiryInfo == nil || expiryInfo.ExpiresAt.IsZero() {
+			return time.Time{}, fmt.Errorf("expiry not found")
+		}
+		return expiryInfo.ExpiresAt, nil
 	case "opencode", "cursor", "grok":
 		// No token expiry parsing for these providers yet
 		return time.Time{}, nil
 	default:
 		return time.Time{}, fmt.Errorf("unknown provider: %s", provider)
 	}
-
-	if err != nil {
-		return time.Time{}, err
-	}
-
-	if expiryInfo == nil || expiryInfo.ExpiresAt.IsZero() {
-		return time.Time{}, fmt.Errorf("expiry not found")
-	}
-
-	return expiryInfo.ExpiresAt, nil
 }
