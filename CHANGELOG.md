@@ -8,114 +8,182 @@ Repository: <https://github.com/Dicklesworthstone/coding_agent_account_manager>
 
 ---
 
-## [Unreleased] — account-switcher branch
+## [Unreleased]
 
-The fork's account-switcher work: log in once with every account on every
-coding agent, see each account's rate-limit windows, and switch without
-logging in again. Architecture and the facts behind it:
-`docs/ACCOUNT_SWITCHER.md`.
+The account switcher: log in once with every account on every coding agent,
+see each account's rate-limit windows, and switch without logging in again.
+The design and the facts behind it are in `docs/ACCOUNT_SWITCHER.md`.
 
 ### Added
 
-- **Kimi Code, zcode and OpenCode adapters** with capture, switch, status
-  and limits; **Antigravity** identity, health, keychain bridge and
-  per-model quota.
-- **`caam monitor` dashboard**: one column per rate-limit window across every
-  account, `*` on the active one, Enter switches; failed rows keep their
-  last good numbers.
-- **Main TUI redesigned** as a provider tab strip above the selected
-  provider's accounts, one column per window, the selected account expanded
-  in place; responsive tiers by width and height.
-- **`n` logs a new account in from the dashboard** through the provider's own
-  login, then captures it under the account that signed in; a picker asks
-  which provider.
-- **`r` refreshes** the limits on screen and, when the selected account's
-  token has expired or was just refused, its token first (Codex, Gemini
-  and Kimi).
-- **Kimi's token is caam's to refresh**: `caam refresh kimi <account>` and
-  the dashboard's `r` renew it through the CLI's own token endpoint (form
-  POST with its client id and device headers, honouring
-  `KIMI_CODE_OAUTH_HOST` / `KIMI_OAUTH_HOST`), behind the same one gate; a
-  401, 403 or `invalid_grant` answer offers the login.
-- **LAST USED** is filled from the activity log; a dashboard login is logged.
-- `limits` reads the active profile's live credential rather than its vault
-  copy; shared window naming (`usage.WindowsOf`).
+- **Kimi Code adapter**: capture, switch, status, identity (`/me`) and
+  limits (`/coding/v1/usages` with the CLI's device headers; the device id is
+  read from `~/.kimi-code/device_id`, never created). The dashboard and
+  `caam add` log in with `kimi login` (device code), not the chat REPL.
+- **zcode adapter**: capture, switch, status and limits. The AES-GCM sealed
+  credential is moved verbatim and unsealed only to read identity and query
+  the billing API; an account without a coding plan is reported as
+  `no coding plan`, not as 0% used.
+- **OpenCode adapter**: the login rows of `opencode.db` are exported and
+  restored; the database itself is never swapped. A Console login reports
+  `no limits API`; a Zen API key reports limits.
+- **Antigravity**: identity (Google userinfo, recorded in `meta.json`),
+  health, and per-model quota. The Code Assist project is resolved with
+  `v1internal:loadCodeAssist` under the `antigravity` User-Agent before
+  `retrieveUserQuota` is called; without the project Google answers
+  `403 PERMISSION_DENIED` "no valid license (#3501)". The project is cached
+  per access token; opaque `chat_NNNNN` buckets are dropped.
+- **Keychain bridges** on macOS: Claude Code's credential (keychain service
+  `Claude Code-credentials`) and Antigravity's (service `gemini`, account
+  `antigravity`) are captured from, restored to and cleared in the keychain,
+  with the on-disk file kept as a mirror.
+- **`internal/switcher`**: `Switch` (re-capture the outgoing account, then
+  restore) and `Login` (capture, clear, run the agent's login, capture who
+  signed in), the one implementation every command and the TUI call.
+- **Dashboard** (`caam` with no arguments): a tab strip of agents above the
+  selected agent's accounts, each window as a `LEFT`/`RESETS` column pair,
+  the selected account expanded in place; three width tiers. `n` logs a new
+  account in; `r` refreshes limits (and the token, only when expired or
+  refused; Codex, Gemini, Kimi) and offers a login when a refresh cannot
+  help; `i` is the full card. Every question and outcome is a dialog.
+  Limits are cached per account for a minute, failures included; a failed
+  fetch keeps the last figures marked stale with a short reason.
+- **`caam monitor` interactive dashboard**: one `LEFT`/`RESETS` pair per
+  window across every agent's accounts, `*` on the active one, Enter
+  switches through the switch core; rows whose fetch fails keep their last
+  good numbers. `--reload-daemon` SIGTERMs a running Codex app-server after
+  a switch. Piped or `--once` prints the plain table as before.
+- **`caam wezterm switch-all <agent>`**: switch every rate-limited pane's
+  agent through the core, then `/exit` and resume on its history.
+- **Kimi token refresh**: `caam refresh kimi <account>` and the dashboard's
+  `r` renew the token through the CLI's own endpoint (form POST to
+  `{oauthHost}/api/oauth/token`, honouring `KIMI_CODE_OAUTH_HOST` then
+  `KIMI_OAUTH_HOST`); 401, 403 or `invalid_grant` is treated as a session
+  that is gone.
+- **`provider.Label`**: one product name per agent (Antigravity, Kimi Code,
+  zcode, OpenCode, Grok, Claude Code, Codex, Gemini, Cursor) on every
+  surface.
+- **`usage.WindowsOf`, `LeftText`, `ResetText`, `WindowLeftText`**: shared
+  window ordering and "left, resets at" formatting for every table and
+  sentence.
+- **`db.LastUsed`**: LAST USED in `ls`, the dashboard, `robot` and the API
+  comes from the activity log (activate, deactivate, switch, login); a
+  dashboard login is logged as an event.
+- `robot limits` returns real limits (`left_percent`, `resets_at`,
+  `last_used`); `robot next` uses the activity log for its LRU bonus.
+- The API's `/usage` reports `last_used` from the activity log and the
+  probe time as `last_checked`.
+- `caam ls` lists agents in a fixed order with a LAST USED column and
+  `last_used` in JSON; `caam status` labels agents and moves never-logged-in
+  ones to a footer line; `caam which` reports every registered agent, not
+  three.
+- `caam limits` reads the active profile's live credential rather than its
+  vault copy, since the agent rotates that one in place.
+- Profiles that hold settings but no credential are listed as
+  `No credential` and refused by `Restore` and `caam activate`.
+- The export dialog names its output directory and says the bundle is not
+  encrypted; the sync panel's `s` confirms in a dialog before credentials
+  cross SSH; the status bar honours `tui.show_key_hints`; `caam init`
+  onboarding leads with bare `caam`.
+- `.golangci.yml` migrated to the golangci-lint v2 format and CI installs
+  v2, so `make lint` is a gate again.
 
 ### Changed
 
-- **Every switch re-captures the outgoing account first** and aborts when it
-  cannot (`--force` overrides). One core, `internal/switcher.Switch`, is
-  called by `caam activate`, `next`, `run` (and `--precheck`), `workspace`,
-  `robot act`, the wrap retry loop, the HTTP API, the TUI and `monitor`;
-  none of them restores a vault copy on its own any more.
-- **A login is a logout first**: `internal/switcher.Login` vaults the
-  signed-in account (or files an unknown live credential as a backup),
-  clears the live credential so the tool's login has nothing to revoke,
-  runs the login, and files the new session under the account that signed
-  in. The dashboard's `n` and `caam add` both use it (`add` no longer files
-  the outgoing account as `_auto_backup_` or deletes files around the
-  keychain). The smart handoff, the coordinator and the new `caam wezterm
-  switch-all` no longer inject a login: on a rate limit they switch the
-  agent through the switch core, end the session and resume it on its
-  history (`claude --continue`, `codex resume --last`, `gemini --resume
-  latest`, `kimi --continue`). Only with no other vaulted account does the
-  coordinator fall back to `/login`, and then it captures the signed-in
-  account first and refuses when it cannot; `wezterm login-all` does the
-  same and points at switch-all;
-  isolated `caam login` for Claude Code and Antigravity is refused on macOS
-  while the keychain bridge is on; `caam watch` no longer files auto-named
-  profiles.
-- **One refresh gate, no timers**: `refresh.NeedsRefresh` (expired, or just
-  refused) replaces `ShouldRefresh`, which refreshed valid tokens and refused
-  expired ones. The daemon no longer refreshes on its five-minute timer; the
-  pool monitor only tends cooldowns on its tick and its explicit
-  `RefreshAll` takes expired profiles only; `caam refresh --all --force` is
-  refused.
-- **One vocabulary, "left, resets at" everywhere**: every string a person
-  reads in the dashboard, the CLI help and errors calls the thing with
-  accounts an agent ("Agents (5)", "Log in to which agent?", `caam add
-  <agent>`, "unknown agent"); flag names, JSON keys and the HTTP API keep
-  their contract. `provider.Label` names
-  agents by product on every surface (Antigravity, Kimi Code, OpenCode,
-  zcode, Claude Code, Codex, Gemini, Grok, Cursor); the `limits` table,
-  `--rank`, `--forecast`, `monitor`'s brief/table/alerts and `robot limits`
-  say what is left and when it resets, like the dashboard; `ls` lists
-  providers in the strip's order with LAST USED; `status` labels tools and
-  moves never-logged-in ones to a footer; `which` knows every provider;
-  `robot limits` returns real limits and `robot next` reads the activity
-  log; the API's `/usage` `last_used` comes from the activity log (the
-  probe time is `last_checked`). `limits --format json` is unchanged,
-  pinned byte for byte.
-- **Shared files are respected on clear**: Antigravity and the Gemini CLI
-  share `~/.gemini`'s OAuth cache and accounts file; clearing one tool's
-  credential no longer logs the other out. `google_accounts.json` is part
-  of Gemini's file set.
-- **Dashboard edges**: help teaches `n`; the export dialog names its
-  directory and that the bundle is plaintext; empty states say "press n";
-  the name dialog speaks of login; `l` moves right; the palette has New
-  Login, Full Card and Search; the sync panel's `s` confirms in a dialog;
-  the status bar honours `show_key_hints`.
-- **Antigravity limits** resolve the Code Assist project via `loadCodeAssist`
-  under the `antigravity` User-Agent before calling `retrieveUserQuota`;
-  the empty-body call was refused with "no valid license (#3501)".
-- Only providers with a captured account appear on the strip; an empty
-  vault says how to get started.
-- Profiles that hold settings but no credential are listed as
-  `No credential` and refused by `Restore` and `caam activate`.
-- Kimi's login is `kimi login` (device code), not the chat REPL.
-- **What is left and when it resets are two columns per window** on every
-  table — `caam limits`, the dashboard's accounts pane and `caam monitor`:
-  the window's name heads the figure (`88% left`) and a `RESETS` column
-  beside it holds the local clock (`8:50 PM`), instead of one
-  `88% left · 8:50 PM` cell. The dashboard's narrow tier pairs `TIGHTEST`
-  with `RESETS` and keeps `TIGHTEST` alone when both cannot fit.
-  `caam limits --format json` is unchanged.
+- **Every switch re-captures the outgoing account first and aborts when it
+  cannot** (`--force` overrides). `caam activate`, `next`, `run` (including
+  `--precheck`), `workspace`, `robot act`, the wrap retry loop, the HTTP
+  API's activate, the TUI and `monitor` all go through `switcher.Switch`;
+  none restores a vault copy on its own any more. Reason: a rotating
+  refresh-token family makes the vault copy of the active account stale
+  while the agent runs, and restoring over it loses the newest tokens
+  (issue #19).
+- **A login is a logout first.** The dashboard's `n` and `caam add` capture
+  the active account (an unmatched live credential is filed as a
+  `_backup_`), clear the live credential, run the agent's login, and file
+  the new session under the identity that signed in. `caam add` no longer
+  files the outgoing account as `_auto_backup_` or removes files around the
+  keychain. Reason: `codex login` revokes whatever session it finds before
+  starting, which kills a vault copy taken seconds earlier.
+- **The smart handoff switches and resumes instead of injecting a login.**
+  On a rate limit it switches through the core, ends the session and
+  respawns it on its history (`claude --continue`, `codex resume --last`,
+  `gemini --resume latest`). `LoginHandler` lost `TriggerLogin` and gained
+  `ResumeArgs`; the dead `handoffConfig` field is gone. Reason: an injected
+  login is a logout first, and a restored credential is already logged in.
+- **The coordinator and `wezterm login-all` no longer inject `/login` into
+  a live pane without capturing first.** The coordinator's `Recover` hook
+  switches and resumes; only with no other vaulted account does it fall
+  back to `/login`, capturing the signed-in account first and refusing when
+  it cannot. `login-all` does the same and points at `switch-all`.
+- **One refresh gate, no timers.** `refresh.NeedsRefresh` (expired, or just
+  refused by the service) replaces `ShouldRefresh`, which refreshed valid
+  tokens inside a threshold and refused expired ones. Reason: every refresh
+  consumes the refresh token, and a consumed token presented again revokes
+  the family.
+- **Threshold-based refresh and `SPMConfig.GetRefreshThreshold` are
+  removed.** The `refresh_threshold` config keys are still accepted; the
+  health one is now only the "expiring soon" horizon for status views, and
+  `caam config` says nothing refreshes on it.
+- **The daemon no longer refreshes tokens on its five-minute timer**; it
+  keeps the vault-backup schedule. The pool monitor's tick only tends
+  cooldowns, a refused refresh is terminal until a person acts, and the
+  explicit `RefreshAll` takes expired profiles only.
+- **`caam refresh --all --force` is refused** with an explanation; the
+  help says a refresh consumes the refresh token.
+- **The three-panel main screen is replaced by the dashboard** (strip above,
+  accounts below). The `b` key (backup under a typed name) and the `l` key
+  (a token refresh labelled login) are gone; `l` now moves right, pairing
+  with `h`. The palette offers New Login, Full Card and Search; help
+  teaches `n` instead of the manual backup/clear/login ritual; empty states
+  say "press n"; the name dialog speaks of login; the `i` card closes on
+  Esc only.
+- **`caam limits` table columns**: `AGENT`, `PROFILE`, then one
+  `<WINDOW>`/`RESETS` pair per window (`88% left`, `8:50 PM`), then
+  `STATUS`, in place of `PROFILE SCORE PRIMARY SECONDARY SCOPED RESETS IN
+  BURN/HR DEPLETES STATUS` with used percentages and durations. SCORE, BURN
+  and DEPLETES live behind `--rank` and `--forecast`, which say "left" too,
+  as does `--best`. `--format json` is unchanged and pinned byte for byte
+  by a golden test.
+- **`caam monitor`'s brief, table and alert output** builds its agent list
+  from state instead of a hardcoded five, labels agents by product, and
+  says what is left with a clock reset.
+- **Table headers, help text and errors say "agent"** and use product
+  names: "Agents (5)", "Log in to which agent?", `caam add <agent>`,
+  `unknown agent` (CLI and HTTP API), "valid agents: …" in `robot` hints.
+  Flag names (`--tool`, `--provider`), subcommand names and JSON keys are
+  unchanged.
+- **Clearing respects files shared between agents.** Antigravity and the
+  Gemini CLI share `~/.gemini`'s OAuth cache and accounts file; clearing one
+  no longer logs the other out. `google_accounts.json` is part of Gemini's
+  file set.
+- **Isolated `caam login` for Claude Code and Antigravity is refused on
+  macOS** while the keychain bridge is on: the login keychain is per OS
+  user, so the login would replace the signed-in account's credential.
+  `CAAM_KEYCHAIN=0` disables the bridge.
+- **`caam watch` no longer files `auto-<timestamp>` profiles** for a
+  credential with no readable identity; it logs and points at the dashboard
+  or `caam backup <name>`. Reason: each auto profile was another copy of the
+  same rotating family.
+- The dashboard's strip shows only agents with a captured account; an
+  empty vault says how to get started.
+- `next`'s single-profile path logs its switch like the multi-profile path.
+- A credential-namespace error from `limits --source` names the other
+  source to try.
 
-### Removed
+### Fixed
 
-- The TUI's `b` (backup under a typed name) and `l` (token refresh labelled
-  login) keys, and the three-panel layout with its provider/profile/detail
-  panels.
+- A `caam monitor` refresh that yields no snapshot keeps the rows instead
+  of panicking.
+- A dashboard status-bar message is dropped when the focus moves to another
+  agent or account, so an error no longer follows the user across tabs.
+- A dashboard capture records the identity for Antigravity and Kimi; a
+  profile's recorded identity beats the Gemini CLI's accounts file.
+- The dashboard never draws into the terminal's last column.
+- The `i` card's LAST USED matches the row (both fall back to the activity
+  log).
+- A nil dereference in the dashboard's `applyState`, found by the v2 lint
+  configuration.
 
 ## [0.1.18] - 2026-08-31
 
