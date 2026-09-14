@@ -17,12 +17,12 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
 )
 
-// nineProviders is Chris's provider set: five with an account, four
-// without, in key order.
+// nineProviders is every provider caam manages with an account captured
+// for each, in key order — the widest strip the dashboard can show.
 func nineProviders(t *testing.T, w, h int) Model {
 	t.Helper()
 	m := modelWithLimits(t, w, h)
-	for _, p := range []string{"codex", "gemini", "agy", "zcode"} {
+	for _, p := range []string{"codex", "gemini", "grok", "opencode", "cursor", "agy", "kimi", "zcode"} {
 		m.profiles[p] = []Profile{{Name: p + "@example.com", Provider: p, IsActive: true}}
 	}
 	m.syncProfilesPanel()
@@ -145,16 +145,52 @@ func TestProviderStrip_CardsFillTheRow(t *testing.T) {
 	}
 }
 
-func TestProviderStrip_ZeroAccountProvidersHaveSlots(t *testing.T) {
-	m := nineProviders(t, 159, 42)
+// A provider with no captured account has no place on the strip: there
+// is nothing to switch between. n is how such a provider gets its first
+// account.
+func TestProviderStrip_HidesProvidersWithoutAnAccount(t *testing.T) {
+	m := modelWithLimits(t, 159, 42)
+	for _, p := range []string{"codex", "gemini", "agy", "zcode"} {
+		m.profiles[p] = []Profile{{Name: p + "@example.com", Provider: p, IsActive: true}}
+	}
+	m.syncProfilesPanel()
 	joined := strings.Join(stripLines(m), "\n")
+	if !strings.Contains(joined, "Providers (5)") {
+		t.Errorf("five providers have accounts:\n%s", joined)
+	}
 	for _, id := range []string{"grok", "opencode", "cursor", "kimi"} {
-		if !strings.Contains(joined, providerLabel(id)+" (0)") && !strings.Contains(joined, "›") {
-			t.Errorf("%s has no slot and nothing says it is off-screen:\n%s", id, joined)
+		if strings.Contains(joined, providerLabel(id)) {
+			t.Errorf("%s has no account and should not be on the strip:\n%s", id, joined)
 		}
 	}
-	if strings.Contains(joined, "not logged in:") {
-		t.Errorf("zero-account providers must be slots, not a folded line:\n%s", joined)
+	if len(m.providers) != 5 || len(m.allProviders) != 9 {
+		t.Fatalf("providers = %v (all %v)", m.providers, m.allProviders)
+	}
+	// ←/→ only visit providers with accounts.
+	seen := map[string]bool{}
+	for i := 0; i < 5; i++ {
+		seen[m.currentProvider()] = true
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+		m = updated.(Model)
+	}
+	if len(seen) != 5 || seen["grok"] {
+		t.Fatalf("→ visited %v", seen)
+	}
+}
+
+// Capturing a provider's first account puts it on the strip, selected.
+func TestProviderStrip_NewProviderAppearsWhenItGetsAnAccount(t *testing.T) {
+	m := modelWithLimits(t, 159, 42)
+	if strings.Contains(strings.Join(stripLines(m), "\n"), "Kimi") {
+		t.Fatal("kimi should not be on the strip before it has an account")
+	}
+	m.profiles["kimi"] = []Profile{{Name: "k@example.com", Provider: "kimi", IsActive: true}}
+	m.selectedProfileName = "k@example.com"
+	m.activeProvider = 1 // stale index from before the sync: kimi is not visible yet
+	m.syncProfilesPanel()
+	joined := strings.Join(stripLines(m), "\n")
+	if !strings.Contains(joined, "Kimi Code (1)") || !strings.Contains(joined, "Providers (2)") {
+		t.Fatalf("kimi should join the strip once it has an account:\n%s", joined)
 	}
 }
 
@@ -273,7 +309,7 @@ func TestVerticalLayout_ProvidersAboveAccountsWithWindowColumns(t *testing.T) {
 	if iProviders < 0 || iAccounts < 0 || iProviders > iAccounts {
 		t.Fatalf("providers strip must sit above the accounts pane:\n%s", view)
 	}
-	for _, want := range []string{"▸ Claude (2)", "● a@example.com", "5h 82%", "wk 50%", "Fable 10%", "Providers (9)",
+	for _, want := range []string{"▸ Claude (2)", "● a@example.com", "5h 82%", "wk 50%", "Fable 10%", "Providers (1)",
 		"NAME", "STATUS", "5-HOUR", "WEEKLY", "WEEKLY FABLE", "LAST USED",
 		"82% left · ", "50% left · ", "10% left", "enter", "switch to this account"} {
 		if !strings.Contains(view, want) {

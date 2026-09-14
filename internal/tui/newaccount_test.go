@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // newAccountHooks fakes the command layer: a login that succeeds without
@@ -45,13 +46,63 @@ func TestNewAccount_RecapturesTheActiveAccountThenRunsTheLogin(t *testing.T) {
 	// The vault has no live claude credential in the test HOME, so the
 	// active-profile lookup finds nothing to re-capture; seed the vault's
 	// notion of the active profile through the model instead.
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
 	m = updated.(Model)
-	if cmd == nil {
-		t.Fatalf("n should hand the terminal to the login command")
+	if m.state != stateProviderPicker || m.providerPicker == nil {
+		t.Fatalf("n should ask which provider to log in to, state=%v", m.state)
+	}
+	// The picker offers every provider, preselecting the current one, and
+	// says which are not installed.
+	if got := m.providerPicker.Chosen(); got != "claude" {
+		t.Fatalf("picker preselected %q, want the selected provider claude", got)
+	}
+	if len(m.providerPicker.choices) != len(m.allProviders) {
+		t.Fatalf("picker lists %d providers, want all %d", len(m.providerPicker.choices), len(m.allProviders))
+	}
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"Log in to which provider?", "▸ Claude", "2 accounts", "Cursor", "not installed"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("picker lacks %q:\n%s", want, view)
+		}
+	}
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if cmd == nil || m.state != stateList {
+		t.Fatalf("enter should hand the terminal to the login command (cmd=%v state=%v)", cmd, m.state)
 	}
 	if !strings.Contains(m.statusMsg, "Complete the claude login") {
 		t.Fatalf("status should carry the login hint, got %q", m.statusMsg)
+	}
+}
+
+// pickProvider opens the picker with n and submits the given provider.
+func pickProvider(t *testing.T, m Model, id string) (Model, tea.Cmd) {
+	t.Helper()
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m = updated.(Model)
+	if m.state != stateProviderPicker || m.providerPicker == nil {
+		t.Fatalf("n should open the provider picker, state=%v", m.state)
+	}
+	for i := 0; i < len(m.providerPicker.choices) && m.providerPicker.Chosen() != id; i++ {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = updated.(Model)
+	}
+	if m.providerPicker.Chosen() != id {
+		t.Fatalf("could not select %s in the picker", id)
+	}
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	return updated.(Model), cmd
+}
+
+func TestNewAccount_EscLeavesThePickerWithoutLoggingIn(t *testing.T) {
+	h := &newAccountHooks{}
+	m := modelWithTwoClaudeProfiles(h.hooks(t))
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m = updated.(Model)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = updated.(Model)
+	if cmd != nil || m.state != stateList || m.providerPicker != nil {
+		t.Fatalf("esc should close the picker and start nothing: cmd=%v state=%v", cmd, m.state)
 	}
 }
 
@@ -59,14 +110,7 @@ func TestNewAccount_UnavailableProviderSaysWhy(t *testing.T) {
 	h := &newAccountHooks{}
 	m := modelWithTwoClaudeProfiles(h.hooks(t))
 	m.width, m.height = 170, 40
-	for i, p := range m.providers {
-		if p == "cursor" {
-			m.activeProvider = i
-		}
-	}
-	m.syncProfilesPanel()
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
-	m = updated.(Model)
+	m, cmd := pickProvider(t, m, "cursor")
 	if cmd != nil || !strings.Contains(m.statusMsg, "not installed") {
 		t.Fatalf("an uninstallable provider should refuse with the reason: cmd=%v status=%q", cmd, m.statusMsg)
 	}
@@ -154,30 +198,63 @@ func TestNewAccount_FailedLoginIsReported(t *testing.T) {
 }
 
 // A status line about one provider (here a login failure) must not follow
-// the user to the next tab: it belongs to the provider it was written under. Providers with no
-// accounts are the hard case, since their account selection is the same
-// (empty) key on both sides of the move.
+// the user to the next tab: it belongs to the provider it was written under.
 func TestNewAccount_ErrorLeavesWithTheTab(t *testing.T) {
 	h := &newAccountHooks{}
 	m := modelWithTwoClaudeProfiles(h.hooks(t))
-	m.profiles["cursor"] = nil
-	m.profiles["opencode"] = nil
-	m.providers = []string{"claude", "cursor", "opencode"}
-	m.activeProvider = 1
+	m.profiles["cursor"] = []Profile{{Name: "c@example.com", Provider: "cursor"}}
+	m.profiles["opencode"] = []Profile{{Name: "o@example.com", Provider: "opencode"}}
 	m.syncProfilesPanel()
+	for m.currentProvider() != "cursor" {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+		m = updated.(Model)
+	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
-	m = updated.(Model)
+	m, _ = pickProvider(t, m, "cursor")
 	if !strings.Contains(m.statusMsg, "Cannot log in to Cursor") {
 		t.Fatalf("status = %q, want the Cursor login failure", m.statusMsg)
 	}
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	// opencode sits just left of cursor on the strip.
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyLeft})
 	m = updated.(Model)
 	if m.currentProvider() != "opencode" {
 		t.Fatalf("provider = %q, want opencode", m.currentProvider())
 	}
 	if m.statusMsg != "" {
 		t.Fatalf("status = %q after moving to another tab, want it cleared", m.statusMsg)
+	}
+}
+
+// b re-captures the selected account from the live credential — but only
+// when it is the signed-in one, since the live credential is nobody else's.
+func TestRecapture_TakesTheSignedInAccountOnly(t *testing.T) {
+	h := &newAccountHooks{}
+	m := modelWithTwoClaudeProfiles(h.hooks(t))
+	m.width, m.height = 170, 40
+
+	// a@example.com is active and selected.
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
+	m = updated.(Model)
+	if len(h.captured) != 1 || h.captured[0] != "claude/a@example.com" {
+		t.Fatalf("b should re-capture the signed-in account, captured %v", h.captured)
+	}
+	if m.state != stateList || !strings.Contains(m.notice, "Re-captured a@example.com") {
+		t.Fatalf("state=%v notice=%q, want a re-capture notice with no dialog", m.state, m.notice)
+	}
+
+	// b@example.com is not signed in: nothing live belongs to it.
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
+	m = updated.(Model)
+	if len(h.captured) != 1 {
+		t.Fatalf("b on an inactive account must not capture, captured %v", h.captured)
+	}
+	if !m.noticeErr || !strings.Contains(m.notice, "a@example.com is signed in, not b@example.com") {
+		t.Fatalf("notice = %q, want the reason it was refused", m.notice)
+	}
+	if m.state != stateList {
+		t.Fatalf("no dialog should open, state=%v", m.state)
 	}
 }

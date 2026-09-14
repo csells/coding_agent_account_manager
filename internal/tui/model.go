@@ -57,6 +57,7 @@ const (
 	stateSyncAdd
 	stateSyncEdit
 	stateCommandPalette
+	stateProviderPicker
 )
 
 const (
@@ -91,6 +92,10 @@ type vaultProfileMeta struct {
 // Model is the main Bubble Tea model for the caam TUI.
 type Model struct {
 	// Provider state
+	// allProviders is every provider caam manages; providers is the subset
+	// with at least one captured account, in the same order — the strip,
+	// ←/→ and the accounts pane see only those.
+	allProviders   []string
 	providers      []string // codex, claude, gemini
 	activeProvider int      // Currently selected provider index
 
@@ -144,7 +149,11 @@ type Model struct {
 	searchQuery   string
 
 	// Dialog state for backup flow
-	backupDialog   *TextInputDialog
+	backupDialog *TextInputDialog
+	// backupProvider is the provider the name dialog captures for; it can
+	// differ from the selected one when the login came from the picker.
+	backupProvider string
+	providerPicker *ProviderPickerDialog
 	confirmDialog  *ConfirmDialog
 	pendingProfile string // Profile name pending overwrite confirmation
 	editDialog     *MultiFieldDialog
@@ -312,6 +321,7 @@ func NewWithProvidersAndConfig(providers []string, cfg *config.SPMConfig) Model 
 	}
 
 	return Model{
+		allProviders:    providers,
 		providers:       providers,
 		activeProvider:  0,
 		profiles:        make(map[string][]Profile),
@@ -516,7 +526,7 @@ func (m Model) loadProfiles() tea.Msg {
 		store = profile.NewStore(profile.DefaultStorePath())
 	}
 
-	for _, name := range m.providers {
+	for _, name := range m.allProviders {
 		names, err := vault.List(name)
 		if err != nil {
 			return errMsg{err: fmt.Errorf("list vault profiles for %s: %w", name, err)}
@@ -1057,6 +1067,8 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSyncEditKeys(msg)
 	case stateCommandPalette:
 		return m.handleCommandPaletteKeys(msg)
+	case stateProviderPicker:
+		return m.handleProviderPickerKeys(msg)
 	}
 
 	// The detail card overlay: ↑/↓ keep working underneath it; anything
@@ -1158,10 +1170,12 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Tab):
 		// Cycle through providers
-		m.activeProvider = (m.activeProvider + 1) % len(m.providers)
-		m.selected = 0
-		m.selectedProfileName = ""
-		m.syncProfilesPanel()
+		if n := len(m.providers); n > 0 {
+			m.activeProvider = (m.activeProvider + 1) % n
+			m.selected = 0
+			m.selectedProfileName = ""
+			m.syncProfilesPanel()
+		}
 		return m, nil
 
 	case key.Matches(msg, m.keys.Delete):
@@ -1353,26 +1367,56 @@ func (m Model) handleDeleteProfile() (tea.Model, tea.Cmd) {
 // handleBackupProfile initiates backup of the current auth state to a named profile.
 func (m Model) handleBackupProfile() (tea.Model, tea.Cmd) {
 	provider := m.currentProvider()
-	if provider == "" {
-		m.statusMsg = "No provider selected"
+	info := m.selectedProfileInfo()
+	if provider == "" || info == nil {
+		m.statusMsg = "No account selected; press n to log in to one"
 		return m, nil
 	}
+	// b re-captures the selected account from the live credential, which
+	// is only that account's when it is the one signed in. Anything else
+	// would file another account's tokens under this name.
+	if !info.IsActive {
+		active := ""
+		for _, p := range m.profiles[provider] {
+			if p.IsActive {
+				active = p.Name
+			}
+		}
+		msg := fmt.Sprintf("%s is not the signed-in %s account, so there is nothing live to re-capture; switch to it first", info.Name, providerLabel(provider))
+		if active != "" {
+			msg = fmt.Sprintf("%s is signed in, not %s; re-capture works on the signed-in account (switch first, or press n to log in)", active, info.Name)
+		}
+		m.setNotice(provider, info.Name, msg, true)
+		m.statusMsg = "Nothing to re-capture"
+		return m, nil
+	}
+	if err := m.captureLive(provider, info.Name); err != nil {
+		m.setNotice(provider, info.Name, "Re-capture failed: "+err.Error(), true)
+		m.statusMsg = "Re-capture failed: " + err.Error()
+		return m, m.addToast(m.statusMsg, StatusError)
+	}
+	delete(m.limits, limitsKey(provider, info.Name))
+	m.setNotice(provider, info.Name, "Re-captured "+info.Name+" from the live credential", false)
+	m.statusMsg = fmt.Sprintf("Re-captured %s/%s", provider, info.Name)
+	return m, tea.Batch(m.addToast(m.statusMsg, StatusSuccess), m.refreshProfiles(refreshContext{provider: provider, selectedProfile: info.Name}))
+}
 
-	// Check if auth files exist for this provider
+// openBackupNameDialog asks for a profile name to capture provider's live
+// credential under; used when a login's identity could not be read.
+func (m Model) openBackupNameDialog(provider string) (tea.Model, tea.Cmd) {
 	fileSet, ok := authFileSetForProvider(provider)
 	if !ok {
 		m.statusMsg = fmt.Sprintf("Unknown provider: %s", provider)
 		return m, nil
 	}
-
 	if !authfile.HasAuthFiles(fileSet) {
 		m.statusMsg = fmt.Sprintf("No auth files found for %s - nothing to backup", provider)
 		return m, nil
 	}
 
-	// Create text input dialog for profile name
+	m.backupProvider = provider
 	m.backupDialog = NewTextInputDialog(
-		fmt.Sprintf("Backup %s Auth", provider),
+		fmt.Sprintf("Capture %s account", providerLabel(provider)),
 		"Enter profile name (alphanumeric, underscore, hyphen, or period):",
 	)
 	m.backupDialog.SetStyles(m.styles)
@@ -1381,6 +1425,14 @@ func (m Model) handleBackupProfile() (tea.Model, tea.Cmd) {
 	m.state = stateBackupDialog
 	m.statusMsg = ""
 	return m, nil
+}
+
+// backupDialogProvider is the provider the open name dialog is for.
+func (m Model) backupDialogProvider() string {
+	if m.backupProvider != "" {
+		return m.backupProvider
+	}
+	return m.currentProvider()
 }
 
 // handleBackupDialogKeys handles key input for the backup dialog.
@@ -1412,7 +1464,7 @@ func (m Model) handleBackupDialogKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // processBackupSubmit validates the profile name and initiates backup.
 func (m Model) processBackupSubmit(profileName string) (tea.Model, tea.Cmd) {
-	provider := m.currentProvider()
+	provider := m.backupDialogProvider()
 
 	// Validate profile name
 	profileName = strings.TrimSpace(profileName)
@@ -1586,7 +1638,7 @@ func (m Model) handleSyncPanelKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // executeBackup performs the actual backup operation.
 func (m Model) executeBackup(profileName string) (tea.Model, tea.Cmd) {
-	provider := m.currentProvider()
+	provider := m.backupDialogProvider()
 	fileSet, ok := authFileSetForProvider(provider)
 	if !ok {
 		m.state = stateList
@@ -1602,10 +1654,11 @@ func (m Model) executeBackup(profileName string) (tea.Model, tea.Cmd) {
 	}
 
 	m.state = stateList
+	m.backupProvider = ""
 	m.statusMsg = fmt.Sprintf("Backed up %s auth to '%s'", provider, profileName)
 
-	// Reload profiles to show the new backup
-	return m, m.loadProfiles
+	// Reload profiles to show the new backup, and select it.
+	return m, m.refreshProfiles(refreshContext{provider: provider, selectedProfile: profileName})
 }
 
 // handleLoginProfile initiates login/refresh for the selected profile.
@@ -2322,7 +2375,32 @@ func (m Model) buildProfileInfo(provider string, p Profile, projectDefault strin
 }
 
 // syncProfilesPanel syncs the profiles panel with the current provider's profiles.
+// syncProviders recomputes the visible provider list — those with at least
+// one captured account — and keeps the selection on the same provider when
+// it is still visible. Providers without accounts are reached through n.
+func (m *Model) syncProviders() {
+	all := m.allProviders
+	if all == nil {
+		all = m.providers
+	}
+	current := m.currentProvider()
+	visible := make([]string, 0, len(all))
+	for _, id := range all {
+		if len(m.profiles[id]) > 0 {
+			visible = append(visible, id)
+		}
+	}
+	m.providers = visible
+	m.activeProvider = 0
+	for i, id := range visible {
+		if id == current {
+			m.activeProvider = i
+		}
+	}
+}
+
 func (m *Model) syncProfilesPanel() {
+	m.syncProviders()
 	if m.profilesPanel == nil {
 		return
 	}
@@ -2480,6 +2558,11 @@ func (m Model) View() string {
 		return m.helpView()
 	case stateBackupDialog:
 		return m.dialogOverlayView(m.backupDialog.View())
+	case stateProviderPicker:
+		if m.providerPicker != nil {
+			return m.dialogOverlayView(m.providerPicker.View())
+		}
+		return m.mainView()
 	case stateConfirmOverwrite:
 		return m.dialogOverlayView(m.confirmDialog.View())
 	case stateExportConfirm:
@@ -3353,7 +3436,7 @@ func (m Model) refreshProfiles(ctx refreshContext) tea.Cmd {
 			store = profile.NewStore(profile.DefaultStorePath())
 		}
 
-		for _, name := range m.providers {
+		for _, name := range m.allProviders {
 			names, err := vault.List(name)
 			if err != nil {
 				return profilesRefreshedMsg{
@@ -3562,7 +3645,7 @@ func (m Model) refreshProfilesWithIndex(provider string, index int) tea.Cmd {
 		vault := authfile.NewVault(m.vaultPath)
 		profiles := make(map[string][]Profile)
 
-		for _, name := range m.providers {
+		for _, name := range m.allProviders {
 			names, err := vault.List(name)
 			if err != nil {
 				return profilesRefreshedMsg{

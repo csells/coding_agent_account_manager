@@ -154,6 +154,9 @@ func (m Model) verticalPanels(contentHeight int) string {
 // --- provider strip -------------------------------------------------------
 
 // stripItem is one provider's slot.
+// noAccountsHint is what the panes say before any account is captured.
+const noAccountsHint = "No accounts captured yet — press n to log in to a provider"
+
 type stripItem struct {
 	id       string
 	label    string
@@ -366,6 +369,17 @@ func (m Model) renderProviderStrip(g paneGeometry) string {
 	items := m.stripItems()
 	offset, count := m.stripWindow(kind, items, g.inner)
 	n := len(items)
+	if n == 0 {
+		// Nothing captured yet: the strip keeps its height and says how
+		// to get a first account onto it.
+		lines := make([]string, kind.lines())
+		lines[0] = m.styles.StatusText.Render(noAccountsHint)
+		body := strings.Join(lines, "\n")
+		if kind == stripCards {
+			body = lipgloss.JoinVertical(lipgloss.Left, ss.Title.MarginBottom(0).Render("Providers (0)"), body)
+		}
+		return ss.Border.Width(g.pane).Render(fitWidth(body, g.inner))
+	}
 
 	// Slots, each a block of kind.lines() lines at its slot width.
 	blocks := make([][]string, 0, count)
@@ -514,7 +528,11 @@ func (m Model) renderAccountsPane(g paneGeometry, height int) string {
 	now := time.Now()
 
 	// Title row: "<Provider> accounts" left, freshness right.
-	left := ps.Title.MarginBottom(0).Render(providerLabel(provider) + " accounts")
+	title := "Accounts"
+	if provider != "" {
+		title = providerLabel(provider) + " accounts"
+	}
+	left := ps.Title.MarginBottom(0).Render(title)
 	right := ""
 	if m.hooks.Limits != nil && len(profiles) > 0 {
 		if info := m.selectedProfileInfo(); info != nil {
@@ -539,7 +557,11 @@ func (m Model) renderAccountsPane(g paneGeometry, height int) string {
 	}
 	lines := []string{titleRow}
 	if len(profiles) == 0 {
-		lines = append(lines, ps.Empty.Render(emptyProfilesMessage(provider)))
+		if provider == "" {
+			lines = append(lines, "", ps.Empty.Render(noAccountsHint))
+		} else {
+			lines = append(lines, ps.Empty.Render(emptyProfilesMessage(provider)))
+		}
 		return frame(lines)
 	}
 

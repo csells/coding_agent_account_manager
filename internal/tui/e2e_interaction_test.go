@@ -108,34 +108,8 @@ func TestE2E_NavigationWithTabKey(t *testing.T) {
 		t.Errorf("Expected provider 'gemini', got %q", m.currentProvider())
 	}
 
-	// Continue tabbing through grok, opencode, and cursor
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(Model)
-	if m.currentProvider() != "grok" {
-		t.Errorf("Expected provider 'grok', got %q", m.currentProvider())
-	}
-
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(Model)
-	if m.currentProvider() != "opencode" {
-		t.Errorf("Expected provider 'opencode', got %q", m.currentProvider())
-	}
-
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(Model)
-	if m.currentProvider() != "cursor" {
-		t.Errorf("Expected provider 'cursor', got %q", m.currentProvider())
-	}
-
-	// ...and the providers added with their own adapters: agy, kimi, zcode
-	for _, want := range []string{"agy", "kimi", "zcode"} {
-		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-		m = updated.(Model)
-		if m.currentProvider() != want {
-			t.Errorf("Expected provider %q, got %q", want, m.currentProvider())
-		}
-	}
-
+	// Providers without a captured account are not on the strip, so tab
+	// goes straight back to the first one that has an account.
 	// Tab should wrap around
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = updated.(Model)
@@ -565,11 +539,19 @@ func TestE2E_EmptyProviderHandling(t *testing.T) {
 		t.Errorf("Expected 0 profiles, got %d", len(profiles))
 	}
 
-	// Navigation should still work
+	// With no account anywhere there is no provider to select; navigation
+	// must not panic and the panes say how to get started.
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = updated.(Model)
-	if m.currentProvider() != "codex" {
-		t.Errorf("Expected 'codex', got %q", m.currentProvider())
+	if m.currentProvider() != "" {
+		t.Errorf("Expected no provider, got %q", m.currentProvider())
+	}
+	for _, key := range []tea.KeyMsg{{Type: tea.KeyRight}, {Type: tea.KeyLeft}, {Type: tea.KeyDown}, {Type: tea.KeyEnter}} {
+		updated, _ = m.Update(key)
+		m = updated.(Model)
+	}
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "press n to log in") {
+		t.Errorf("empty dashboard should say how to add an account:\n%s", view)
 	}
 
 	// Action on empty should not panic
