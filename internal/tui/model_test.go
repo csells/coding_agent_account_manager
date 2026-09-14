@@ -1050,7 +1050,7 @@ func TestStatusBarSeveritySnapshots(t *testing.T) {
 	m.width = 120
 
 	// Status bar now has 3 segments: mode indicator | center message | key hints
-	// The format is: " CLAUDE  message  [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ /  :search]"
+	// The format is: " CLAUDE  message  [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ n  :new login] [ /  :search]"
 	tests := []struct {
 		name    string
 		message string
@@ -1060,19 +1060,19 @@ func TestStatusBarSeveritySnapshots(t *testing.T) {
 			name:    "success",
 			message: "Exported",
 			want: "" +
-				"  CLAUDE   Exported                                  [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ /  :search]",
+				"  CLAUDE   Exported                 [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ n  :new login] [ /  :search]",
 		},
 		{
 			name:    "warning",
 			message: "No profile selected",
 			want: "" +
-				"  CLAUDE   No profile selected                       [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ /  :search]",
+				"  CLAUDE   No profile selected      [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ n  :new login] [ /  :search]",
 		},
 		{
 			name:    "error",
 			message: "Export failed",
 			want: "" +
-				"  CLAUDE   Export failed                             [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ /  :search]",
+				"  CLAUDE   Export failed            [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ n  :new login] [ /  :search]",
 		},
 	}
 

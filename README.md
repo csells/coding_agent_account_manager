@@ -818,7 +818,14 @@ again, so a provider with many accounts is one list to scroll through:
 ╰──────────────────────────────────────────────────────────────────────────╯
 ```
 
-`i` opens the full card as an overlay and `r` refreshes the limits shown.
+`n` logs a new account into the selected provider without leaving the
+dashboard: the active account is re-captured first, so its newest tokens
+are in the vault before the tool's login replaces them; the terminal goes
+to the provider's own login (`codex login`, Claude Code with `/login`,
+`zcode login`, …); and when it returns, the live credential is captured
+under the account it now belongs to and selected. A provider whose
+credential carries no identity asks for a profile name instead. `i` opens
+the full card as an overlay and `r` refreshes the limits shown.
 Limits are fetched for the accounts on screen — the selected provider's
 rows and every provider's active account — at most once a minute each,
 failures included, through the same credential resolution as

@@ -19,7 +19,6 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/logs"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/shallow"
-	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/tui"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
 )
 
@@ -996,52 +995,4 @@ func generateForecasts(results []usage.ProfileUsage) []Forecast {
 	}
 
 	return forecasts
-}
-
-// tuiHooks wires the interactive TUI to the command layer: switching goes
-// through switchProfile (outgoing profile re-captured first, failed
-// re-capture aborts) and the detail card's Limits section is fetched with
-// the same credential resolution as `caam limits` and `caam monitor`.
-func tuiHooks() tui.Hooks {
-	return tui.Hooks{
-		Switch: func(ctx context.Context, provider, profile string) error {
-			_, err := switchProfile(ctx, provider, profile, switchOptions{Quiet: true})
-			return err
-		},
-		Limits: fetchProfileLimits,
-		Health: getProfileHealth,
-	}
-}
-
-// fetchProfileLimits reads one profile's rate-limit windows: from the live
-// credential when the profile is the active one (the tool rotates it in
-// place, so the vault copy is stale for exactly that account), else from
-// its vault copy. It presents the access token and nothing more; it never
-// refreshes or rewrites a credential.
-func fetchProfileLimits(ctx context.Context, provider, profile string) (*usage.UsageInfo, error) {
-	if !isLimitsProvider(provider) {
-		return nil, fmt.Errorf("%s has no usage API", provider)
-	}
-	lookup := buildCredentialLookup(getVaultDir())
-	var cred credentialCandidate
-	if lookup.ActiveName != nil && lookup.ActiveName(provider) == profile {
-		cred = lookup.inspect(credNamespaceLive, provider, profile)
-	}
-	if !cred.Found() || cred.Token == "" {
-		cred = lookup.inspect(credNamespaceVault, provider, profile)
-	}
-	if !cred.Found() {
-		return nil, fmt.Errorf("no credential captured for this profile (re-run caam backup %s %s)", provider, profile)
-	}
-	if cred.Token == "" {
-		if provider == "opencode" {
-			return nil, fmt.Errorf("%s", usage.ErrNoOpenCodeLimitsAPI)
-		}
-		return nil, fmt.Errorf("credential holds no access token")
-	}
-	results := usage.NewMultiProfileFetcher().FetchAllProfiles(ctx, provider, map[string]string{profile: cred.Token})
-	if len(results) == 0 || results[0].Usage == nil {
-		return nil, fmt.Errorf("no usage returned for %s/%s", provider, profile)
-	}
-	return results[0].Usage, nil
 }

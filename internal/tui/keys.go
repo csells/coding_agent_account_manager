@@ -12,21 +12,22 @@ type keyMap struct {
 	Tab   key.Binding
 
 	// Actions
-	Enter   key.Binding
-	Backup  key.Binding
-	Delete  key.Binding
-	Edit    key.Binding
-	Login   key.Binding
-	Open    key.Binding
-	Search  key.Binding
-	Project key.Binding
-	Usage   key.Binding
-	Sync    key.Binding
-	Export  key.Binding
-	Import  key.Binding
-	Palette key.Binding
-	Detail  key.Binding
-	Refresh key.Binding
+	Enter      key.Binding
+	Backup     key.Binding
+	Delete     key.Binding
+	Edit       key.Binding
+	Login      key.Binding
+	Open       key.Binding
+	Search     key.Binding
+	Project    key.Binding
+	Usage      key.Binding
+	Sync       key.Binding
+	Export     key.Binding
+	Import     key.Binding
+	Palette    key.Binding
+	Detail     key.Binding
+	Refresh    key.Binding
+	NewAccount key.Binding
 
 	// Confirmation
 	Confirm key.Binding
@@ -120,6 +121,10 @@ func defaultKeyMap() keyMap {
 			key.WithKeys("r"),
 			key.WithHelp("r", "refresh limits"),
 		),
+		NewAccount: key.NewBinding(
+			key.WithKeys("n"),
+			key.WithHelp("n", "log in to a new account"),
+		),
 		Confirm: key.NewBinding(
 			key.WithKeys("y", "enter"),
 			key.WithHelp("y/enter", "confirm"),
@@ -150,7 +155,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 		{k.Up, k.Down, k.Left, k.Right},
 		{k.Enter, k.Backup, k.Delete, k.Edit},
 		{k.Login, k.Open, k.Search, k.Project, k.Usage},
-		{k.Detail, k.Refresh},
+		{k.Detail, k.Refresh, k.NewAccount},
 		{k.Sync, k.Export, k.Import},
 		{k.Help, k.Quit},
 	}

@@ -373,9 +373,9 @@ func TestKeyMapFullHelp(t *testing.T) {
 		t.Errorf("Secondary actions group should have 5 bindings, got %d", len(fullHelp[2]))
 	}
 
-	// Group 4: Account view (Detail card, Refresh limits)
-	if len(fullHelp[3]) != 2 {
-		t.Errorf("Account view group should have 2 bindings, got %d", len(fullHelp[3]))
+	// Group 4: Account view (Detail card, Refresh limits, New account)
+	if len(fullHelp[3]) != 3 {
+		t.Errorf("Account view group should have 3 bindings, got %d", len(fullHelp[3]))
 	}
 
 	// Group 5: Advanced (Sync, Export, Import)

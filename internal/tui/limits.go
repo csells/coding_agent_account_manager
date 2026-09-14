@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"strconv"
 	"time"
 
@@ -26,6 +27,17 @@ type Hooks struct {
 	// Health computes one profile's health verdict from its credential, the
 	// way `caam ls` does. When nil the TUI reads the stored health snapshot.
 	Health func(provider, profile string) *health.ProfileHealth
+	// Login builds the provider's native login command for the terminal,
+	// with a one-line hint for the user; an error means no login can be
+	// started for that provider (not installed, no login flow). When nil
+	// the `n` key says so.
+	Login func(provider string) (cmd *exec.Cmd, hint string, err error)
+	// LiveIdentity names the account the provider's live credential now
+	// belongs to (an email), or "" when it cannot tell.
+	LiveIdentity func(ctx context.Context, provider string) string
+	// Capture vaults the provider's live credential under name, as
+	// `caam backup` does. When nil the TUI's own vault backup is used.
+	Capture func(provider, name string) error
 }
 
 // limitsTTL is how long a fetched set of windows is shown before the

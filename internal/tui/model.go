@@ -866,6 +866,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyLimitsLoaded(msg)
 		return m, nil
 
+	case newAccountLoginDoneMsg:
+		return m.newAccountLoggedIn(msg)
+
+	case newAccountIdentifiedMsg:
+		return m.newAccountIdentified(msg)
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -1065,6 +1071,9 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Refresh):
 		m.limitsRefresh()
 		return m, m.limitsPrefetchCmd()
+
+	case key.Matches(msg, m.keys.NewAccount):
+		return m.handleNewAccount()
 
 	case key.Matches(msg, m.keys.Quit):
 		if m.watcher != nil {
@@ -2972,7 +2981,7 @@ func (m Model) statusKeyHints() string {
 	case m.width < 100:
 		hints = hint("←/→", "provider") + " " + hint("/", "search")
 	default:
-		hints = hint("←/→", "provider") + " " + hint("↑/↓", "account") + " " + hint("enter", "switch") + " " + hint("/", "search")
+		hints = hint("←/→", "provider") + " " + hint("↑/↓", "account") + " " + hint("enter", "switch") + " " + hint("n", "new login") + " " + hint("/", "search")
 	}
 
 	if m.debugEnabled() {
