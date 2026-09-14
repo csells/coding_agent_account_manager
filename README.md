@@ -786,20 +786,53 @@ up/down select   enter switch   r refresh   q quit     * = active account
 Piped or run with `--once`, `caam monitor` prints the plain table it always
 did; `--format brief|json|alerts` are unchanged.
 
-The main TUI (`caam` with no arguments) shows the same windows for whichever
-account is selected, in a **Limits** block on the right-hand detail card
-(`5-hour: 82% left, resets 6:10 PM`, `Weekly Fable: 10% left, …`, with an
-"As of" time). Arrowing between accounts fetches each one's windows at most
-once a minute; a failed fetch keeps the last known figures, marked. Enter
-there switches through the same re-capture-first path as `caam activate`,
-and the outcome — switched, refused, failed — is written on the card, not
-only in the status bar. A profile that holds settings but no credential
-(captured before the keychain bridge, or from a logged-out state) is listed
-as `No credential`, cannot be activated from the TUI, and is refused by
-`caam activate` too: installing it would change nothing while reporting
-success.
-Every provider the vault knows — Antigravity, Kimi and zcode included — is
-listed, and the screen fits the terminal instead of scrolling off the top.
+The main TUI (`caam` with no arguments) is split top to bottom. A strip of
+providers runs across the top — one card per provider with its account
+count, active account and tightest windows (`5h 53% · wk 44% · Fable 0%`)
+— and ←/→ move along it. The selected provider's accounts fill the pane
+below, one row each, with every rate-limit window the provider reports as
+a column (`53% left · 6:10 PM`), the active account marked `●`, and ↑/↓
+moving between them:
+
+```
+╭─ Providers ──────────────────────────────────────────────────────────────╮
+│ ▶ Claude (2)                   Codex (1)                  Antigravity (1) │
+│ ● chris@gascity.com            ● ops+chris-claude-1@…     ● chris@gascity │
+│ 5h 53% · wk 44% · Fable 0%     wk 30%                     auth expired    │
+╰──────────────────────────────────────────────────────────────────────────╯
+╭─ Claude accounts ──────────────────────────────────── limits as of 17:08 ─╮
+│ NAME                 STATUS     5-HOUR             WEEKLY        FABLE     │
+│ ▶ chris@gascity.com  🟢 1h left 53% left · 6:10 PM 44% · Tue 5PM 0% · Tue │
+│ ● csells@sellsbro…   🟢 6h left 88% left · 8:50 PM 78% · Wed    64% · Wed │
+│ ───────────────────────────────────────────────────────────────────────── │
+│ chris@gascity.com · oauth · max · Healthy · token 1h39m · ~/vault/claude/… │
+│ enter switch   b re-capture   l login   e edit   d delete   i full card    │
+╰──────────────────────────────────────────────────────────────────────────╯
+```
+
+Under the table, two lines describe the selected account (auth, plan,
+health, token, vault path) and its actions; `i` opens the full card as an
+overlay, and `r` refreshes the limits shown. Limits are fetched for the
+accounts on screen — the selected provider's rows and every provider's
+active account — at most once a minute each, through the same
+credential resolution as `caam limits`; a failed fetch keeps the last
+known figures, marked `*`. Enter switches through the same
+re-capture-first path as `caam activate`, and the outcome — switched,
+refused, failed — is written under the table, not only in the status bar.
+A profile that holds settings but no credential (captured before the
+keychain bridge, or from a logged-out state) is listed as `No credential`,
+cannot be activated from the TUI, and is refused by `caam activate` too:
+installing it would change nothing while reporting success.
+
+The layout follows the terminal. At 150 columns and up the provider
+cards are three lines tall and every window column shows with LAST USED;
+from 100 columns the cards collapse to one-line chips that wrap and the
+window cells shorten; below that the providers become a single row of
+tabs scrolled around the selected one and the table keeps only STATUS and
+the TIGHTEST window, with the rest listed under it. The strip's height is
+fixed by its content and the accounts pane takes the remaining rows; on a
+short terminal the two-line detail strip gives way to the table, and the
+status bar is always the last line.
 
 ### Uninstall Notes
 

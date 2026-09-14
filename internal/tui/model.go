@@ -217,6 +217,10 @@ type Model struct {
 	// profileHealth is each profile's health verdict as computed when the
 	// profiles were loaded (see computeHealthMap), keyed provider/name.
 	profileHealth map[string]*health.ProfileHealth
+
+	// showDetailCard overlays the full detail card for the selected
+	// account (the `i` key); ↑/↓ move the selection underneath it.
+	showDetailCard bool
 }
 
 // computeHealthMap builds the health verdict for every listed profile. With
@@ -875,7 +879,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				next.notice = ""
 				next.noticeKey = ""
 			}
-			if fetch := next.limitsFetchCmd(); fetch != nil {
+			if fetch := next.limitsPrefetchCmd(); fetch != nil {
 				return next, tea.Batch(cmd, fetch)
 			}
 			return next, cmd
@@ -917,7 +921,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Update profiles panel with current provider's profiles
 		m.syncProfilesPanel()
-		fetch := m.limitsFetchCmd()
+		fetch := m.limitsPrefetchCmd()
 		return m, fetch
 
 	case profilesRefreshedMsg:
@@ -947,7 +951,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Update profiles panel with current provider's profiles
 		m.syncProfilesPanel()
-		fetch := m.limitsFetchCmd()
+		fetch := m.limitsPrefetchCmd()
 		return m, fetch
 
 	case activateResultMsg:
@@ -1073,8 +1077,32 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleCommandPaletteKeys(msg)
 	}
 
+	// The detail card overlay: ↑/↓ keep working underneath it; anything
+	// else closes it (and, for i/esc/q, does nothing more).
+	if m.showDetailCard {
+		switch {
+		case key.Matches(msg, m.keys.Up), key.Matches(msg, m.keys.Down):
+			// fall through to the list handling below
+		case key.Matches(msg, m.keys.Detail), key.Matches(msg, m.keys.Cancel), key.Matches(msg, m.keys.Quit):
+			m.showDetailCard = false
+			return m, nil
+		default:
+			m.showDetailCard = false
+		}
+	}
+
 	// Normal list view key handling
 	switch {
+	case key.Matches(msg, m.keys.Detail):
+		if m.selectedProfileInfo() != nil {
+			m.showDetailCard = true
+		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.Refresh):
+		m.limitsRefresh()
+		return m, m.limitsPrefetchCmd()
+
 	case key.Matches(msg, m.keys.Quit):
 		if m.watcher != nil {
 			_ = m.watcher.Close()
@@ -2525,6 +2553,15 @@ func (m Model) View() string {
 			m.syncPanel.SetSize(m.width, m.height)
 			return m.syncPanel.View()
 		}
+		if m.showDetailCard && m.detailPanel != nil && m.width > 0 && m.height > 0 {
+			m.syncDetailPanel()
+			w := min(72, m.width-4)
+			if w < 30 {
+				w = m.width
+			}
+			m.detailPanel.SetSize(w, m.height-2)
+			return m.dialogOverlayView(m.detailPanel.View())
+		}
 		return m.mainView()
 	}
 }
@@ -2652,6 +2689,11 @@ func (m Model) mainView() string {
 	// Header
 	headerLines := []string{m.styles.Header.Render("caam - Coding Agent Account Manager")}
 	if projectLine := m.projectContextLine(); projectLine != "" {
+		if m.width > 0 {
+			// A long project path must not widen the whole frame past the
+			// terminal: JoinVertical pads every line to the widest one.
+			projectLine = truncateWithEllipsis(projectLine, m.width)
+		}
 		headerLines = append(headerLines, m.styles.StatusText.Render(projectLine))
 	}
 	header := lipgloss.JoinVertical(lipgloss.Left, headerLines...)
@@ -2669,70 +2711,9 @@ func (m Model) mainView() string {
 		contentHeight = 0
 	}
 
-	var panels string
-	layoutMode := m.layoutMode()
-	var layout layoutSpec
-
-	if layoutMode != layoutFull {
-		tabs := m.renderProviderTabs()
-		tabsHeight := lipgloss.Height(tabs)
-		layout = m.compactLayoutSpec(layoutMode, contentHeight, tabsHeight)
-
-		var profilesPanelView string
-		if m.profilesPanel != nil {
-			m.profilesPanel.SetSize(m.width, layout.ProfilesHeight)
-			profilesPanelView = m.profilesPanel.View()
-		} else {
-			profilesPanelView = m.renderProfileList()
-		}
-
-		var detailPanelView string
-		if m.detailPanel != nil && layout.ShowDetail {
-			m.syncDetailPanel()
-			m.detailPanel.SetSize(m.width, layout.DetailHeight)
-			detailPanelView = m.detailPanel.View()
-		}
-
-		if detailPanelView != "" {
-			panels = lipgloss.JoinVertical(lipgloss.Left, tabs, profilesPanelView, "", detailPanelView)
-		} else {
-			panels = lipgloss.JoinVertical(lipgloss.Left, tabs, profilesPanelView)
-		}
-	} else {
-		layout = m.fullLayoutSpec(contentHeight)
-
-		// Sync and render provider panel
-		m.providerPanel.SetActiveProvider(m.activeProvider)
-		m.providerPanel.SetSize(layout.ProviderWidth, contentHeight)
-		providerPanelView := m.providerPanel.View()
-
-		// Sync and render profiles panel (center panel)
-		var profilesPanelView string
-		if m.profilesPanel != nil {
-			m.profilesPanel.SetSize(layout.ProfilesWidth, contentHeight)
-			profilesPanelView = m.profilesPanel.View()
-		} else {
-			profilesPanelView = m.renderProfileList()
-		}
-
-		// Sync and render detail panel (right panel)
-		var detailPanelView string
-		if m.detailPanel != nil {
-			m.syncDetailPanel()
-			m.detailPanel.SetSize(layout.DetailWidth, contentHeight)
-			detailPanelView = m.detailPanel.View()
-		}
-
-		// Create panels side by side
-		panels = lipgloss.JoinHorizontal(
-			lipgloss.Top,
-			providerPanelView,
-			strings.Repeat(" ", layout.Gap),
-			profilesPanelView,
-			strings.Repeat(" ", layout.Gap),
-			detailPanelView,
-		)
-	}
+	// Providers across the top, the selected provider's accounts below.
+	layout := layoutSpec{Mode: m.layoutMode(), ContentHeight: contentHeight}
+	panels := m.verticalPanels(contentHeight)
 
 	// Status bar
 	status := m.renderStatusBar(layout)

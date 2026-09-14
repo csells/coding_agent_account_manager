@@ -152,7 +152,7 @@ func TestFailedLimitsFetchShowsReasonThenKeepsLastKnown(t *testing.T) {
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = runCmd(t, updated.(Model), cmd)
 	m.syncDetailPanel()
-	if v := m.detailPanel.View(); !strings.Contains(v, "unauthorized: token expired") {
+	if v := m.detailPanel.View(); !strings.Contains(v, "auth expired") {
 		t.Fatalf("error not shown:\n%s", v)
 	}
 
@@ -462,5 +462,140 @@ func TestSelectionColourDiffersFromZebraStripe(t *testing.T) {
 				t.Errorf("%v/%v: Selection renders the same as SurfaceMuted (%q)", contrast, mode, sel)
 			}
 		}
+	}
+}
+
+// modelWithLimits is a two-account Claude model whose limits are already
+// loaded, at the given terminal size.
+func modelWithLimits(t *testing.T, w, h int) Model {
+	t.Helper()
+	rec := &limitsRecorder{info: sampleLimits()}
+	m := modelWithTwoClaudeProfiles(Hooks{Limits: rec.fetch})
+	m.width, m.height = w, h
+	for _, name := range []string{"a@example.com", "b@example.com"} {
+		m.applyLimitsLoaded(limitsLoadedMsg{provider: "claude", profile: name, info: sampleLimits()})
+	}
+	return m
+}
+
+func TestVerticalLayout_ProvidersAboveAccountsWithWindowColumns(t *testing.T) {
+	m := modelWithLimits(t, 170, 40)
+	view := stripANSI(m.View())
+
+	iProviders := strings.Index(view, "Providers")
+	iAccounts := strings.Index(view, "Claude accounts")
+	if iProviders < 0 || iAccounts < 0 || iProviders > iAccounts {
+		t.Fatalf("providers strip must sit above the accounts pane:\n%s", view)
+	}
+	for _, want := range []string{"▶ Claude (2)", "● a@example.com", "5h 82%", "wk 50%", "Fable 10%",
+		"NAME", "STATUS", "5-HOUR", "WEEKLY", "WEEKLY FABLE", "LAST USED",
+		"82% left · ", "50% left · ", "10% left", "enter", "switch to this account"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("wide view lacks %q:\n%s", want, view)
+		}
+	}
+	if lipgloss.Height(m.View()) > 40 {
+		t.Errorf("view taller than the terminal: %d", lipgloss.Height(m.View()))
+	}
+}
+
+func TestVerticalLayout_MediumDropsLastUsedAndShortensCells(t *testing.T) {
+	m := modelWithLimits(t, 120, 30)
+	view := stripANSI(m.View())
+	if strings.Contains(view, "LAST USED") {
+		t.Errorf("medium tier should drop LAST USED:\n%s", view)
+	}
+	if !strings.Contains(view, "82% · ") || strings.Contains(view, "82% left") {
+		t.Errorf("medium tier should show short window cells:\n%s", view)
+	}
+	if !strings.Contains(view, "▶ Claude 2") {
+		t.Errorf("medium tier should show one-line provider chips:\n%s", view)
+	}
+	for _, line := range strings.Split(m.View(), "\n") {
+		if lipgloss.Width(line) > 120 {
+			t.Fatalf("line wider than the terminal (%d): %q", lipgloss.Width(line), stripANSI(line))
+		}
+	}
+}
+
+func TestVerticalLayout_NarrowShowsTightestWindowAndTabRow(t *testing.T) {
+	m := modelWithLimits(t, 80, 24)
+	view := stripANSI(m.View())
+	for _, want := range []string{"TIGHTEST", "Fable 10%", "▶ Claude 2"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("narrow view lacks %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "5-HOUR") {
+		t.Errorf("narrow tier should not show every window column:\n%s", view)
+	}
+	for _, line := range strings.Split(m.View(), "\n") {
+		if lipgloss.Width(line) > 80 {
+			t.Fatalf("line wider than the terminal (%d): %q", lipgloss.Width(line), stripANSI(line))
+		}
+	}
+	if lipgloss.Height(m.View()) > 24 {
+		t.Errorf("view taller than the terminal: %d", lipgloss.Height(m.View()))
+	}
+}
+
+func TestVerticalLayout_ArrowsSteerProvidersThenAccounts(t *testing.T) {
+	m := modelWithLimits(t, 170, 40)
+	m.profiles["codex"] = []Profile{{Name: "c@example.com", Provider: "codex", IsActive: true}}
+	m.syncProfilesPanel()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = updated.(Model)
+	if m.currentProvider() != "codex" || !strings.Contains(stripANSI(m.View()), "Codex accounts") {
+		t.Fatalf("→ should select the next provider's accounts, got %q", m.currentProvider())
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	if m.currentProvider() != "claude" || m.selectedProfileInfo().Name != "b@example.com" {
+		t.Fatalf("← then ↓ should select claude's second account, got %s/%v", m.currentProvider(), m.selectedProfileInfo())
+	}
+}
+
+func TestVerticalLayout_DetailCardOverlayToggles(t *testing.T) {
+	m := modelWithLimits(t, 170, 40)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	m = updated.(Model)
+	if !m.showDetailCard || !strings.Contains(stripANSI(m.View()), "Profile: a@example.com") {
+		t.Fatalf("i should open the full card for the selected account")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	if !m.showDetailCard || !strings.Contains(stripANSI(m.View()), "Profile: b@example.com") {
+		t.Fatalf("↓ under the card should move it to the next account")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	if m.showDetailCard {
+		t.Fatalf("esc should close the card")
+	}
+}
+
+func TestVerticalLayout_PrefetchCoversTableAndStrip(t *testing.T) {
+	rec := &limitsRecorder{info: sampleLimits()}
+	m := modelWithTwoClaudeProfiles(Hooks{Limits: rec.fetch})
+	m.profiles["codex"] = []Profile{{Name: "c@example.com", Provider: "codex", IsActive: true}, {Name: "d@example.com", Provider: "codex"}}
+	m.syncProfilesPanel()
+
+	cmd := m.limitsPrefetchCmd()
+	if cmd == nil {
+		t.Fatalf("prefetch returned nothing")
+	}
+	runCmd(t, m, cmd)
+	// Both Claude accounts (the table) and Codex's active account (the
+	// strip), but not Codex's idle one.
+	for _, want := range []string{"claude/a@example.com", "claude/b@example.com", "codex/c@example.com"} {
+		if rec.calls[want] != 1 {
+			t.Errorf("%s fetched %d times, want 1 (calls=%v)", want, rec.calls[want], rec.calls)
+		}
+	}
+	if rec.calls["codex/d@example.com"] != 0 {
+		t.Errorf("idle account of another provider was fetched: %v", rec.calls)
 	}
 }

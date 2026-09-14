@@ -66,35 +66,15 @@ func limitsKey(provider, profile string) string { return provider + "/" + profil
 // The model is a value, so the caller must keep the returned model: the
 // loading mark lives in the (shared) map, the map itself is created here.
 func (m *Model) limitsFetchCmd() tea.Cmd {
-	if m.hooks.Limits == nil {
-		return nil
-	}
 	info := m.selectedProfileInfo()
 	if info == nil {
 		return nil
 	}
-	provider, profile := m.currentProvider(), info.Name
-	if provider == "" || profile == "" {
-		return nil
-	}
-	if m.limits == nil {
-		m.limits = make(map[string]limitsEntry)
-	}
-	key := limitsKey(provider, profile)
-	e, ok := m.limits[key]
-	if ok && (e.loading || (e.err == nil && time.Since(e.at) < limitsTTL)) {
-		return nil
-	}
-	e.loading = true
-	m.limits[key] = e
+	return m.limitsFetchFor(m.currentProvider(), info.Name)
+}
 
-	fetch := m.hooks.Limits
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		res, err := fetch(ctx, provider, profile)
-		return limitsLoadedMsg{provider: provider, profile: profile, info: res, err: err}
-	}
+func contextWithTimeout(d time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), d)
 }
 
 // applyLimitsLoaded stores a fetch result. A failed fetch keeps the

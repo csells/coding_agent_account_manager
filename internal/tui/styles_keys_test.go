@@ -353,9 +353,9 @@ func TestKeyMapFullHelp(t *testing.T) {
 	km := defaultKeyMap()
 	fullHelp := km.FullHelp()
 
-	// Should have 5 groups
-	if len(fullHelp) != 5 {
-		t.Errorf("FullHelp should return 5 groups, got %d", len(fullHelp))
+	// Should have 6 groups
+	if len(fullHelp) != 6 {
+		t.Errorf("FullHelp should return 6 groups, got %d", len(fullHelp))
 	}
 
 	// Group 1: Navigation (Up, Down, Left, Right)
@@ -373,14 +373,19 @@ func TestKeyMapFullHelp(t *testing.T) {
 		t.Errorf("Secondary actions group should have 5 bindings, got %d", len(fullHelp[2]))
 	}
 
-	// Group 4: Advanced (Sync, Export, Import)
-	if len(fullHelp[3]) != 3 {
-		t.Errorf("Advanced group should have 3 bindings, got %d", len(fullHelp[3]))
+	// Group 4: Account view (Detail card, Refresh limits)
+	if len(fullHelp[3]) != 2 {
+		t.Errorf("Account view group should have 2 bindings, got %d", len(fullHelp[3]))
 	}
 
-	// Group 5: General (Help, Quit)
-	if len(fullHelp[4]) != 2 {
-		t.Errorf("General group should have 2 bindings, got %d", len(fullHelp[4]))
+	// Group 5: Advanced (Sync, Export, Import)
+	if len(fullHelp[4]) != 3 {
+		t.Errorf("Advanced group should have 3 bindings, got %d", len(fullHelp[4]))
+	}
+
+	// Group 6: General (Help, Quit)
+	if len(fullHelp[5]) != 2 {
+		t.Errorf("General group should have 2 bindings, got %d", len(fullHelp[5]))
 	}
 }
 
