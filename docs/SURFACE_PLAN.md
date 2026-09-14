@@ -353,14 +353,14 @@ Status: rewritten 2026-09-14; the v2 text it replaced is kept as
 - Five Codex accounts need one `n` login each; then the Codex round trip
   (`caam activate` each way, `limits codex` healthy for both, vault copies
   rotated).
-- Two decisions: Claude's label ("Claude Code") and the `limits` table's
-  dropped SCORE/BURN/DEPLETES columns.
-- `golangci-lint migrate` on `.golangci.yml`: run on a scratch copy
-  2026-09-14 with golangci-lint 2.9.0. The migration adds `version: "2"`,
-  drops `run.timeout`, and adds the default exclusion presets. Against the
-  branch it reports 12 findings, all staticcheck: 11 quick-fix style
-  suggestions (tagged switches, De Morgan, `fmt.Fprintf`) in upstream code,
-  and one real one, a nil dereference in the dashboard's `applyState`,
-  fixed on the branch with a test. Decision for Chris: commit the migrated
-  config as is (and either silence QF* or fix the 11 upstream spots).
-- Remove the two merged agent worktrees under `.claude/worktrees`.
+- Decided 2026-09-14: labels are the full product name without a "CLI"
+  suffix (Claude Code, Antigravity, Codex, Kimi Code, OpenCode, zcode,
+  Gemini); the `limits` table keeps SCORE/BURN/DEPLETES out (they live
+  behind `--rank` and `--forecast`), and every Window is two columns, what
+  is left and when it resets, on every tabular surface.
+- Decided 2026-09-14: `.golangci.yml` migrated to the v2 format
+  (golangci-lint 2.9.0) and the findings fixed (one real nil dereference in
+  the dashboard's `applyState`, the rest style), so `make lint` is a gate
+  again. The merged agent worktrees and their branches were removed with
+  Chris's permission. A Kimi rate-limit pattern for the coordinator waits
+  until Chris sees one.

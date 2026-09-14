@@ -261,11 +261,12 @@ func runTagClear(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("save profile: %w", err)
 	}
 
-	if count == 0 {
+	switch count {
+	case 0:
 		fmt.Printf("No tags to clear for %s/%s\n", tool, profileName)
-	} else if count == 1 {
+	case 1:
 		fmt.Printf("Cleared 1 tag from %s/%s\n", tool, profileName)
-	} else {
+	default:
 		fmt.Printf("Cleared %d tags from %s/%s\n", count, tool, profileName)
 	}
 

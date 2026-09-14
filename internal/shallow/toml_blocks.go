@@ -273,10 +273,10 @@ func parseKeyPath(s string) ([]string, error) {
 	)
 	i := 0
 	for i < len(s) {
-		switch c := s[i]; {
-		case c == ' ' || c == '\t':
+		switch c := s[i]; c {
+		case ' ', '\t':
 			i++
-		case c == '.':
+		case '.':
 			if !any {
 				return nil, fmt.Errorf("empty key segment")
 			}
@@ -284,7 +284,7 @@ func parseKeyPath(s string) ([]string, error) {
 			cur.Reset()
 			any = false
 			i++
-		case c == '"':
+		case '"':
 			i++
 			for i < len(s) && s[i] != '"' {
 				if s[i] == '\\' && i+1 < len(s) {
@@ -298,7 +298,7 @@ func parseKeyPath(s string) ([]string, error) {
 			}
 			i++
 			any = true
-		case c == '\'':
+		case '\'':
 			i++
 			for i < len(s) && s[i] != '\'' {
 				cur.WriteByte(s[i])

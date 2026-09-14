@@ -1545,8 +1545,7 @@ func (m Model) processNameSubmit(name string) (tea.Model, tea.Cmd) {
 	// rule (authfile.go, profile.go), which keeps names out of shell and
 	// filesystem trouble.
 	for _, r := range name {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.') {
+		if !isProfileNameRune(r) {
 			m.statusMsg = "The name can only contain letters, numbers, underscore, hyphen, and period"
 			m.nameDialog.Reset()
 			return m, nil
@@ -3890,4 +3889,11 @@ func (m Model) refreshProfilesWithIndex(provider string, index int) tea.Cmd {
 
 		return profilesRefreshedMsg{profiles: profiles, health: m.computeHealthMap(profiles), ctx: ctx}
 	}
+}
+
+// isProfileNameRune reports whether r may appear in a profile name typed
+// into the dashboard: letters, digits, underscore, hyphen and period.
+func isProfileNameRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.'
 }

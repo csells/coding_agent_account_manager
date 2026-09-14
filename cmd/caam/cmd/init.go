@@ -338,7 +338,7 @@ func appendToShellRC(rcFile, line string) error {
 	defer f.Close()
 
 	// Add a newline and comment before the init line
-	_, err = f.WriteString(fmt.Sprintf("\n# caam shell integration\n%s\n", line))
+	_, err = fmt.Fprintf(f, "\n# caam shell integration\n%s\n", line)
 	return err
 }
 

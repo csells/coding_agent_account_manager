@@ -1555,8 +1555,7 @@ func validateProfileName(name string) (string, error) {
 		return "", fmt.Errorf("invalid profile name: %q", name)
 	}
 	for _, r := range name {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' || r == '@' || r == '+') {
+		if !isNameRune(r) {
 			return "", fmt.Errorf("invalid profile name: %q (only alphanumeric, _, -, ., @, + allowed)", name)
 		}
 	}
@@ -1693,4 +1692,11 @@ func readMeta(home string) (*Meta, error) {
 	// centralized in resolveProviderForHome so it can consult the credential
 	// label before falling back (issue #50).
 	return &m, nil
+}
+
+// isNameRune reports whether r may appear in a shallow profile name:
+// alphanumeric, underscore, hyphen, period, @ and +.
+func isNameRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' || r == '@' || r == '+'
 }

@@ -290,9 +290,10 @@ func printImportResult(cmd *cobra.Command, result *bundle.ImportResult) {
 		fmt.Fprintln(out, "Optional Files:")
 		for _, action := range result.OptionalActions {
 			symbol := "✓"
-			if action.Action == "skip" {
+			switch action.Action {
+			case "skip":
 				symbol = "✗"
-			} else if action.Action == "error" {
+			case "error":
 				symbol = "!"
 			}
 			fmt.Fprintf(out, "  %s %s: %s\n", symbol, action.Name, action.Reason)

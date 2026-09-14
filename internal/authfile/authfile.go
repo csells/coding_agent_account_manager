@@ -599,7 +599,8 @@ func (v *Vault) Backup(fileSet AuthFileSet, profile string) error {
 		// an optional file carries a credential of its own (API-key mode).
 		// Otherwise it is settings with no token in them — exactly the profile
 		// that reported success and vaulted nothing, so it is refused loudly.
-		if !(fileSet.AllowOptionalOnly && !requiredFound && optionalFound && optionalFilesCarryAuth(fileSet)) {
+		optionalOnlyOK := fileSet.AllowOptionalOnly && !requiredFound && optionalFound && optionalFilesCarryAuth(fileSet)
+		if !optionalOnlyOK {
 			return missingRequiredBackupError(fileSet, missingRequired[0])
 		}
 	}
@@ -1217,7 +1218,8 @@ func (v *Vault) Restore(fileSet AuthFileSet, profile string) error {
 		return fmt.Errorf("no auth files restored for %s/%s", fileSet.Tool, profile)
 	}
 	if len(missingRequired) > 0 {
-		if !(fileSet.AllowOptionalOnly && !requiredFound && optionalFound) {
+		optionalOnlyOK := fileSet.AllowOptionalOnly && !requiredFound && optionalFound
+		if !optionalOnlyOK {
 			return fmt.Errorf("required backup not found: %s", missingRequired[0])
 		}
 	}
@@ -2492,8 +2494,7 @@ func validateVaultSegment(kind, val string) (string, error) {
 	// The @ and + characters are safe (no special shell meaning) and useful for email-based profile names.
 	// Also prevents filesystem issues and unexpected behavior.
 	for _, r := range val {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' || r == '@' || r == '+') {
+		if !isNameRune(r) {
 			return "", fmt.Errorf("invalid %s: %q (only alphanumeric, underscore, hyphen, period, @, and + allowed)", kind, val)
 		}
 	}
@@ -3164,4 +3165,11 @@ func credentialLessProfileError(tool, profile string) error {
 		login = "log in with agy"
 	}
 	return fmt.Errorf("profile %s/%s holds no credential to install (settings only); %s as that account, then re-capture it with `caam backup %s %s`", tool, profile, login, tool, profile)
+}
+
+// isNameRune reports whether r may appear in a tool or profile name:
+// alphanumeric, underscore, hyphen, period, @ and +.
+func isNameRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' || r == '@' || r == '+'
 }

@@ -256,19 +256,14 @@ scripts referenced in the branch history: start, send keys, dump rows), and
 against real accounts with `caam limits <agent>`; the two probes that
 settled the Antigravity and Codex questions were plain HTTP calls with the
 stored tokens, printing status and a body snippet and never the token.
-`make lint` is broken on `main` and on this branch alike (golangci-lint 2.x
-against a v1 config); `go vet`, `gofmt` and `go test -race` are the checks
-that run.
+`make lint` runs again since 2026-09-14 (`.golangci.yml` migrated to the
+v2 format, findings fixed) and is clean; `go vet`, `gofmt` and
+`go test -race` are the other checks.
 
 ## 8. Open items
 
 - The five Codex Accounts revoked before §2 was understood need one `n`
   login each; they are filed under the same names.
-- `.golangci.yml` still needs migrating to the v2 config format. Measured
-  2026-09-14 on a scratch copy: the migrated config reports 12 staticcheck
-  findings, 11 of them style quick-fixes in upstream code and one real nil
-  dereference in the monitor dashboard, since fixed. Committing the
-  migrated config is Chris's call (`docs/SURFACE_PLAN.md`, R6).
 - Which "pro" model becomes Antigravity's primary Window is decided by usage
   then name, so with everything untouched it is `gemini-2.5-pro` rather than
   a 3.x model.

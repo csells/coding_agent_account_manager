@@ -385,9 +385,9 @@ func (h *ExtendedHarness) formatStepTimeline(sb *strings.Builder, steps []*StepL
 		if step.Duration > 0 {
 			durationStr = step.Duration.Round(time.Microsecond).String()
 		}
-		sb.WriteString(fmt.Sprintf("%s  %s %-35s %s\n", prefix, status, step.Name, durationStr))
+		fmt.Fprintf(sb, "%s  %s %-35s %s\n", prefix, status, step.Name, durationStr)
 		if step.Description != "" {
-			sb.WriteString(fmt.Sprintf("%s      %s\n", prefix, step.Description))
+			fmt.Fprintf(sb, "%s      %s\n", prefix, step.Description)
 		}
 		if len(step.Nested) > 0 {
 			h.formatStepTimeline(sb, step.Nested, indent+1)
@@ -647,16 +647,16 @@ type BaselineMetrics struct {
 
 // PerformanceComparison represents the result of comparing against a baseline.
 type PerformanceComparison struct {
-	TestName      string                   `json:"test_name"`
-	BaselineDate  time.Time                `json:"baseline_date"`
-	CurrentTimeMs int64                    `json:"current_time_ms"`
-	BaselineMs    int64                    `json:"baseline_ms"`
-	DeltaMs       int64                    `json:"delta_ms"`
-	DeltaPercent  float64                  `json:"delta_percent"`
-	Regressions   []MetricRegression       `json:"regressions,omitempty"`
-	Improvements  []MetricRegression       `json:"improvements,omitempty"`
-	Threshold     float64                  `json:"threshold_percent"`
-	IsRegression  bool                     `json:"is_regression"`
+	TestName      string             `json:"test_name"`
+	BaselineDate  time.Time          `json:"baseline_date"`
+	CurrentTimeMs int64              `json:"current_time_ms"`
+	BaselineMs    int64              `json:"baseline_ms"`
+	DeltaMs       int64              `json:"delta_ms"`
+	DeltaPercent  float64            `json:"delta_percent"`
+	Regressions   []MetricRegression `json:"regressions,omitempty"`
+	Improvements  []MetricRegression `json:"improvements,omitempty"`
+	Threshold     float64            `json:"threshold_percent"`
+	IsRegression  bool               `json:"is_regression"`
 }
 
 // MetricRegression represents a single metric that regressed or improved.

@@ -351,9 +351,10 @@ func runDetection(ctx context.Context, specs []AgentSpec, verbose bool) *DetectR
 		report.Summary.TotalAgents++
 		if agent.Installed {
 			report.Summary.Installed++
-			if agent.Status == StatusReady {
+			switch agent.Status {
+			case StatusReady:
 				report.Summary.Ready++
-			} else if agent.Status == StatusNeedsAuth {
+			case StatusNeedsAuth:
 				report.Summary.NeedAuth++
 			}
 		} else {

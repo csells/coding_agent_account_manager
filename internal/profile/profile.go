@@ -616,8 +616,7 @@ func validateStoreSegment(kind, val string) (string, error) {
 	// The @ and + characters are safe (no special shell meaning) and useful for email-based profile names.
 	// Also prevents filesystem issues and unexpected behavior.
 	for _, r := range val {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' || r == '@' || r == '+') {
+		if !isNameRune(r) {
 			return "", fmt.Errorf("invalid %s: %q (only alphanumeric, underscore, hyphen, period, @, and + allowed)", kind, val)
 		}
 	}
@@ -1040,7 +1039,7 @@ func ValidateTag(tag string) error {
 		return fmt.Errorf("tag exceeds maximum length of %d characters", MaxTagLength)
 	}
 	for _, r := range tag {
-		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-') {
+		if !isTagRune(r) {
 			return fmt.Errorf("tag %q contains invalid character %q (only lowercase letters, numbers, and hyphens allowed)", tag, string(r))
 		}
 	}
@@ -1157,4 +1156,17 @@ func (s *Store) AllTags(provider string) ([]string, error) {
 		tags = append(tags, tag)
 	}
 	return tags, nil
+}
+
+// isNameRune reports whether r may appear in a profile or tool name:
+// alphanumeric, underscore, hyphen, period, @ and +.
+func isNameRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' || r == '@' || r == '+'
+}
+
+// isTagRune reports whether r may appear in a tag: lowercase letters,
+// digits and hyphens.
+func isTagRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-'
 }

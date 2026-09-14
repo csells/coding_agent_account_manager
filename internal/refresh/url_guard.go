@@ -23,7 +23,8 @@ func validateTokenEndpoint(raw string, allowHosts []string) error {
 	}
 
 	scheme := strings.ToLower(strings.TrimSpace(u.Scheme))
-	if scheme != "https" && !(scheme == "http" && isLoopbackHost(host)) {
+	loopbackHTTP := scheme == "http" && isLoopbackHost(host)
+	if scheme != "https" && !loopbackHTTP {
 		return fmt.Errorf("refusing token endpoint scheme %q (host=%q)", scheme, host)
 	}
 

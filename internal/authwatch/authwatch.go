@@ -330,7 +330,8 @@ func (t *Tracker) getProfileHash(provider, profile string) (string, error) {
 		return "", fmt.Errorf("no auth files found for %s/%s", provider, profile)
 	}
 	if len(missingRequired) > 0 {
-		if !(fileSet.AllowOptionalOnly && !requiredFound && optionalFound) {
+		optionalOnlyOK := fileSet.AllowOptionalOnly && !requiredFound && optionalFound
+		if !optionalOnlyOK {
 			return "", fmt.Errorf("required backup not found: %s", missingRequired[0])
 		}
 	}

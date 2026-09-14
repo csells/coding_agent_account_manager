@@ -597,8 +597,8 @@ func (p *Provider) ImportAuth(ctx context.Context, sourcePath string, prof *prof
 	parentDir := filepath.Base(filepath.Dir(sourcePath))
 
 	// Determine target location based on source file type
-	switch {
-	case parentDir == ".gemini":
+	switch parentDir {
+	case ".gemini":
 		// Files from ~/.gemini/ go to profile home's .gemini/
 		targetDir := filepath.Join(prof.HomePath(), ".gemini")
 		if err := os.MkdirAll(targetDir, 0700); err != nil {
@@ -610,7 +610,7 @@ func (p *Provider) ImportAuth(ctx context.Context, sourcePath string, prof *prof
 		}
 		copiedFiles = append(copiedFiles, targetPath)
 
-	case parentDir == "gcloud":
+	case "gcloud":
 		// ADC files go to profile's gcloud config
 		targetDir := filepath.Join(prof.BasePath, "gcloud")
 		if err := os.MkdirAll(targetDir, 0700); err != nil {
