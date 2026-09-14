@@ -5,6 +5,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider"
 )
 
 // ProviderPanelStyles holds the styles the provider strip draws with.
@@ -59,21 +61,10 @@ func NewProviderPanelStyles(theme Theme) ProviderPanelStyles {
 }
 
 // providerLabel is the name a provider goes by on screen: the product's
-// own name, not its caam id ("Antigravity", not "Agy").
+// own name, not its caam id ("Antigravity", not "Agy"). It is the same
+// vocabulary every other caam surface prints (provider.Label).
 func providerLabel(id string) string {
-	switch id {
-	case "agy":
-		return "Antigravity"
-	case "kimi":
-		return "Kimi Code"
-	case "zcode":
-		return "zcode"
-	case "opencode":
-		return "OpenCode"
-	case "grok":
-		return "Grok"
-	}
-	return capitalizeFirst(id)
+	return provider.Label(id)
 }
 
 // capitalizeFirst capitalizes the first letter of a string, with

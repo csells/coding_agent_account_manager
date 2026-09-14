@@ -217,7 +217,7 @@ func TestShortTerminalKeepsTheAccountsPane(t *testing.T) {
 		if lipgloss.Height(m.View()) > size[1] {
 			t.Errorf("%dx%d: view is %d lines", size[0], size[1], lipgloss.Height(m.View()))
 		}
-		for _, want := range []string{"Claude accounts", "NAME", "a@example.com"} {
+		for _, want := range []string{"Claude Code accounts", "NAME", "a@example.com"} {
 			if !strings.Contains(view, want) {
 				t.Errorf("%dx%d: view lacks %q:\n%s", size[0], size[1], want, view)
 			}
@@ -305,11 +305,11 @@ func TestVerticalLayout_ProvidersAboveAccountsWithWindowColumns(t *testing.T) {
 	view := ansi.Strip(m.View())
 
 	iProviders := strings.Index(view, "Providers")
-	iAccounts := strings.Index(view, "Claude accounts")
+	iAccounts := strings.Index(view, "Claude Code accounts")
 	if iProviders < 0 || iAccounts < 0 || iProviders > iAccounts {
 		t.Fatalf("providers strip must sit above the accounts pane:\n%s", view)
 	}
-	for _, want := range []string{"▸ Claude (2)", "● a@example.com", "5h 82%", "wk 50%", "Fable 10%", "Providers (1)",
+	for _, want := range []string{"▸ Claude Code (2)", "● a@example.com", "5h 82%", "wk 50%", "Fable 10%", "Providers (1)",
 		"NAME", "STATUS", "5-HOUR", "WEEKLY", "WEEKLY FABLE", "LAST USED",
 		"82% left · ", "50% left · ", "10% left", "enter", "switch to this account"} {
 		if !strings.Contains(view, want) {
@@ -381,7 +381,7 @@ func TestVerticalLayout_MediumDropsLastUsedAndShortensCells(t *testing.T) {
 	if !strings.Contains(view, "82% · ") || strings.Contains(view, "82% left") {
 		t.Errorf("medium tier should show short window cells:\n%s", view)
 	}
-	if !strings.Contains(view, "▸ Claude 2") {
+	if !strings.Contains(view, "▸ Claude Code 2") {
 		t.Errorf("medium tier should show one-line provider chips:\n%s", view)
 	}
 	for _, line := range strings.Split(m.View(), "\n") {
@@ -394,7 +394,7 @@ func TestVerticalLayout_MediumDropsLastUsedAndShortensCells(t *testing.T) {
 func TestVerticalLayout_NarrowShowsTightestWindowAndTabRow(t *testing.T) {
 	m := modelWithLimits(t, 80, 24)
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"TIGHTEST", "Fable 10%", "▸ Claude 2", "├─ 5-hour", "82% left", "├─ Weekly"} {
+	for _, want := range []string{"TIGHTEST", "Fable 10%", "▸ Claude Code 2", "├─ 5-hour", "82% left", "├─ Weekly"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("narrow view lacks %q:\n%s", want, view)
 		}

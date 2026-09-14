@@ -388,9 +388,10 @@ func TestGetProviderDisplayName(t *testing.T) {
 		id   string
 		want string
 	}{
-		{"claude", "Claude (Anthropic)"},
-		{"codex", "Codex (OpenAI)"},
-		{"gemini", "Gemini (Google)"},
+		{"claude", "Claude Code"},
+		{"codex", "Codex"},
+		{"gemini", "Gemini"},
+		{"agy", "Antigravity"},
 		{"unknown", "Unknown"}, // Falls back to title case
 	}
 
