@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -59,14 +60,13 @@ type CredentialAlternative struct {
 
 // MultiProfileFetcher fetches usage data for multiple profiles concurrently.
 type MultiProfileFetcher struct {
-	claudeFetcher *ClaudeFetcher
-	codexFetcher  *CodexFetcher
-	agyFetcher    *AgyFetcher
-	kimiFetcher   *KimiFetcher
-	zcodeFetcher  *ZcodeFetcher
-	opencode      *OpenCodeFetcher
-	logScanner    logs.Scanner // Optional scanner for burn rate calculation
+	fetchers   map[string]Fetcher // One per supported provider; a missing one is reported, not a panic
+	logScanner logs.Scanner       // Optional scanner for burn rate calculation
 }
+
+// usageProviders lists the providers a MultiProfileFetcher can serve. Any
+// other provider is reported as unsupported.
+var usageProviders = []string{"claude", "codex", "agy", "kimi", "zcode", "opencode"}
 
 // FetcherOption configures the MultiProfileFetcher.
 type FetcherOption func(*MultiProfileFetcher)
@@ -81,12 +81,14 @@ func WithLogScanner(scanner logs.Scanner) FetcherOption {
 // NewMultiProfileFetcher creates a new multi-profile fetcher.
 func NewMultiProfileFetcher(opts ...FetcherOption) *MultiProfileFetcher {
 	m := &MultiProfileFetcher{
-		claudeFetcher: NewClaudeFetcher(),
-		codexFetcher:  NewCodexFetcher(),
-		agyFetcher:    NewAgyFetcher(),
-		kimiFetcher:   NewKimiFetcher(),
-		zcodeFetcher:  NewZcodeFetcher(),
-		opencode:      NewOpenCodeFetcher(),
+		fetchers: map[string]Fetcher{
+			"claude":   NewClaudeFetcher(),
+			"codex":    NewCodexFetcher(),
+			"agy":      NewAgyFetcher(),
+			"kimi":     NewKimiFetcher(),
+			"zcode":    NewZcodeFetcher(),
+			"opencode": NewOpenCodeFetcher(),
+		},
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -228,79 +230,26 @@ func (m *MultiProfileFetcher) FetchAllProfiles(ctx context.Context, provider str
 	return results
 }
 
-// fetchOne runs the provider's fetcher for one token.
+// fetchOne runs the provider's fetcher for one token. An unknown provider,
+// or a supported one with no fetcher wired in, is reported as a row error
+// rather than as a panic.
 func (m *MultiProfileFetcher) fetchOne(ctx context.Context, provider, token string) (*UsageInfo, error) {
-	var info *UsageInfo
-	var err error
-	switch provider {
-	case "claude":
-		if m.claudeFetcher == nil {
-			info = &UsageInfo{
-				Provider:  provider,
-				FetchedAt: time.Now(),
-				Error:     "claude fetcher unavailable",
-			}
-		} else {
-			info, err = m.claudeFetcher.Fetch(ctx, token)
-		}
-	case "codex":
-		if m.codexFetcher == nil {
-			info = &UsageInfo{
-				Provider:  provider,
-				FetchedAt: time.Now(),
-				Error:     "codex fetcher unavailable",
-			}
-		} else {
-			info, err = m.codexFetcher.Fetch(ctx, token)
-		}
-	case "agy":
-		if m.agyFetcher == nil {
-			info = &UsageInfo{
-				Provider:  provider,
-				FetchedAt: time.Now(),
-				Error:     "agy fetcher unavailable",
-			}
-		} else {
-			info, err = m.agyFetcher.Fetch(ctx, token)
-		}
-	case "kimi":
-		if m.kimiFetcher == nil {
-			info = &UsageInfo{
-				Provider:  provider,
-				FetchedAt: time.Now(),
-				Error:     "kimi fetcher unavailable",
-			}
-		} else {
-			info, err = m.kimiFetcher.Fetch(ctx, token)
-		}
-	case "zcode":
-		if m.zcodeFetcher == nil {
-			info = &UsageInfo{
-				Provider:  provider,
-				FetchedAt: time.Now(),
-				Error:     "zcode fetcher unavailable",
-			}
-		} else {
-			info, err = m.zcodeFetcher.Fetch(ctx, token)
-		}
-	case "opencode":
-		if m.opencode == nil {
-			info = &UsageInfo{
-				Provider:  provider,
-				FetchedAt: time.Now(),
-				Error:     "opencode fetcher unavailable",
-			}
-		} else {
-			info, err = m.opencode.Fetch(ctx, token)
-		}
-	default:
-		info = &UsageInfo{
+	if !slices.Contains(usageProviders, provider) {
+		return &UsageInfo{
 			Provider:  provider,
 			FetchedAt: time.Now(),
 			Error:     fmt.Sprintf("unsupported provider: %s", provider),
-		}
+		}, nil
 	}
-	return info, err
+	f, ok := m.fetchers[provider]
+	if !ok || f == nil {
+		return &UsageInfo{
+			Provider:  provider,
+			FetchedAt: time.Now(),
+			Error:     provider + " fetcher unavailable",
+		}, nil
+	}
+	return f.Fetch(ctx, token)
 }
 
 // GetBestProfile returns the profile with the highest availability score.
