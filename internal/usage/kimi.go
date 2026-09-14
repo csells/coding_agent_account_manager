@@ -142,13 +142,18 @@ func kimiPlanName(level, version string) string {
 }
 
 func (f *KimiFetcher) base() string {
-	if f.baseURL != "" {
-		return strings.TrimRight(f.baseURL, "/")
+	return resolveBaseURL(f.baseURL, "KIMI_CODE_BASE_URL", KimiCodeBaseURL)
+}
+
+// resolveBaseURL is the override (tests) > env var > fallback ladder; the first two lose trailing slashes.
+func resolveBaseURL(override, envVar, fallback string) string {
+	if override != "" {
+		return strings.TrimRight(override, "/")
 	}
-	if env := strings.TrimSpace(os.Getenv("KIMI_CODE_BASE_URL")); env != "" {
+	if env := strings.TrimSpace(os.Getenv(envVar)); env != "" {
 		return strings.TrimRight(env, "/")
 	}
-	return KimiCodeBaseURL
+	return fallback
 }
 
 func (f *KimiFetcher) home() string {

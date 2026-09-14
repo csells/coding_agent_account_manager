@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -43,13 +42,7 @@ func NewZcodeFetcher() *ZcodeFetcher {
 }
 
 func (f *ZcodeFetcher) base() string {
-	if f.baseURL != "" {
-		return strings.TrimRight(f.baseURL, "/")
-	}
-	if env := strings.TrimSpace(os.Getenv("ZCODE_BASE_URL")); env != "" {
-		return strings.TrimRight(env, "/")
-	}
-	return ZcodeOrigin
+	return resolveBaseURL(f.baseURL, "ZCODE_BASE_URL", ZcodeOrigin)
 }
 
 // zcodeBillingResponse is the envelope every zcode API answer uses.
