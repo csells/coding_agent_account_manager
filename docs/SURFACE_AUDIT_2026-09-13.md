@@ -1,5 +1,9 @@
 # Surface audit, 2026-09-13: the rest of caam against the switcher's rules
 
+> A dated, read-only audit of every caam surface against the credential rules
+> in `ACCOUNT_SWITCHER.md`, kept as history. Every finding here was closed by
+> `SURFACE_PLAN.md`; line numbers are as of the audit date.
+
 A read-only audit of caam's CLI, output formats, HTTP API and the parts of the
 TUI the account-switcher work did not touch, checked against the principles in
 `ACCOUNT_SWITCHER.md` and the credential rules in `AGENTS.md`. Every
@@ -8,7 +12,7 @@ were re-verified by hand. Status (2026-09-14): findings 1–15 (credential
 paths) and 26–32 (the dashboard's edges) are fixed on the `account-switcher`
 branch per `SURFACE_PLAN.md` gaps 1, 2, 3 and 5; findings 16–25 (output
 formats) are fixed as gap 4. A review of the whole change (19 findings)
-was acted on the same night: one shared capture for logins that also
+was acted on afterwards: one shared capture for logins that also
 handles system-profile matches, clearing that respects files shared
 between tools, refresh moved into the switch core behind the one gate,
 terminal pool refusals, login logging through the core, and the dead

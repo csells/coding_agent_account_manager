@@ -1,11 +1,15 @@
 # Plan: bring the rest of caam up to the dashboard's rules
 
+> The plan that closed the findings of `SURFACE_AUDIT_2026-09-13.md`, gap by
+> gap, kept as history. Every slice below landed on the branch; the design
+> as it stands is described in `ACCOUNT_SWITCHER.md`.
+
 The audit (`SURFACE_AUDIT_2026-09-13.md`) found five gaps between what the
 dashboard does and what the rest of caam does. This is the plan to close
 them, gap by gap, each as red → green slices: a failing test that states
 the behaviour, the least code that passes it, then tidy. Test names use
-the glossary in `CONTEXT.md` (Agent, Account, Capture, Switch, Login,
-Limits, Window); test packages run under `testutil.IsolatedMain` with the
+the glossary at the top of `ACCOUNT_SWITCHER.md` (Agent, Account, Capture,
+Switch, Login, Limits, Window); test packages run under `testutil.IsolatedMain` with the
 fake keychain and synthetic tokens, never a real credential.
 
 Order: 1, 2, 3 are credential safety and go first, in that order; 4 and 5
@@ -299,7 +303,7 @@ A running session holds its credential in memory, so switching the file
 under it is not enough, and injecting `/login` is a new OAuth login (a
 logout first, and the thing the switcher replaces). The right move is:
 switch through the core, then restart the session on its own history.
-Resume flags, verified on this machine: Claude Code `--continue`, Codex
+Resume flags, verified against the installed CLIs: Claude Code `--continue`, Codex
 `resume --last`, Gemini `--resume latest`, Kimi `--continue`.
 
 1. `TestHandoff_SwitchesThenResumes` (`internal/exec`, mock CLI) — on a
@@ -325,7 +329,7 @@ the coordinator yet, so only the handoff and switch-all cover it.
 
 ## R4 — One word for the thing with accounts: "agent" (done)
 
-`CONTEXT.md` says Agent and lists "provider" under words to avoid. Every
+The glossary says Agent and treats "provider" as code vocabulary only. Every
 string a person reads in the dashboard and in CLI help says agent
 ("Agents (5)", "←/→ agent", "Log in to which agent?", `caam add <agent>`
 in help). Flag and subcommand names (`--tool`, `provider`) stay: they are
@@ -339,20 +343,20 @@ names, JSON keys, the HTTP API's "unknown tool", and "tool" where it means
 gum, MCP tools or caam itself. The wider README still says "tool" outside
 the dashboard section.
 
-## R5 — The handoff document (done)
+## R5 — The design document (done)
 
-`caam-handoff.md` is rewritten around the product mission per ADR-0001: what
-the switcher is, where it lives (`docs/ACCOUNT_SWITCHER.md`), the rules,
-what is done, what needs Chris. The v1 file stays as history.
+`docs/ACCOUNT_SWITCHER.md` is written around the product mission: what the
+switcher is, the rules, what each agent's credential is, what is done and
+what is left. Earlier working notes that framed the work as a series of
+sessions are superseded by it.
 
-Status: rewritten 2026-09-14; the v2 text it replaced is kept as
-`caam-handoff-v2-superseded.md`.
+Status: rewritten 2026-09-14.
 
-## R6 — Waiting on Chris
+## R6 — Outside this plan
 
-- Five Codex accounts need one `n` login each; then the Codex round trip
-  (`caam activate` each way, `limits codex` healthy for both, vault copies
-  rotated).
+- Accounts revoked before rule 2 was understood need one fresh login each;
+  then the Codex round trip (`caam activate` each way, `limits codex`
+  healthy for both, vault copies rotated) is the acceptance check.
 - Decided 2026-09-14: labels are the full product name without a "CLI"
   suffix (Claude Code, Antigravity, Codex, Kimi Code, OpenCode, zcode,
   Gemini); the `limits` table keeps SCORE/BURN/DEPLETES out (they live
@@ -361,6 +365,6 @@ Status: rewritten 2026-09-14; the v2 text it replaced is kept as
 - Decided 2026-09-14: `.golangci.yml` migrated to the v2 format
   (golangci-lint 2.9.0) and the findings fixed (one real nil dereference in
   the dashboard's `applyState`, the rest style), so `make lint` is a gate
-  again. The merged agent worktrees and their branches were removed with
-  Chris's permission. A Kimi rate-limit pattern for the coordinator waits
-  until Chris sees one.
+  again.
+- A Kimi rate-limit pattern for the coordinator waits until one is observed
+  in real Kimi output.

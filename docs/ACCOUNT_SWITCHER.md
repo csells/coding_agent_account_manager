@@ -1,28 +1,29 @@
 # The account switcher: how it works and what it learned
 
-caam's `account-switcher` branch turns caam into the tool the handoff asked
-for: log in once with every account on every coding agent, see each
-account's rate-limit state, and switch which account an agent uses without
-logging in again. This document is the architecture and the hard-won facts
-behind it, written so the next person (or agent) does not rediscover them
-against a real account. Decisions with alternatives are in the ADRs under
-`specs/adr/` next to the repository; the user-facing description is in
-`README.md` ("Supported Agents" and the dashboard sections).
+The account switcher lets a user log in once with every account on every
+coding agent, see each account's rate-limit state, and switch which account
+an agent uses without logging in again. This document is the architecture
+and the facts behind it, written so that nobody has to rediscover them
+against a real account. The user-facing description is in `README.md`
+("Supported Agents" and the dashboard sections); the credential rules in
+short form are in `AGENTS.md`.
 
-Vocabulary follows `CONTEXT.md`: an **Agent** is a CLI coding tool (caam
-calls it a provider), an **Account** is one login identity at that Agent's
-service (caam calls it a profile), **Capture** brings an Account's credential
+Vocabulary: an **Agent** is a CLI coding tool (caam's code calls it a
+provider), an **Account** is one login identity at that Agent's service
+(caam's code calls it a profile), **Capture** brings an Account's credential
 into the vault (caam's `backup`), **Switch** makes a captured Account the
 Active one (caam's `activate`), **Login** obtains a credential by
-authenticating, **Limits** are an Account's Windows and how much of each is
-left.
+authenticating with the Agent's service, **Limits** are an Account's
+**Windows** (the rate-limit periods the service enforces) and how much of
+each is left. Prose uses these words; flag names, subcommands and JSON keys
+keep caam's original ones.
 
 ## 1. The one rule everything else follows from
 
 **A credential in the vault is a copy of a session, not a password.** For
 Claude Code, Codex and Antigravity the session is an OAuth refresh-token
 family that rotates: every refresh consumes the current refresh token and
-issues a new one, and presenting a consumed token trips the provider's
+issues a new one, and presenting a consumed token trips the service's
 reuse detection and revokes the whole family (caam issue #19 bricked a real
 account this way). Two consequences drive the design:
 
@@ -42,23 +43,24 @@ account this way). Two consequences drive the design:
   switcher never "refreshes" a credential casually (see §6), and never lets
   an operation invalidate a family it has not just captured (see §2).
 
-The handoff's standing constraints follow from the same rule: caam writes to
+Two standing constraints follow from the same rule: caam writes to
 `~/.codex/auth.json`, the login keychain, `~/.kimi-code/credentials/`,
 `~/.zcode/v2/credentials.json` and OpenCode's store only through its own
-Capture/Switch/Clear paths, never ad hoc; tests never touch the real
-keychain (`testutil.FakeKeychain`) and every test package runs under
+Capture/Switch/Clear paths, never ad hoc; and tests never touch the real
+keychain (`testutil.FakeKeychain`) — every test package runs under
 `testutil.IsolatedMain`, which redirects `HOME`.
 
 ## 2. A login is a logout first: capture, clear, then log in
 
-Discovered 2026-09-13, at the cost of five Codex Accounts. The Codex CLI's
-`codex login` (0.154, `codex-rs/cli/src/login.rs`) calls
+The Codex CLI's `codex login` (0.154, `codex-rs/cli/src/login.rs`) calls
 `clear_existing_auth_before_login`, which runs `logout_with_revoke` on
 whatever session it finds in `$CODEX_HOME/auth.json`. That revokes the
-refresh token, which revokes the family, which kills the vault copy taken
+refresh token, which revokes the family, which kills a vault copy taken
 seconds earlier. The symptom is `401 token_revoked` from
 `chatgpt.com/backend-api/wham/usage` and `refresh_token_invalidated` from the
-token endpoint; nothing brings the Account back but a new login.
+token endpoint; nothing brings the Account back but a new login. This was
+learned against real accounts, and the sessions it revoked were not
+recoverable.
 
 The rule, implemented once in `internal/switcher` (`PrepareLogin`, `Run`,
 `FinishLogin`; `Login` for the three in order) and used by the dashboard's
@@ -79,17 +81,27 @@ Step 2 runs only when step 1 succeeded. A live credential caam cannot match to
 a vault profile (or that matches only an immutable system profile) is
 somebody's session too: `CaptureSignedIn` files it as a fresh `_backup_`
 first, then it is cleared — never destroyed, never left for the login to
-revoke. A failed or cancelled login leaves the
-agent logged out; the dashboard says so and that Enter on the previous
-Account restores it.
+revoke. A failed or cancelled login leaves the agent logged out; the
+dashboard says so and that Enter on the previous Account restores it.
 
 Never run an agent's native login while a vaulted Account's live credential
 is on disk. This applies to any agent whose login is a logout first; Codex
 is the one proven to do it.
 
+The same rule governs running sessions. A running session holds its
+credential in memory, so switching the file under it is not enough, and
+injecting `/login` into it is a new OAuth login — a logout first, and the
+very thing the switcher replaces. The smart handoff (`caam run` with
+handoff enabled), the coordinator and `caam wezterm switch-all` therefore
+switch through the core, end the session and resume it on its history
+(`claude --continue`, `codex resume --last`, `gemini --resume latest`,
+`kimi --continue`). Nothing injects `/login` while another vaulted Account
+exists; with none, the coordinator captures the signed-in Account and then
+sends `/login`, and `wezterm login-all` does the same.
+
 ## 3. What each agent's credential actually is
 
-The README's per-tool sections carry the user-facing facts; these are the
+The README's per-agent sections carry the user-facing facts; these are the
 ones that shaped the code.
 
 - **Claude Code (macOS).** The OAuth blob lives in the login keychain
@@ -114,7 +126,9 @@ ones that shaped the code.
   names the signed-in Google account, so Capture asks Google's userinfo
   endpoint once and records the email in `meta.json`. Profile detection
   hashes the refresh token, so hourly access-token rotation does not lose the
-  Active Account.
+  Active Account. Antigravity and the Gemini CLI share `~/.gemini`'s OAuth
+  cache and accounts file, so clearing one agent's credential leaves the
+  other's alone.
 - **Kimi Code.** `~/.kimi-code/credentials/kimi-code.json`, plain tokens;
   `kimi login` is a device-code flow (plain `kimi` is the chat REPL and does
   not log in). `/logout` leaves the file with empty tokens, which caam treats
@@ -165,17 +179,16 @@ surfaces print (`limits <agent>` detail, `robot`, the full card).
 - **Caching in the dashboard** (`internal/tui/limits.go`): one entry per
   Account, fetched for the Accounts on screen — the selected agent's rows and
   every agent's Active Account — at most once a minute each, **failures
-  included** (a 429 from Anthropic once came from the dashboard's own
-  relaunches). A failed fetch keeps the last known figures, marked stale, and
-  the expansion says why in a short form (`auth expired (re-login)`,
-  `no limits API`, `no coding plan`, `quota API refused (403)`). Keys typed
-  into search or a dialog never start a fetch.
+  included** (a dashboard that refetches on every relaunch can draw a 429
+  from the service all by itself). A failed fetch keeps the last known
+  figures, marked stale, and the expansion says why in a short form (`auth
+  expired (re-login)`, `no limits API`, `no coding plan`, `quota API refused
+  (403)`). Keys typed into search or a dialog never start a fetch.
 
 ## 5. The dashboard
 
-`caam` with no arguments (`internal/tui`), the product view. Its shape was
-chosen on a design canvas ("Direction A"): a strip of agents across the top,
-the selected agent's Accounts below.
+`caam` with no arguments (`internal/tui`), the product view: a strip of
+agents across the top, the selected agent's Accounts below.
 
 - **Strip** (`internal/tui/vertical.go`): a real tab strip — a fixed slot per
   agent in key order, one horizontally scrolled row, `‹ n` / `n ›` counts for
@@ -200,7 +213,7 @@ the selected agent's Accounts below.
   on it, its windows without a column, auth/plan/health/token, its vault
   path, and the keys. **LAST USED** is the activity log's last activate,
   deactivate, switch or login of the Account (`db.LastUsed`); a Login from
-  the dashboard is logged as one. Upstream's isolated-profile store, which
+  the dashboard is logged as one. caam's isolated-profile store, which
   nothing writes, is consulted first and is always empty for vault profiles.
 - **Keys**: ←/→ agent, ↑/↓ Account, Enter switch (confirm), `n` new Login
   (picker of every agent, install status shown), `r` refresh (limits; the
@@ -227,10 +240,10 @@ the selected agent's Accounts below.
   `LiveIdentity` and `Capture`. Tests substitute fakes.
 - **Messages**: a status-bar line belongs to the agent it was written under
   and is dropped when the focus moves (agent *or* Account; two agents with
-  no Accounts have the same empty selection key, which is how a Grok error
-  once followed the user to every tab). The outcome of a switch, capture or
-  refusal is also the first line of the Account's expansion, not only a
-  status-bar message.
+  no Accounts share the same empty selection key, so a line keyed on the
+  selection alone would follow the user from one such tab to the next). The
+  outcome of a switch, capture or refusal is also the first line of the
+  Account's expansion, not only a status-bar message.
 
 `caam monitor` is the second view: the same Windows as column pairs across
 every agent's Accounts, `*` on the Active one, Enter switches through the same
@@ -247,53 +260,46 @@ moved, restores it to the live file too). Kimi's refresh is the CLI's own
 call — a form-encoded `POST {oauthHost}/api/oauth/token` with the CLI's
 client id and `X-Msh-*` device headers, `oauthHost` following
 `KIMI_CODE_OAUTH_HOST` then `KIMI_OAUTH_HOST` — and 401, 403 or
-`invalid_grant` from it is the session-gone class that offers a login. Every such refresh consumes the refresh
-token. So there is one gate, `refresh.NeedsRefresh`: expired, or just
-refused by the provider — never early, never on a timer, never on a plain
-keypress. The daemon keeps the vault-backup schedule and does not refresh;
-the pool monitor tends cooldowns on its tick, and its explicit `RefreshAll`
-takes expired profiles only — a refused refresh is terminal until a person
-acts. `caam refresh --all --force` is refused. Claude Code, Antigravity,
-zcode and OpenCode renew their own; a refresh cannot revive a revoked
-family (§2).
+`invalid_grant` from it is the session-gone class that offers a login. Every
+such refresh consumes the refresh token. So there is one gate,
+`refresh.NeedsRefresh`: expired, or just refused by the service — never
+early, never on a timer, never on a plain keypress. The daemon keeps the
+vault-backup schedule and does not refresh; the pool monitor tends cooldowns
+on its tick, and its explicit `RefreshAll` takes expired profiles only — a
+refused refresh is terminal until a person acts. `caam refresh --all
+--force` is refused. Claude Code, Antigravity, zcode and OpenCode renew
+their own; a refresh cannot revive a revoked family (§2).
 
 ## 7. Verifying changes
 
 Unit tests run under `testutil.IsolatedMain` with a fake keychain; the
-dashboard tests render `Model.View()` at real sizes (159×42 is Chris's
-terminal) and assert on the stripped text. Visual changes are also driven
-against the real binary through a pty with `pyte` (see the scratchpad
-scripts referenced in the branch history: start, send keys, dump rows), and
+dashboard tests render `Model.View()` at real terminal sizes and assert on
+the stripped text. Visual changes are also driven against the real binary
+through a pty with a terminal emulator (start, send keys, dump rows), and
 against real accounts with `caam limits <agent>`; the two probes that
 settled the Antigravity and Codex questions were plain HTTP calls with the
 stored tokens, printing status and a body snippet and never the token.
-`make lint` runs again since 2026-09-14 (`.golangci.yml` migrated to the
-v2 format, findings fixed) and is clean; `go vet`, `gofmt` and
-`go test -race` are the other checks.
+`make lint` is a gate (`.golangci.yml` in the golangci-lint v2 format, CI
+installs v2); `go vet`, `gofmt` and `go test -race` are the other checks.
 
-## 8. Open items
+## 8. Known limitations and future work
 
-- The five Codex Accounts revoked before §2 was understood need one `n`
-  login each; they are filed under the same names.
-- Which "pro" model becomes Antigravity's primary Window is decided by usage
-  then name, so with everything untouched it is `gemini-2.5-pro` rather than
-  a 3.x model.
-- The parent handoff (`caam-handoff.md`) is now written around the product
-  mission per ADR-0001 and points here; the two earlier framings are kept
-  beside it as `caam-handoff-v1-superseded.md` and `-v2-superseded.md`.
-- `docs/SURFACE_AUDIT_2026-09-13.md` and `docs/SURFACE_PLAN.md` record the
-  gaps between the dashboard and the rest of caam and the plan that closed
-  them. Gaps 1 (one switch core), 2 (one refresh gate, no timers), 3
-  (every login is capture → clear → login) and 5 (the dashboard's edges)
-  and 4 (one vocabulary and "left, resets at" in every output) are done,
-  and so is round 2 (robot hints from the registry, Kimi refreshes its own
-  token, switch-then-resume, "agent" in every string a person reads, this
-  handoff). What remains waits on Chris (R6).
-- A running session holds its credential in memory, so switching the
-  file under it is not enough. The smart handoff (`caam run` with handoff
-  enabled), the coordinator and `caam wezterm switch-all` therefore
-  switch through the core, end the session and resume it on its history
-  (`claude --continue`, `codex resume --last`, `gemini --resume latest`,
-  `kimi --continue`). Nothing injects `/login` while another vaulted
-  account exists; with none, the coordinator captures the signed-in
-  account and then sends `/login`, and `wezterm login-all` does the same.
+- Codex is the only agent proven to revoke the existing session on login;
+  the capture → clear → login rule is applied to every agent on the
+  assumption that others may.
+- Antigravity's primary Window is the "pro" model chosen by usage then by
+  name, so an untouched account leads with `gemini-2.5-pro` rather than a
+  3.x model.
+- Kimi has a resume command (`kimi --continue`) but no rate-limit output
+  pattern in the coordinator and no smart-handoff handler yet, so only
+  `caam wezterm switch-all` recovers a rate-limited Kimi session.
+- Isolated `caam login` for Claude Code and Antigravity is refused on macOS
+  while the keychain bridge is on: the login keychain is per OS user, not per
+  `HOME`, so an isolated login would replace the live credential.
+- OpenCode's Console login exposes no usage API, so its Accounts show `no
+  limits API`; a Zen API key reports limits.
+- caam cannot refresh Claude Code, Antigravity, zcode or OpenCode tokens;
+  when one of those sessions ends, only a new Login helps.
+- `docs/SURFACE_AUDIT_2026-09-13.md` and `docs/SURFACE_PLAN.md` are the
+  dated record of the gaps found between the dashboard and the rest of caam
+  and the plan that closed them; they are kept as history.
