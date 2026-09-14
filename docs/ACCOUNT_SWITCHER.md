@@ -207,11 +207,8 @@ the selected agent's Accounts below.
   via `showMessage`), one key to dismiss. The status bar carries progress ("Refreshing limits…",
   "Login finished; reading who signed in…") and nothing the user must not
   miss. The expansion under the Account keeps the last outcome as its first
-  line for context after the dialog is gone. Upstream's `b` (backup under a typed name)
-  and `l` (token refresh labelled "login") were removed: Enter and `n`
-  re-capture on the way through, and one `r` is easier to hold than two
-  refreshes. The name dialog survives only as the `n` fallback when a login
-  leaves no identity.
+  line for context after the dialog is gone. The name dialog exists only as
+  the `n` fallback when a login leaves no identity.
 - **Hooks** (`internal/tui/limits.go: Hooks`): the TUI does not open
   credentials itself. The command layer supplies `Switch` (the shared
   `switchProfile`), `Limits`, `Health` (computed as `caam ls` does, not read

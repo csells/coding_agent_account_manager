@@ -89,36 +89,6 @@ func runNext(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no profiles found for %s; create one with 'caam backup %s <name>'", tool, tool)
 	}
 
-	if len(profiles) == 1 {
-		if currentProfile == profiles[0] {
-			fmt.Printf("Only one profile available for %s (%s), already active\n", tool, profiles[0])
-			return nil
-		}
-		// Single profile case: switch to it through the shared core.
-		if !dryRun {
-			if _, err := switcher.Switch(cmd.Context(), vault, fileSet, coreOptions(switcher.Options{Profile: profiles[0], Force: force, Source: "next"})); err != nil {
-				return err
-			}
-		}
-		if !quiet {
-			if dryRun {
-				fmt.Printf("Would switch to: %s/%s\n", tool, profiles[0])
-			} else {
-				fmt.Printf("Activated %s profile '%s'\n", tool, profiles[0])
-			}
-		}
-		// Codex daemon check (see issue #21): a running codex app-server caches
-		// auth in-process, so the on-disk swap won't apply to it. Skip on
-		// dry-run (nothing was actually switched).
-		if !dryRun {
-			daemonWarn := checkCodexDaemon(tool, reloadDaemon)
-			if !quiet {
-				printCodexDaemonWarning(cmd.ErrOrStderr(), daemonWarn)
-			}
-		}
-		return nil
-	}
-
 	// Load config for rotation algorithm
 	spmCfg, err := config.LoadSPMConfig()
 	if err != nil {
@@ -142,6 +112,36 @@ func runNext(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		defer db.Close()
+	}
+
+	if len(profiles) == 1 {
+		if currentProfile == profiles[0] {
+			fmt.Printf("Only one profile available for %s (%s), already active\n", tool, profiles[0])
+			return nil
+		}
+		// Single profile case: switch to it through the shared core.
+		if !dryRun {
+			if _, err := switcher.Switch(cmd.Context(), vault, fileSet, coreOptions(switcher.Options{Profile: profiles[0], Force: force, Config: spmCfg, DB: db, Source: "next"})); err != nil {
+				return err
+			}
+		}
+		if !quiet {
+			if dryRun {
+				fmt.Printf("Would switch to: %s/%s\n", tool, profiles[0])
+			} else {
+				fmt.Printf("Activated %s profile '%s'\n", tool, profiles[0])
+			}
+		}
+		// Codex daemon check (see issue #21): a running codex app-server caches
+		// auth in-process, so the on-disk swap won't apply to it. Skip on
+		// dry-run (nothing was actually switched).
+		if !dryRun {
+			daemonWarn := checkCodexDaemon(tool, reloadDaemon)
+			if !quiet {
+				printCodexDaemonWarning(cmd.ErrOrStderr(), daemonWarn)
+			}
+		}
+		return nil
 	}
 
 	// Fetch usage data if --usage-aware is set

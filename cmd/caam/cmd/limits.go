@@ -688,19 +688,10 @@ func renderBestProfile(w io.Writer, format string, results []usage.ProfileUsage,
 			best.Provider, best.ProfileName, best.Usage.AvailabilityScoreForModel(model))
 
 		if scoped := best.Usage.ScopedLimit(model); scoped != nil {
-			fmt.Fprintf(w, "  Model-scoped window: %s used\n", formatScopedLimit(scoped))
+			fmt.Fprintf(w, "  Model-scoped window: %s\n", usage.WindowLeftText(scoped, time.Now()))
 		}
-
-		if best.Usage.PrimaryWindow != nil {
-			fmt.Fprintf(w, "  Primary window: %d%% used, resets in %s\n",
-				best.Usage.PrimaryWindow.UsedPercent,
-				formatLimitsDuration(time.Until(best.Usage.PrimaryWindow.ResetsAt)))
-		}
-
-		if best.Usage.SecondaryWindow != nil {
-			fmt.Fprintf(w, "  Secondary window: %d%% used, resets in %s\n",
-				best.Usage.SecondaryWindow.UsedPercent,
-				formatLimitsDuration(time.Until(best.Usage.SecondaryWindow.ResetsAt)))
+		for _, c := range usage.WindowsOf(best.Usage) {
+			fmt.Fprintf(w, "  %s: %s\n", c.Label, usage.WindowLeftText(c.Window, time.Now()))
 		}
 
 		return nil

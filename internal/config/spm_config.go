@@ -887,11 +887,6 @@ func parseBool(s string) (bool, error) {
 	}
 }
 
-// GetRefreshThreshold returns the token refresh threshold.
-func (c *SPMConfig) GetRefreshThreshold() time.Duration {
-	return c.Health.RefreshThreshold.Duration()
-}
-
 // GetWarningThreshold returns the health warning threshold.
 func (c *SPMConfig) GetWarningThreshold() time.Duration {
 	return c.Health.WarningThreshold.Duration()
