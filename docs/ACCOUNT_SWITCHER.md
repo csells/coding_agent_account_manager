@@ -7,7 +7,7 @@ logging in again. This document is the architecture and the hard-won facts
 behind it, written so the next person (or agent) does not rediscover them
 against a real account. Decisions with alternatives are in the ADRs under
 `specs/adr/` next to the repository; the user-facing description is in
-`README.md` ("Supported Tools" and the dashboard sections).
+`README.md` ("Supported Agents" and the dashboard sections).
 
 Vocabulary follows `CONTEXT.md`: an **Agent** is a CLI coding tool (caam
 calls it a provider), an **Account** is one login identity at that Agent's
