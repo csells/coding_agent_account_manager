@@ -669,27 +669,11 @@ func parseOAuthJSON(data []byte) (*ExpiryInfo, error) {
 
 	// Try expires_in with issued_at
 	if expiresIn := parseExpiresIn(oauth.ExpiresIn); expiresIn > 0 {
-		issuedAt := parseExpiryField(oauth.IssuedAt)
-		if issuedAt.IsZero() {
-			issuedAt = parseExpiryField(oauth.IssuedTime)
-		}
-		if issuedAt.IsZero() {
-			// If issued_at is missing, assume now (common for OAuth tokens).
-			issuedAt = time.Now()
-		}
-		info.ExpiresAt = issuedAt.Add(time.Duration(expiresIn) * time.Second)
+		info.ExpiresAt = issuedAtPlus(oauth, expiresIn)
 		return info, nil
 	}
 	if expiresIn := parseExpiresIn(oauth.ExpiresInCamel); expiresIn > 0 {
-		issuedAt := parseExpiryField(oauth.IssuedAt)
-		if issuedAt.IsZero() {
-			issuedAt = parseExpiryField(oauth.IssuedTime)
-		}
-		if issuedAt.IsZero() {
-			// Without issued_at, assume now (less accurate but better than nothing)
-			issuedAt = time.Now()
-		}
-		info.ExpiresAt = issuedAt.Add(time.Duration(expiresIn) * time.Second)
+		info.ExpiresAt = issuedAtPlus(oauth, expiresIn)
 		return info, nil
 	}
 
@@ -699,6 +683,20 @@ func parseOAuthJSON(data []byte) (*ExpiryInfo, error) {
 	}
 
 	return nil, ErrNoExpiry
+}
+
+// issuedAtPlus resolves the token's issue time (issued_at, then issuedTime,
+// then now when neither is present) and adds expiresIn seconds to it.
+func issuedAtPlus(oauth oauthJSON, expiresIn int64) time.Time {
+	issuedAt := parseExpiryField(oauth.IssuedAt)
+	if issuedAt.IsZero() {
+		issuedAt = parseExpiryField(oauth.IssuedTime)
+	}
+	if issuedAt.IsZero() {
+		// If issued_at is missing, assume now (common for OAuth tokens).
+		issuedAt = time.Now()
+	}
+	return issuedAt.Add(time.Duration(expiresIn) * time.Second)
 }
 
 // adcJSON represents Google Application Default Credentials format.
