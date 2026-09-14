@@ -245,7 +245,8 @@ func DisplayOrder() []string {
 }
 
 // providerMetaRegistry holds static metadata for all known providers. The
-// DisplayName is filled from Label on read so there is one vocabulary.
+// DisplayName is filled from Label once, at init, so there is one
+// vocabulary.
 var providerMetaRegistry = map[string]ProviderMeta{
 	"codex": {
 		ID:          "codex",
@@ -294,13 +295,17 @@ var providerMetaRegistry = map[string]ProviderMeta{
 	},
 }
 
+func init() {
+	for id, meta := range providerMetaRegistry {
+		meta.DisplayName = Label(id)
+		providerMetaRegistry[id] = meta
+	}
+}
+
 // GetProviderMeta returns metadata for a provider by ID.
 // Returns the metadata and true if found, or zero value and false if not.
 func GetProviderMeta(id string) (ProviderMeta, bool) {
 	meta, ok := providerMetaRegistry[id]
-	if ok {
-		meta.DisplayName = Label(meta.ID)
-	}
 	return meta, ok
 }
 
@@ -308,7 +313,6 @@ func GetProviderMeta(id string) (ProviderMeta, bool) {
 func AllProviderMeta() []ProviderMeta {
 	result := make([]ProviderMeta, 0, len(providerMetaRegistry))
 	for _, meta := range providerMetaRegistry {
-		meta.DisplayName = Label(meta.ID)
 		result = append(result, meta)
 	}
 	return result
