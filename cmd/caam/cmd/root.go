@@ -1210,6 +1210,68 @@ type lsProfile struct {
 	System   bool               `json:"system"`
 	Health   lsHealth           `json:"health"`
 	Identity *identity.Identity `json:"identity,omitempty"`
+	// LastUsed is when the activity log last saw this account switched to,
+	// away from, or logged in (RFC 3339); absent when never.
+	LastUsed string `json:"last_used,omitempty"`
+}
+
+// lsToolOrder lists the tools that have profiles in the dashboard strip's
+// order (provider.DisplayOrder), then any the strip does not know, by name.
+func lsToolOrder(allProfiles map[string][]string) []string {
+	seen := make(map[string]bool, len(allProfiles))
+	var out []string
+	for _, tool := range provider.DisplayOrder() {
+		if _, ok := allProfiles[tool]; ok {
+			out = append(out, tool)
+			seen[tool] = true
+		}
+	}
+	var rest []string
+	for tool := range allProfiles {
+		if !seen[tool] {
+			rest = append(rest, tool)
+		}
+	}
+	sort.Strings(rest)
+	return append(out, rest...)
+}
+
+// lastUsedByProfile is the activity log's last use of every profile, as
+// the dashboard row shows it. The log is optional (analytics off, no
+// database yet): without it every account simply reads "never".
+func lastUsedByProfile() map[string]map[string]time.Time {
+	db, err := getDB()
+	if err != nil {
+		return nil
+	}
+	used, err := db.LastUsed()
+	if err != nil {
+		return nil
+	}
+	return used
+}
+
+// formatLastUsed says how long ago an account was used, in the words the
+// dashboard uses: never, now, 5m ago, 3h ago, 2d ago, 1w ago, or the date.
+func formatLastUsed(t, now time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	d := now.Sub(t)
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	case d < 7*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	case d < 30*24*time.Hour:
+		return fmt.Sprintf("%dw ago", int(d.Hours()/(24*7)))
+	default:
+		return t.Format("Jan 2, 2006")
+	}
 }
 
 type lsHealth struct {
@@ -1304,16 +1366,19 @@ func runLs(cmd *cobra.Command, args []string) error {
 		}
 
 		if !jsonOutput {
-			fmt.Printf("%-22s  %-24s  %-10s  %s\n", "PROFILE", "EMAIL", "PLAN", "STATUS")
+			fmt.Printf("%-22s  %-24s  %-10s  %-10s  %s\n", "PROFILE", "EMAIL", "PLAN", "LAST USED", "STATUS")
 		}
 
 		// Check which is active
 		fileSet := tools[tool]()
 		activeProfile, _ := vault.ActiveProfile(fileSet)
+		used := lastUsedByProfile()
+		now := time.Now()
 
 		for _, p := range profiles {
 			ph, id := getProfileHealthWithIdentity(tool, p)
 			status := health.CalculateStatus(ph)
+			lastUsed := used[tool][p]
 
 			if jsonOutput {
 				lp := lsProfile{
@@ -1331,6 +1396,9 @@ func runLs(cmd *cobra.Command, args []string) error {
 				if !ph.TokenExpiresAt.IsZero() {
 					lp.Health.ExpiresAt = ph.TokenExpiresAt.Format(time.RFC3339)
 				}
+				if !lastUsed.IsZero() {
+					lp.LastUsed = lastUsed.Format(time.RFC3339)
+				}
 				output.Profiles = append(output.Profiles, lp)
 			} else {
 				marker := "  "
@@ -1345,7 +1413,7 @@ func runLs(cmd *cobra.Command, args []string) error {
 
 				email, plan := formatIdentityDisplay(id)
 				healthStr := health.FormatHealthStatus(status, ph, formatOpts)
-				fmt.Printf("%s%-20s  %-24s  %-10s  %s\n", marker, displayName, email, plan, healthStr)
+				fmt.Printf("%s%-20s  %-24s  %-10s  %-10s  %s\n", marker, displayName, email, plan, formatLastUsed(lastUsed, now), healthStr)
 			}
 		}
 
@@ -1396,18 +1464,23 @@ func runLs(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	for tool, profiles := range allProfiles {
+	used := lastUsedByProfile()
+	now := time.Now()
+
+	for _, tool := range lsToolOrder(allProfiles) {
+		profiles := allProfiles[tool]
 		fileSet := tools[tool]()
 		activeProfile, _ := vault.ActiveProfile(fileSet)
 
 		if !jsonOutput {
-			fmt.Printf("%s:\n", tool)
-			fmt.Printf("  %-20s  %-24s  %-10s  %s\n", "PROFILE", "EMAIL", "PLAN", "STATUS")
+			fmt.Printf("%s:\n", provider.Label(tool))
+			fmt.Printf("  %-20s  %-24s  %-10s  %-10s  %s\n", "PROFILE", "EMAIL", "PLAN", "LAST USED", "STATUS")
 		}
 
 		for _, p := range profiles {
 			ph, id := getProfileHealthWithIdentity(tool, p)
 			status := health.CalculateStatus(ph)
+			lastUsed := used[tool][p]
 
 			if jsonOutput {
 				lp := lsProfile{
@@ -1425,6 +1498,9 @@ func runLs(cmd *cobra.Command, args []string) error {
 				if !ph.TokenExpiresAt.IsZero() {
 					lp.Health.ExpiresAt = ph.TokenExpiresAt.Format(time.RFC3339)
 				}
+				if !lastUsed.IsZero() {
+					lp.LastUsed = lastUsed.Format(time.RFC3339)
+				}
 				output.Profiles = append(output.Profiles, lp)
 			} else {
 				marker := "  "
@@ -1439,7 +1515,7 @@ func runLs(cmd *cobra.Command, args []string) error {
 
 				email, plan := formatIdentityDisplay(id)
 				healthStr := health.FormatHealthStatus(status, ph, formatOpts)
-				fmt.Printf("  %s%-20s  %-24s  %-10s  %s\n", marker, displayName, email, plan, healthStr)
+				fmt.Printf("  %s%-20s  %-24s  %-10s  %-10s  %s\n", marker, displayName, email, plan, formatLastUsed(lastUsed, now), healthStr)
 			}
 		}
 	}

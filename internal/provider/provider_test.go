@@ -484,3 +484,23 @@ func TestProviderLabel_IsTheOneVocabulary(t *testing.T) {
 		}
 	}
 }
+
+// TestDisplayOrder_IsTheDashboardStrip pins the one order providers are
+// listed in wherever caam lists them: the dashboard strip, caam ls.
+func TestDisplayOrder_IsTheDashboardStrip(t *testing.T) {
+	want := []string{"claude", "codex", "gemini", "grok", "opencode", "cursor", "agy", "kimi", "zcode"}
+	got := DisplayOrder()
+	if len(got) != len(want) {
+		t.Fatalf("DisplayOrder() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("DisplayOrder() = %v, want %v", got, want)
+		}
+	}
+	// A copy, so a caller cannot reorder the strip for everyone.
+	got[0] = "x"
+	if DisplayOrder()[0] != "claude" {
+		t.Error("DisplayOrder() must return a fresh slice")
+	}
+}

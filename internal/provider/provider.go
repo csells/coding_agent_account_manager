@@ -236,6 +236,14 @@ func Label(id string) string {
 	return string(unicode.ToUpper(r)) + id[size:]
 }
 
+// DisplayOrder is the one order providers are listed in wherever caam
+// lists them: the dashboard strip and caam ls. The six agents the
+// switcher is for are not grouped first; the order is the strip's as
+// people know it. Returns a fresh slice.
+func DisplayOrder() []string {
+	return []string{"claude", "codex", "gemini", "grok", "opencode", "cursor", "agy", "kimi", "zcode"}
+}
+
 // providerMetaRegistry holds static metadata for all known providers. The
 // DisplayName is filled from Label on read so there is one vocabulary.
 var providerMetaRegistry = map[string]ProviderMeta{
