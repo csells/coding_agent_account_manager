@@ -8,7 +8,7 @@
 ![Go Version](https://img.shields.io/github/go-mod/go-version/Dicklesworthstone/coding_agent_account_manager?style=for-the-badge&color=6272a4)
 ![License](https://img.shields.io/badge/License-MIT%2BOpenAI%2FAnthropic%20Rider-blue-the-badge)
 
-> **Sub-100ms account switching for AI coding CLIs with fixed-cost subscription plans. When you hit usage limits on Claude Max, GPT Pro, or Gemini Ultra, don't wait 60 seconds for browser OAuth—just swap to another account instantly.**
+> **Sub-100ms account switching for coding agents with fixed-cost subscription plans. When you hit usage limits on Claude Max, GPT Pro, or Gemini Ultra, don't wait 60 seconds for browser OAuth—just swap to another account instantly.**
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/coding_agent_account_manager/main/install.sh?$(date +%s)" | bash
@@ -31,7 +31,7 @@ caam activate claude bob@gmail.com      # Switch instantly
 # List available profiles (machine-readable)
 caam list --json
 
-# Show current status for all tools
+# Show current status for all agents
 caam status --json
 
 # Switch accounts
@@ -49,11 +49,11 @@ You're paying $200-275/month for fixed-cost AI coding subscriptions (Claude Max,
 authorize app → wait for redirect → back to terminal
 ```
 
-**That's 30-60 seconds of friction.** Multiply by 5+ switches per day across multiple tools.
+**That's 30-60 seconds of friction.** Multiply by 5+ switches per day across multiple agents.
 
 ## The Solution
 
-Each AI CLI stores OAuth tokens in plain files. `caam` backs them up and restores them:
+Each coding agent stores OAuth tokens in plain files. `caam` backs them up and restores them:
 
 ```bash
 caam activate claude bob@gmail.com   # ~50ms, done
@@ -91,7 +91,7 @@ flowchart LR
 
 ### Why This Works
 
-OAuth tokens are bearer tokens—possession equals access. The CLI tools don't fingerprint your machine beyond what's already in the token file. Swapping files is equivalent to "being" that authenticated session.
+OAuth tokens are bearer tokens—possession equals access. The agents don't fingerprint your machine beyond what's already in the token file. Swapping files is equivalent to "being" that authenticated session.
 
 ### Profile Detection
 
@@ -112,7 +112,7 @@ This means:
 
 ### 1. Vault Profiles (Simple Switching)
 
-Swap auth files in place. One account active at a time per tool. Instant switching.
+Swap auth files in place. One account active at a time per agent. Instant switching.
 
 ```bash
 caam backup claude work@company.com
@@ -138,7 +138,7 @@ Each profile gets its own `$HOME` and `$CODEX_HOME` with symlinks to your real `
 
 | Path | Treatment | Why |
 |---|---|---|
-| Provider auth dirs (`~/.claude` credentials, `~/.config/claude-code`, `$CODEX_HOME`, `~/.gemini`, `~/.config/opencode`, ...) | isolated (real dirs) | The whole point: per-account credentials. |
+| Agent auth dirs (`~/.claude` credentials, `~/.config/claude-code`, `$CODEX_HOME`, `~/.gemini`, `~/.config/opencode`, ...) | isolated (real dirs) | The whole point: per-account credentials. |
 | `~/.ssh`, `~/.gitconfig`, `~/.gnupg`, `~/.aws`, `~/.cargo`, `~/.npm`, `~/.local/bin` | symlink → real home | Dev tooling passes through. |
 | Other `$XDG_CONFIG_HOME` entries (`gh`, `atuin`, `uv`, `shopify-*`, ...) | per-entry symlink → real `~/.config` | XDG-based CLIs keep their credentials — without this, `gh` silently logs out and `git push` fails with `could not read Username for 'https://github.com'` (issue #69). |
 | Other `~/.local/share` and `~/.local/state` entries (`com.vercel.cli`, `supabase`, ...) | per-entry symlink → real home | Same: `HOME` redirection silently relocates the XDG data/state dirs. |
@@ -153,7 +153,7 @@ Passthrough symlinks (and the Claude asset links) are refreshed on every `caam e
 
 A "shallow" `$HOME` per identity: only the auth-bearing files are real, **everything else is a symlink back to your real `~/`**. Designed for orchestrators that fan N parallel agent sessions across N accounts on the same machine.
 
-**Supported providers:** `claude`, `codex`, and `agy` (Antigravity). Each provider keeps only *its own* identity files real and private; everything else symlinks back to your real `~/`. The provider is inferred from `--from-vault <tool>/<profile>`, or set explicitly with `--tool claude|codex|agy` (defaults to `claude`). On spawn, caam repoints `HOME` at the shallow profile and pins the provider's home var (`CODEX_HOME` / `GEMINI_HOME`) so a stray inherited value can't pull the real identity back in.
+**Supported agents:** `claude`, `codex`, and `agy` (Antigravity). Each agent keeps only *its own* identity files real and private; everything else symlinks back to your real `~/`. The agent is inferred from `--from-vault <agent>/<profile>`, or set explicitly with `--tool claude|codex|agy` (defaults to `claude`). On spawn, caam repoints `HOME` at the shallow profile and pins the agent's home var (`CODEX_HOME` / `GEMINI_HOME`) so a stray inherited value can't pull the real identity back in.
 
 ```bash
 # Stage credentials in caam's vault first (one-time per account).
@@ -162,13 +162,13 @@ caam backup codex  bob
 caam backup agy    carol
 
 # Create a shallow profile per identity, copying the credential out of the vault.
-# --tool is inferred from the <tool>/<profile> part of --from-vault.
+# --tool is inferred from the <agent>/<profile> part of --from-vault.
 caam shallow-profile create alice --from-vault claude/alice@example.com
 caam shallow-profile create bob   --from-vault codex/bob
 caam shallow-profile create carol --from-vault agy/carol
 
-# Spawn concurrent sessions, each pinned to its own identity and provider.
-# With no `-- <cmd>` the profile's own CLI (claude / codex / agy) is run.
+# Spawn concurrent sessions, each pinned to its own identity and agent.
+# With no `-- <cmd>` the profile's own agent (claude / codex / agy) is run.
 caam shallow-spawn alice &   # session 1, alice's Claude quota
 caam shallow-spawn bob   &   # session 2, bob's Codex identity
 caam shallow-spawn carol &   # session 3, carol's Antigravity identity
@@ -185,9 +185,9 @@ Layout under `~/orch-homes/<name>/` — **claude** (the `codex` and `agy` real-f
 | `.claude/projects/`, `.claude/todos/`, `.claude/shell-snapshots/` | symlink → `~/.claude/...` | Conversation history is shared. |
 | `.bashrc`, `.zshrc`, `.gitconfig`, `.ssh/`, `.cargo/`, `.bun/`, `.config/`, `.docker/`, ... | symlink → `~/...` | Dev tooling, shell, git, ssh — all pass through. |
 
-Per-provider real (private) files — everything else under the provider's home is symlinked through, so non-auth state (sessions, history, caches) stays shared:
+Per-agent real (private) files — everything else under the agent's home is symlinked through, so non-auth state (sessions, history, caches) stays shared:
 
-| Provider | Real / private files | Spawn pins |
+| Agent    | Real / private files | Spawn pins |
 |----------|----------------------|------------|
 | `claude` | `.claude/.credentials.json`, `.claude/.credentials.lock`, `.claude.json` | scrubs `CLAUDE_CONFIG_DIR` |
 | `codex`  | `.codex/auth.json`, `.codex/config.toml` (file credential store enforced; shared tables refreshed from your real config on every spawn, hook/project/notice state kept private) | `CODEX_HOME=<profile>/.codex` |
@@ -200,11 +200,11 @@ Per-provider real (private) files — everything else under the provider's home 
 **Subcommands:**
 
 ```bash
-caam shallow-profile create <name> [--tool claude|codex|agy] [--from-vault <tool>/<profile>] [--from-file <path>] [--force] [--json]
+caam shallow-profile create <name> [--tool claude|codex|agy] [--from-vault <agent>/<profile>] [--from-file <path>] [--force] [--json]
 caam shallow-profile list [--json]
 caam shallow-profile delete <name> [--force] [--json]
 caam shallow-profile sync-config <name>|--all [--json]   # reconcile shared config with your real HOME
-caam shallow-spawn <name>                     # open the profile's own provider CLI (claude / codex / agy) in this terminal
+caam shallow-spawn <name>                     # open the profile's own agent (claude / codex / agy) in this terminal
 caam shallow-spawn <name> --create            # first run of a NEW identity: provision an empty profile, then start it
 caam shallow-spawn <name> --create --tool codex   # ...with a codex layout instead of claude
 caam shallow-spawn <name> -- <cmd> [args...]  # or run any other command under the profile
@@ -259,15 +259,15 @@ shallow profile "alise" does not exist; did you mean "alice"?
 session, so the first run of a new identity is a login prompt. Credentials are
 deliberately never copied from the vault here: two homes sharing one
 refresh-token family invalidate each other, so seeding stays an explicit
-`caam shallow-profile create --from-vault <tool>/<profile>` decision.
+`caam shallow-profile create --from-vault <agent>/<profile>` decision.
 `--print-env` remains a strict dry run and never creates anything, and `--tool`
-on a profile that already exists under another provider is an error rather than
+on a profile that already exists under another agent is an error rather than
 a silent no-op.
 
 #### Keeping shared configuration in sync
 
-A shallow profile's provider configuration is a *real*, private file — it has
-to be, because the provider writes identity and per-home state into it — so it
+A shallow profile's agent configuration is a *real*, private file — it has
+to be, because the agent writes identity and per-home state into it — so it
 diverges from your real HOME the moment you change something there. The most
 common casualty is an MCP server: change a real-home entry from the stdio
 transport to streamable HTTP and every codex profile keeps the old
@@ -277,7 +277,7 @@ transport to streamable HTTP and every codex profile keeps the old
 Every spawn therefore refreshes the shared configuration from your real HOME,
 and `caam shallow-profile sync-config <name> [--all]` does it on demand:
 
-| Provider | Refreshed | Never touched |
+| Agent    | Refreshed | Never touched |
 |----------|-----------|---------------|
 | claude (`.claude.json`) | preferences (theme, editor mode, notification channel, auto-updates), user-scope `mcpServers`, per-project trust / `allowedTools` / MCP settings | `oauthAccount`, usage caches, prompt history, per-project session state |
 | codex (`.codex/config.toml`) | root settings (`model`, `model_reasoning_effort`, `personality`, `notify`, …) and whole tables: `[mcp_servers.*]`, `[features]`, `[skills]`, `[hooks]`, `[model_providers.*]` | `[hooks.state.*]` (hook trust), `[projects.*]` (workspace trust), `[notice.*]` (dismissed notices), and `auth.json` |
@@ -303,16 +303,16 @@ and a second sync writes nothing. Pass `--no-sync-config` to skip it.
 > - Pass `--allow-agent-view` on `shallow-spawn` — caam will not inject the disable flag for that invocation.
 > - Export `CLAUDE_CODE_DISABLE_AGENT_VIEW` yourself (to any value) before spawning — caam never overrides an explicit user setting.
 >
-> This only affects the `claude` provider; `codex` and `agy` shallow sessions have no Agent View feature and are unchanged.
+> This only affects the `claude` agent; `codex` and `agy` shallow sessions have no Agent View feature and are unchanged.
 
 > **Note:** `caam shallow-profile` does not (yet) call any reverse-engineered Anthropic endpoints to display per-account live usage data. That's a separate concern tracked in the original report (issue #16) and intentionally deferred.
 
 ---
 
-## Supported Tools
+## Supported Agents
 
-| Tool | Auth Location | Login Command |
-|------|--------------|---------------|
+| Agent | Auth Location | Login Command |
+|-------|--------------|---------------|
 | **Claude Code** | OAuth: `~/.claude/.credentials.json` + `~/.claude.json` + `~/.config/claude-code/auth.json` + (macOS) `~/Library/Application Support/Claude/config.json` • API key: `~/.claude/settings.json` | `/login` in CLI |
 | **Codex CLI** | `~/.codex/auth.json` (file store enforced) | `codex login` (or `--device-auth`) |
 | **Antigravity CLI** | OAuth: `~/.gemini/antigravity-cli/antigravity-oauth-token` (+ `~/.gemini/google_accounts.json`) | `agy` interactive (Google OAuth) |
@@ -374,7 +374,7 @@ and a second sync writes nothing. Pass `--no-sync-config` to skip it.
 
 ### Antigravity CLI (Google)
 
-**Auth:** on a Mac, `agy` keeps its Google OAuth token in the login keychain (service `gemini`, account `antigravity`, written through go-keyring) and never creates `~/.gemini/antigravity-cli/antigravity-oauth-token`; on Linux that file is the credential. caam bridges the keychain item onto the file exactly as it does for Claude Code: `backup` mirrors it out, `activate` writes the restored token back into the item, `logout` removes it. The `gemini` provider (the legacy Gemini CLI) is a different tool and is untouched.
+**Auth:** on a Mac, `agy` keeps its Google OAuth token in the login keychain (service `gemini`, account `antigravity`, written through go-keyring) and never creates `~/.gemini/antigravity-cli/antigravity-oauth-token`; on Linux that file is the credential. caam bridges the keychain item onto the file exactly as it does for Claude Code: `backup` mirrors it out, `activate` writes the restored token back into the item, `logout` removes it. The `gemini` agent (the legacy Gemini CLI) is a different agent and is untouched.
 
 **Identity:** no agy file records the signed-in Google account (`~/.gemini/google_accounts.json` is the Gemini CLI's and may name none), so `caam backup agy` asks Google's userinfo endpoint once and records the email in the profile's `meta.json`; `ls` and `status` read it from there. Profile detection hashes the refresh token, so Google's hourly access-token rotation does not lose the active profile.
 
@@ -454,14 +454,19 @@ caam activate claude bob@gmail.com       # Back to Bob
 
 ```bash
 $ caam status
-claude: alice@gmail.com (active)
-codex:  work@company.com (active)
-gemini: (no auth files)
+Active Profiles
+───────────────────────────────────────────────────
+AGENT         PROFILE               EMAIL                     PLAN        STATUS
+Codex         work@company.com      work@company.com          Pro         🟢 Healthy
+Claude Code   alice@gmail.com       alice@gmail.com           Max         🟢 Healthy
+
+Not logged in: Gemini, Antigravity, Grok, OpenCode, Cursor, Kimi Code, zcode
 
 $ caam ls claude
-alice@gmail.com
-bob@gmail.com
-carol@gmail.com
+PROFILE                 EMAIL                     PLAN        LAST USED   STATUS
+● alice@gmail.com       alice@gmail.com           Max         2h ago      🟢 Healthy
+  bob@gmail.com         bob@gmail.com             Max         1d ago      🟢 Healthy
+  carol@gmail.com       carol@gmail.com           Max         never       🟢 Healthy
 ```
 
 ---
@@ -472,18 +477,18 @@ carol@gmail.com
 
 | Command | Description |
 |---------|-------------|
-| `caam backup <tool> <email>` | Save current auth files to vault |
-| `caam activate <tool> <email>` | Restore auth files from vault (instant switch!) |
-| `caam status [tool]` | Show which profile is currently active |
-| `caam ls [tool]` | List all saved profiles in vault |
-| `caam delete <tool> <email>` | Remove a saved profile |
-| `caam paths [tool]` | Show auth file locations for each tool |
-| `caam clear <tool>` | Remove auth files (logout state) |
-| `caam alias <tool> <profile> <alias>` | Create a short alias for a profile |
-| `caam rename <tool> <old> <new>` | Copy profile to a new name (non-destructive) |
+| `caam backup <agent> <email>` | Save current auth files to vault |
+| `caam activate <agent> <email>` | Restore auth files from vault (instant switch!) |
+| `caam status [agent]` | Show which profile is currently active |
+| `caam ls [agent]` | List all saved profiles in vault |
+| `caam delete <agent> <email>` | Remove a saved profile |
+| `caam paths [agent]` | Show auth file locations for each agent |
+| `caam clear <agent>` | Remove auth files (logout state) |
+| `caam alias <agent> <profile> <alias>` | Create a short alias for a profile |
+| `caam rename <agent> <old> <new>` | Copy profile to a new name (non-destructive) |
 | `caam uninstall` | Restore originals from `_original` and remove caam data/config |
 
-**Aliases:** `caam switch` is the activation alias and works like `caam activate`. Note that `caam use <provider> <profile>` is a separate command that sets the *default* profile for a provider (it does not switch active auth files).
+**Aliases:** `caam switch` is the activation alias and works like `caam activate`. Note that `caam use <agent> <profile>` is a separate command that sets the *default* profile for an agent (it does not switch active auth files).
 
 ### Quick Switch: `pick` + aliases
 
@@ -494,7 +499,7 @@ caam pick claude           # fzf if installed; numbered prompt otherwise
 caam pick                  # uses your default_provider if set
 ```
 
-Set a default provider so you can omit the tool name:
+Set a default agent so you can omit the agent name:
 
 ```bash
 caam config set default_provider claude
@@ -541,26 +546,26 @@ choice; with no model given, every per-model allowance counts.
 
 | Command | Description |
 |---------|-------------|
-| `caam activate <tool> --auto` | Auto-select the best profile using rotation algorithm |
-| `caam next <tool>` | Switch to the next profile in rotation (use `--dry-run` to preview without switching) |
-| `caam run <tool> [-- args]` | Wrap CLI execution with automatic failover on rate limits |
-| `caam limits <tool> [--model <name>]` | Live rate-limit usage, including each account's per-model allowance |
+| `caam activate <agent> --auto` | Auto-select the best profile using rotation algorithm |
+| `caam next <agent>` | Switch to the next profile in rotation (use `--dry-run` to preview without switching) |
+| `caam run <agent> [-- args]` | Run an agent with automatic failover on rate limits |
+| `caam limits <agent> [--model <name>]` | Live rate-limit usage, including each account's per-model allowance |
 | `caam limits claude --cached` | The same view offline, from the snapshot Claude Code caches on disk (no network, no token presented) |
-| `caam limits <tool> --profile <name> --source live\|vault\|isolated\|shallow` | Read a specific credential namespace (`live` is the credential the tool is using right now) |
-| `caam limits <tool> --rank earliest-reset-headroom` | Rank seats for **new** work: spend the included quota that refreshes soonest, preserve the rest |
+| `caam limits <agent> --profile <name> --source live\|vault\|isolated\|shallow` | Read a specific credential namespace (`live` is the credential the agent is using right now) |
+| `caam limits <agent> --rank earliest-reset-headroom` | Rank seats for **new** work: spend the included quota that refreshes soonest, preserve the rest |
 | `caam monitor` | Live dashboard: every captured account, one column per window (share **left** and local reset), `*` on the active account, Enter to switch |
-| `caam cooldown set <provider/profile>` | Mark profile as rate-limited (default: 60min cooldown) |
+| `caam cooldown set <agent/profile>` | Mark profile as rate-limited (default: 60min cooldown) |
 | `caam cooldown list` | List active cooldowns with remaining time |
-| `caam cooldown clear <provider/profile>` | Clear cooldown for a specific profile |
+| `caam cooldown clear <agent/profile>` | Clear cooldown for a specific profile |
 | `caam cooldown clear --all` | Clear all active cooldowns |
-| `caam project set <tool> <profile>` | Associate current directory with a profile |
-| `caam project show [tool]` | Show resolved associations for current directory (`get` is an alias; `--json` for machine-readable output) |
+| `caam project set <agent> <profile>` | Associate current directory with a profile |
+| `caam project show [agent]` | Show resolved associations for current directory (`get` is an alias; `--json` for machine-readable output) |
 | `caam project list` | List all project associations (`--json` supported) |
 
 #### Offline usage: `caam limits --cached`
 
 `caam limits` answers "which account still has headroom" by querying the
-provider. Claude Code also caches the figures it last received in each
+agent's service. Claude Code also caches the figures it last received in each
 account's own `.claude.json`, and `--cached` reads those files instead: no
 request is made and no token is presented.
 
@@ -585,7 +590,7 @@ both:
 
 In `--format json` these appear as `source: "cache"`, the window-level `rolled`
 flag, and `fetched_at` set to the snapshot's own timestamp rather than the time
-caam read it. Only Claude keeps such a cache; `--cached` on another provider is
+caam read it. Only Claude keeps such a cache; `--cached` on another agent is
 an error rather than an empty table.
 
 #### Picking a seat for new work: `caam limits --rank`
@@ -626,7 +631,7 @@ live numbers could not be read, so it never answers confidently on missing data.
 
 A named `--model` tightens this further. An account can exhaust its weekly Fable
 or Opus allowance while its general windows still read idle, so that allowance
-counts as the binding window; and if the provider did not report a row for that
+counts as the binding window; and if the agent's service did not report a row for that
 model at all, the seat is `unknown`, not spare capacity. Pass
 `--require-model-window=false` to rank it anyway.
 
@@ -686,23 +691,23 @@ or touch a running session.
 #### Credential namespaces: `caam limits --profile ... --source`
 
 One profile name can exist in three unrelated stores at once, plus the
-credential the tool is actually using:
+credential the agent is actually using:
 
 | Namespace | Where | Written by |
 |-----------|-------|------------|
-| `live` | the tool's own auth location (`~/.codex/auth.json`, the Claude keychain item, ...) | the tool's login and its in-place token refresh; only the **active** profile has one |
-| `vault` | `<vault>/<provider>/<name>/` | `caam backup` / `caam activate` |
+| `live` | the agent's own auth location (`~/.codex/auth.json`, the Claude keychain item, ...) | the agent's login and its in-place token refresh; only the **active** profile has one |
+| `vault` | `<vault>/<agent>/<name>/` | `caam backup` / `caam activate` |
 | `isolated` | the profile's own HOME and XDG config dir | `caam login`, or an in-app `/login` under `caam exec` |
 | `shallow` | `~/orch-homes/<name>/` | signing in inside a `shallow-spawn` session |
 
 For the active profile `--profile NAME` (and the all-profiles table) reads the
-`live` credential: the tool rotates it in place while the profile is active,
+`live` credential: the agent rotates it in place while the profile is active,
 so the vault copy froze at activate time and reads as expired for exactly the
 account you are on. Every other name still reads the vault by default, and
 the lookup no longer stays quiet about which copy it used. Claude is the case that made this matter: Claude cannot use
 `caam login`, its supported isolated-profile flow is `caam exec claude <name>`
 plus an in-app `/login`, and that flow never touches the vault - so the one
-provider whose login path cannot refresh the vault copy was being reported
+agent whose login path cannot refresh the vault copy was being reported
 purely from the vault copy, and a healthy account came back
 `unauthorized: token expired or invalid`.
 
@@ -744,7 +749,7 @@ Rotation policies decide which profile `caam` *switches the host to*. To rank se
 
 When `stealth.cooldown.enabled` is true in config, `caam activate` warns if the target profile is in cooldown and prompts for confirmation. Use `--force` to bypass.
 
-When `stealth.rotation.enabled` is true, `caam activate <tool>` automatically falls back to rotation if the default profile is in cooldown.
+When `stealth.rotation.enabled` is true, `caam activate <agent>` automatically falls back to rotation if the default profile is in cooldown.
 
 #### Live dashboard: `caam monitor`
 
@@ -883,18 +888,18 @@ accounts pane keeps its rows, and the status bar is always the last line.
 
 | Command | Description |
 |---------|-------------|
-| `caam profile add <tool> <email>` | Create isolated profile directory |
-| `caam profile ls [tool]` | List isolated profiles |
-| `caam profile delete <tool> <email>` | Delete isolated profile |
-| `caam profile status <tool> <email>` | Show isolated profile status |
-| `caam login <tool> <email>` | Run login flow for isolated profile |
-| `caam exec <tool> <email> [-- args]` | Run CLI with isolated profile |
+| `caam profile add <agent> <email>` | Create isolated profile directory |
+| `caam profile ls [agent]` | List isolated profiles |
+| `caam profile delete <agent> <email>` | Delete isolated profile |
+| `caam profile status <agent> <email>` | Show isolated profile status |
+| `caam login <agent> <email>` | Run login flow for isolated profile |
+| `caam exec <agent> <email> [-- args]` | Run the agent with an isolated profile |
 
 ---
 
 ## Smart Profile Management
 
-When you have multiple accounts across multiple providers, manually tracking which account has headroom, which one just hit a limit, and which one you used recently becomes tedious. Smart Profile Management automates this decision-making so you can focus on coding instead of account juggling.
+When you have multiple accounts across multiple agents, manually tracking which account has headroom, which one just hit a limit, and which one you used recently becomes tedious. Smart Profile Management automates this decision-making so you can focus on coding instead of account juggling.
 
 ### Profile Health Scoring
 
@@ -918,7 +923,7 @@ The penalty system uses **exponential decay** (20% reduction every 5 minutes) so
 #### Refreshable tokens are not expired accounts
 
 A short-lived access token that can be renewed **without a human** is not an
-unhealthy account, and caam does not report it as one. Every provider's
+unhealthy account, and caam does not report it as one. Every agent's
 credential carries a refresh token or it does not, and that — not the raw
 expiry timestamp — decides the verdict. Codex is the case that forced the
 distinction: its access token routinely sits expired for days while the CLI
@@ -948,7 +953,7 @@ until the cap clears — but it is not a login problem, so `login_required` stay
 `false`.
 
 A lapsed-but-renewable credential shows as `Auto-refresh` rather than
-`Expired`, and its recommendation is `caam refresh <provider> <profile>`, never
+`Expired`, and its recommendation is `caam refresh <agent> <profile>`, never
 `caam login` (a login is disruptive and would fix nothing).
 
 ### Smart Rotation Algorithms
@@ -997,7 +1002,7 @@ When cooldown enforcement is enabled (`stealth.cooldown.enabled: true`), attempt
 
 ### Automatic Failover with `caam run`
 
-The `caam run` command wraps your AI CLI execution and automatically handles rate limits:
+The `caam run` command wraps the agent and automatically handles rate limits:
 
 ```bash
 # Instead of running claude directly:
@@ -1073,9 +1078,10 @@ This is useful for understanding why rotation is making certain choices, or for 
 ```bash
 # Morning: Check what's active
 caam status
-# claude: alice@gmail.com (active)
-# codex:  work@company.com (active)
-# gemini: personal@gmail.com (active)
+# AGENT         PROFILE               EMAIL                     PLAN        STATUS
+# Codex         work@company.com      work@company.com          Pro         🟢 Healthy
+# Claude Code   alice@gmail.com       alice@gmail.com           Max         🟢 Healthy
+# Gemini        personal@gmail.com    personal@gmail.com        Ultra       🟢 Healthy
 
 # Afternoon: Hit Claude usage limit
 caam activate claude bob@gmail.com
@@ -1153,7 +1159,7 @@ caam activate claude --auto
 alias claude='caam run claude --'
 alias codex='caam run codex --'
 
-# Now just use the tool normally
+# Now just use the agent normally
 claude "explain this authentication flow"
 
 # If you hit a rate limit mid-session, caam automatically:
@@ -1257,13 +1263,13 @@ No. This tool is specifically designed for **fixed-cost subscription plans** lik
 
 No. You're using your own legitimately-purchased subscriptions. `caam` just manages local auth files—it doesn't share accounts, bypass rate limits, or modify API traffic. Each account still respects its individual usage limits.
 
-**Q: What if the tool updates and changes auth file locations?**
+**Q: What if an agent updates and changes auth file locations?**
 
-Run `caam paths` to see current locations. If they change in a tool update, we'll update `caam`. File an issue if you notice a discrepancy.
+Run `caam paths` to see current locations. If they change in an agent update, we'll update `caam`. File an issue if you notice a discrepancy.
 
 **Q: Can I sync the vault across machines?**
 
-With care — and `caam sync` is now provider-aware about what is safe to move. Claude and Codex subscription OAuth uses a **rotating refresh-token family**: every refresh consumes the current refresh token, and replaying a stale copy from another machine can trip the provider's reuse detection and revoke the whole family (this bricked a real account — see issue #19). So by default those providers are **host-local**: `caam sync` replicates their profile *metadata* (so every machine knows the logical account exists) but never their credential payload — each machine keeps its own independent grant via `caam add`. Gemini, OpenCode, and Cursor keep the old bidirectional `replicate` behavior. You can override per provider or per profile in `~/.config/caam/config.json`:
+With care — and `caam sync` is now agent-aware about what is safe to move. Claude and Codex subscription OAuth uses a **rotating refresh-token family**: every refresh consumes the current refresh token, and replaying a stale copy from another machine can trip the reuse detection at the agent's service and revoke the whole family (this bricked a real account — see issue #19). So by default those agents are **host-local**: `caam sync` replicates their profile *metadata* (so every machine knows the logical account exists) but never their credential payload — each machine keeps its own independent grant via `caam add`. Gemini, OpenCode, and Cursor keep the old bidirectional `replicate` behavior. You can override per agent or per profile in `~/.config/caam/config.json`:
 
 ```json
 {
@@ -1274,20 +1280,20 @@ With care — and `caam sync` is now provider-aware about what is safe to move. 
 }
 ```
 
-Forcing `replicate` for a rotating provider prints a loud warning whenever both machines already hold diverged copies, because converging them is exactly the revocation hazard. `caam sync status` shows the resolved policy per provider.
+Forcing `replicate` for a rotating agent prints a loud warning whenever both machines already hold diverged copies, because converging them is exactly the revocation hazard. `caam sync status` shows the resolved policy per agent.
 
 **Q: What's the difference between vault profiles and isolated profiles?**
 
-- **Vault profiles** (`backup`/`activate`): Swap auth files in place. Simple, instant, one account active at a time per tool.
+- **Vault profiles** (`backup`/`activate`): Swap auth files in place. Simple, instant, one account active at a time per agent.
 - **Isolated profiles** (`profile add`/`exec`): Full directory isolation with pseudo-HOME. Run multiple accounts simultaneously in parallel terminals.
 
 **Q: Will this break my existing sessions?**
 
-Switching profiles while a CLI is running may cause auth errors in the running session. Best practice: switch accounts before starting a new session, not during.
+Switching profiles while an agent is running may cause auth errors in the running session. Best practice: switch accounts before starting a new session, not during.
 
 **Q: How do I know which account I'm currently using?**
 
-Run `caam status`. It shows the active profile (email) for each tool based on content hash matching.
+Run `caam status`. It shows the active profile (email) for each agent based on content hash matching.
 
 ---
 
@@ -1412,7 +1418,7 @@ go install github.com/Dicklesworthstone/coding_agent_account_manager/cmd/caam@la
 
 1. **Use the actual email address as the profile name** — it's self-documenting and you'll never forget which account is which
 2. **Backup before clearing:** `caam backup claude current@email.com && caam clear claude`
-3. **Check status often:** `caam status` shows what's active across all tools
+3. **Check status often:** `caam status` shows what's active across all agents
 4. **Use --backup-current flag:** `caam activate claude new@email.com --backup-current` auto-saves current state before switching
 
 ---
@@ -1423,7 +1429,7 @@ Special thanks to **[@darvell](https://github.com/darvell)** for inspiring this 
 
 While codex-pool answers "which account should handle THIS request?" (real-time proxy), caam answers "which account should I USE for my work session?" (profile manager). The Smart Profile Management features adapt codex-pool's intelligence to caam's architecture:
 
-- **On-demand Token Refresh** — `caam refresh` and the dashboard's `r` refresh a token only when it has expired or the provider refused it, never early and never on a timer: a refresh consumes the refresh token, and the families rotate *(Codex, Gemini and Kimi; Claude Code and the others renew their own)*
+- **On-demand Token Refresh** — `caam refresh` and the dashboard's `r` refresh a token only when it has expired or the agent's service refused it, never early and never on a timer: a refresh consumes the refresh token, and the families rotate *(Codex, Gemini and Kimi; Claude Code and the others renew their own)*
 - **Profile Health Scoring** — Visual indicators (🟢🟡🔴) showing token status, error history, penalty decay, and plan type *(Claude profiles may show limited identity info)*
 - **Smart Rotation** — Multi-factor algorithm picks the best available profile based on health, cooldown, recency, and usage patterns
 - **Cooldown Tracking** — Database-backed tracking of rate limit hits with configurable cooldown windows
