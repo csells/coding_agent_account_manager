@@ -195,7 +195,7 @@ func (c *Checker) checkVaultProfile(ctx context.Context, tool, profileName strin
 			Level:   LevelCritical,
 			Tool:    tool,
 			Profile: profileName,
-			Message: fmt.Sprintf("Token expires in %s", formatDuration(remaining)),
+			Message: fmt.Sprintf("Token expires in %s", health.FormatDurationNatural(remaining)),
 			Action:  fmt.Sprintf("caam refresh %s %s", tool, profileName),
 		})
 	} else if remaining <= c.WarningThreshold {
@@ -204,38 +204,12 @@ func (c *Checker) checkVaultProfile(ctx context.Context, tool, profileName strin
 			Level:   LevelWarning,
 			Tool:    tool,
 			Profile: profileName,
-			Message: fmt.Sprintf("Token expires in %s", formatDuration(remaining)),
+			Message: fmt.Sprintf("Token expires in %s", health.FormatDurationNatural(remaining)),
 			Action:  fmt.Sprintf("caam refresh %s %s", tool, profileName),
 		})
 	}
 
 	return warnings
-}
-
-// formatDuration formats a duration in a human-friendly way.
-func formatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return "less than a minute"
-	}
-	if d < time.Hour {
-		mins := int(d.Minutes())
-		if mins == 1 {
-			return "1 minute"
-		}
-		return fmt.Sprintf("%d minutes", mins)
-	}
-	if d < 24*time.Hour {
-		hours := int(d.Hours())
-		if hours == 1 {
-			return "1 hour"
-		}
-		return fmt.Sprintf("%d hours", hours)
-	}
-	days := int(d.Hours() / 24)
-	if days == 1 {
-		return "1 day"
-	}
-	return fmt.Sprintf("%d days", days)
 }
 
 // Print prints warnings to the given writer.

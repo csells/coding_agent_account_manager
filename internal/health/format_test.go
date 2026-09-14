@@ -325,9 +325,9 @@ func TestFormatDurationNatural(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.expected, func(t *testing.T) {
-			got := formatDurationNatural(tt.duration)
+			got := FormatDurationNatural(tt.duration)
 			if got != tt.expected {
-				t.Errorf("formatDurationNatural(%v) = %q, want %q", tt.duration, got, tt.expected)
+				t.Errorf("FormatDurationNatural(%v) = %q, want %q", tt.duration, got, tt.expected)
 			}
 		})
 	}
