@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestHelpRenderer_RenderMarkdown(t *testing.T) {
@@ -232,6 +234,42 @@ func TestRenderHintBar_EmptyHints(t *testing.T) {
 	}
 }
 
+// The help screen teaches the dashboard's own keys: n logs in to a new
+// account (the capture → clear → login → capture ritual is what it does),
+// i opens the full card, ctrl+p the palette; E says plainly that the
+// bundle is not encrypted. It no longer claims Claude's identity cannot
+// be read, nor recommends the CLI ritual n replaced.
+func TestHelp_TeachesNNotTheRitual(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	m := New()
+	m.width, m.height = 120, 60
+	m.state = stateHelp
+	view := ansi.Strip(m.View())
+	for _, want := range []string{
+		"Log in to a new account",
+		"Full account card",
+		"ctrl+p",
+		"Command palette",
+		"press n",
+		"not encrypted",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("help lacks %q:\n%s", want, view)
+		}
+	}
+	for _, stale := range []string{
+		"Email/account ID not available",
+		"auto-YYYYMMDD",
+		"backup",
+		"encrypted bundle",
+		"Recommended Workflow",
+	} {
+		if strings.Contains(view, stale) {
+			t.Errorf("help still says %q:\n%s", stale, view)
+		}
+	}
+}
+
 func TestMainHelpMarkdown(t *testing.T) {
 	markdown := MainHelpMarkdown()
 
@@ -244,7 +282,7 @@ func TestMainHelpMarkdown(t *testing.T) {
 		"# caam",
 		"## Keyboard Shortcuts",
 		"Navigation",
-		"Profile Actions",
+		"Account Actions",
 		"Health Status Indicators",
 		"Smart Profile Features",
 		"Press any key to return",
