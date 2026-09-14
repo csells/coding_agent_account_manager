@@ -52,12 +52,17 @@ type AgyFetcher struct {
 	loadURL     string // Overridable for testing
 	userInfoURL string // Overridable for testing
 
-	// The Code Assist project is a property of the account, so the last
-	// answer is reused while the same token keeps being presented.
-	mu              sync.Mutex
-	projectToken    string
-	projectForToken string
+	// The Code Assist project is a property of the account, so the answer
+	// is reused while the same token keeps being presented — per token,
+	// since one fetcher serves every agy account and they are fetched in
+	// parallel.
+	mu       sync.Mutex
+	projects map[string]string // access token -> Code Assist project
 }
+
+// agyProjectCacheSize bounds the project cache; past it the cache starts
+// over, one loadCodeAssist per account being the cost.
+const agyProjectCacheSize = 16
 
 // NewAgyFetcher creates a new Antigravity usage fetcher.
 func NewAgyFetcher() *AgyFetcher {
@@ -137,12 +142,11 @@ func (f *AgyFetcher) Fetch(ctx context.Context, accessToken string) (*UsageInfo,
 // for as long as the same access token is presented.
 func (f *AgyFetcher) codeAssistProject(ctx context.Context, accessToken string) (string, error) {
 	f.mu.Lock()
-	if f.projectToken == accessToken && f.projectForToken != "" {
-		project := f.projectForToken
-		f.mu.Unlock()
+	project, cached := f.projects[accessToken]
+	f.mu.Unlock()
+	if cached {
 		return project, nil
 	}
-	f.mu.Unlock()
 
 	status, body, err := f.post(ctx, f.resolveLoadURL(), accessToken, agyClientMetadata)
 	if err != nil {
@@ -151,13 +155,16 @@ func (f *AgyFetcher) codeAssistProject(ctx context.Context, accessToken string) 
 	if err := agyStatusError(status, body); err != nil {
 		return "", err
 	}
-	project := agyProjectOf(body)
+	project = agyProjectOf(body)
 	if project == "" {
 		return "", fmt.Errorf("no Code Assist project on this account: Google has not onboarded it yet" + agyRefreshHint)
 	}
 
 	f.mu.Lock()
-	f.projectToken, f.projectForToken = accessToken, project
+	if f.projects == nil || len(f.projects) >= agyProjectCacheSize {
+		f.projects = make(map[string]string)
+	}
+	f.projects[accessToken] = project
 	f.mu.Unlock()
 	return project, nil
 }
