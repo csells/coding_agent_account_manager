@@ -350,10 +350,10 @@ func TestNewAccount_ClearsTheVaultedLiveCredentialBeforeTheLogin(t *testing.T) {
 	}
 }
 
-// A live credential caam cannot match to a vault profile is not cleared:
-// clearing it would lose an account for good. The login then replaces it,
-// which is what the user asked for.
-func TestNewAccount_LeavesAnUnknownLiveCredentialAlone(t *testing.T) {
+// A live credential caam cannot match to a vault profile is somebody's
+// session: it is filed as a backup and then cleared, so it is neither lost
+// nor left for the login to revoke.
+func TestNewAccount_FilesAnUnknownLiveCredentialBeforeTheLogin(t *testing.T) {
 	codexHome := t.TempDir()
 	t.Setenv("CODEX_HOME", codexHome)
 	authPath := filepath.Join(codexHome, "auth.json")
@@ -370,8 +370,19 @@ func TestNewAccount_LeavesAnUnknownLiveCredentialAlone(t *testing.T) {
 	if cmd == nil {
 		t.Fatalf("the login should start: status=%q", m.statusMsg)
 	}
-	if _, err := os.Stat(authPath); err != nil {
-		t.Fatalf("an unvaulted live credential must survive until the login replaces it: %v", err)
+	if _, err := os.Stat(authPath); !os.IsNotExist(err) {
+		t.Fatalf("the live credential should be cleared once filed (err=%v)", err)
+	}
+	profiles, _ := authfile.NewVault(m.vaultPath).List("codex")
+	saved := false
+	for _, p := range profiles {
+		data, _ := os.ReadFile(filepath.Join(m.vaultPath, "codex", p, "auth.json"))
+		if strings.Contains(string(data), "SYNTHETIC-X") {
+			saved = true
+		}
+	}
+	if !saved {
+		t.Fatalf("the stranger's credential should be in the vault: %v", profiles)
 	}
 }
 

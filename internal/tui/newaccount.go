@@ -11,6 +11,7 @@ import (
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 )
 
 // The `n` key logs a NEW account into the selected provider without leaving
@@ -221,27 +222,15 @@ func (m Model) startNewAccountLogin(provider string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// The login will replace the live credential. Whatever account holds
-	// it now goes back into the vault first, newest tokens and all — and
-	// then leaves the machine. A tool's login is a logout first: Codex
-	// revokes the session it finds (its refresh-token family with it, so
-	// the vault copy would die too), and the others may. A login that
-	// finds nothing has nothing to revoke. Only a credential whose account
-	// is in the vault is cleared; an unknown one stays, since clearing it
-	// would lose it for good.
+	// A login is a logout first (docs/ACCOUNT_SWITCHER.md §2): the
+	// shared PrepareLogin vaults the signed-in account with its newest
+	// tokens and clears the live credential, so the agent's login has
+	// nothing to revoke. A failure means the login is not run.
 	if fileSet, ok := authFileSetForProvider(provider); ok {
-		vault := authfile.NewVault(m.vaultPath)
-		if active, _ := vault.ActiveProfile(fileSet); active != "" {
-			if err := m.captureLive(provider, active); err != nil {
-				m.setNotice(provider, active, fmt.Sprintf("Not starting a login: the active account %s could not be re-captured first (%v)", active, err), true)
-				m.showMessage(StatusError, "Login not started", "The signed-in account %s could not be re-captured first: %v. Its newest tokens would be lost, so the login was not run.", active, err)
-				return m, nil
-			}
-			if err := authfile.ClearAuthFiles(fileSet); err != nil {
-				m.setNotice(provider, active, fmt.Sprintf("Not starting a login: %s is in the vault but its live credential could not be cleared (%v); the login would revoke it", active, err), true)
-				m.showMessage(StatusError, "Login not started", "%s is in the vault, but its live credential could not be cleared (%v). The login would have revoked it, so it was not run.", active, err)
-				return m, nil
-			}
+		if _, err := switcher.PrepareLogin(authfile.NewVault(m.vaultPath), fileSet); err != nil {
+			m.setNotice(provider, "", err.Error(), true)
+			m.showMessage(StatusError, "Login not started", "%v", err)
+			return m, nil
 		}
 	}
 
@@ -277,9 +266,15 @@ func (m Model) newAccountIdentified(msg newAccountIdentifiedMsg) (tea.Model, tea
 	if msg.name == "" {
 		return m.openNameDialog(msg.provider)
 	}
-	if err := m.captureLive(msg.provider, msg.name); err != nil {
-		m.setNotice(msg.provider, msg.name, "Logged in as "+msg.name+", but capturing it failed: "+err.Error(), true)
-		m.showMessage(StatusError, "Capture failed", "Logged in as %s, but capturing it failed: %v", msg.name, err)
+	fileSet, _ := authFileSetForProvider(msg.provider)
+	provider := msg.provider
+	_, err := switcher.FinishLogin(context.Background(), authfile.NewVault(m.vaultPath), fileSet, nil, switcher.LoginOptions{
+		Identity: func(context.Context) string { return msg.name },
+		Capture:  func(name string) error { return m.captureLive(provider, name) },
+	})
+	if err != nil {
+		m.setNotice(msg.provider, msg.name, err.Error(), true)
+		m.showMessage(StatusError, "Capture failed", "%v", err)
 		return m, nil
 	}
 	logLoginEvent(msg.provider, msg.name)
