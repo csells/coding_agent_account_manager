@@ -1226,19 +1226,31 @@ type lsProfile struct {
 // lsToolOrder lists the tools that have profiles in the dashboard strip's
 // order (provider.DisplayOrder), then any the strip does not know, by name.
 func lsToolOrder(allProfiles map[string][]string) []string {
-	seen := make(map[string]bool, len(allProfiles))
+	ids := make([]string, 0, len(allProfiles))
+	for tool := range allProfiles {
+		ids = append(ids, tool)
+	}
+	return toolsInDisplayOrder(ids)
+}
+
+// toolsInDisplayOrder orders tool ids as the dashboard strip does
+// (provider.DisplayOrder), then any the strip does not know, by name. It
+// is the one order caam lists tools in: ls, which, status.
+func toolsInDisplayOrder(ids []string) []string {
+	present := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		present[id] = true
+	}
 	var out []string
 	for _, tool := range provider.DisplayOrder() {
-		if _, ok := allProfiles[tool]; ok {
+		if present[tool] {
 			out = append(out, tool)
-			seen[tool] = true
+			delete(present, tool)
 		}
 	}
 	var rest []string
-	for tool := range allProfiles {
-		if !seen[tool] {
-			rest = append(rest, tool)
-		}
+	for tool := range present {
+		rest = append(rest, tool)
 	}
 	sort.Strings(rest)
 	return append(out, rest...)
