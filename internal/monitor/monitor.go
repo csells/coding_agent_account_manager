@@ -184,6 +184,10 @@ func (m *Monitor) Refresh(ctx context.Context) error {
 	var wg sync.WaitGroup
 	resultsCh := make(chan providerResult, len(m.providers))
 
+	// activeNames is each provider's active profile, asked of the hook
+	// once: its row reads the live credential, and is starred afterwards.
+	activeNames := make(map[string]string, len(m.providers))
+
 	for _, provider := range m.providers {
 		profiles := profilesByProvider[provider]
 		if len(profiles) == 0 {
@@ -193,6 +197,7 @@ func (m *Monitor) Refresh(ctx context.Context) error {
 		active := ""
 		if m.activeProfile != nil {
 			active = m.activeProfile(provider)
+			activeNames[provider] = active
 		}
 
 		tokens := make(map[string]string)
@@ -200,11 +205,16 @@ func (m *Monitor) Refresh(ctx context.Context) error {
 			if authfile.IsSystemProfile(name) {
 				continue
 			}
-			token, err := m.readAccessToken(provider, name)
+			// The active profile's row is built from the credential the
+			// tool has in force when the hook can read it; every other
+			// row, and the active one when it cannot, from the vault copy.
+			live, ok := "", false
 			if name == active && m.liveCredential != nil {
-				if live, ok := m.liveCredential(provider, name); ok && live != "" {
-					token, err = live, nil
-				}
+				live, ok = m.liveCredential(provider, name)
+			}
+			token, err := live, error(nil)
+			if !ok || live == "" {
+				token, err = m.readAccessToken(provider, name)
 			}
 			if err != nil {
 				state.Profiles[profileKey(provider, name)] = m.buildProfileState(provider, name, &usage.UsageInfo{
@@ -260,13 +270,12 @@ func (m *Monitor) Refresh(ctx context.Context) error {
 		}
 	}
 
-	if m.activeProfile != nil {
-		for _, provider := range m.providers {
-			if name := m.activeProfile(provider); name != "" {
-				if p := state.Profiles[profileKey(provider, name)]; p != nil {
-					p.Active = true
-				}
-			}
+	for provider, name := range activeNames {
+		if name == "" {
+			continue
+		}
+		if p := state.Profiles[profileKey(provider, name)]; p != nil {
+			p.Active = true
 		}
 	}
 
