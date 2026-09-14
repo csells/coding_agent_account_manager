@@ -427,3 +427,45 @@ func parseSQLiteTime(s string) (time.Time, error) {
 	}
 	return time.Time{}, fmt.Errorf("unsupported time format")
 }
+
+// LastUsed returns, per provider and profile, the time of the most recent
+// activate, deactivate, switch or login event — the last moment the
+// account is known to have been the one in use. Profiles with no such
+// event are absent from the map.
+func (d *DB) LastUsed() (map[string]map[string]time.Time, error) {
+	if d == nil || d.conn == nil {
+		return nil, fmt.Errorf("db is not open")
+	}
+	rows, err := d.conn.Query(
+		`SELECT provider, profile_name, MAX(timestamp)
+		   FROM activity_log
+		  WHERE event_type IN (?, ?, ?, ?)
+		    AND profile_name != ''
+		  GROUP BY provider, profile_name`,
+		EventActivate, EventDeactivate, EventSwitch, EventLogin,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query last used: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]map[string]time.Time)
+	for rows.Next() {
+		var provider, profile, tsStr string
+		if err := rows.Scan(&provider, &profile, &tsStr); err != nil {
+			return nil, fmt.Errorf("scan last used: %w", err)
+		}
+		ts, err := parseSQLiteTime(tsStr)
+		if err != nil {
+			continue
+		}
+		if out[provider] == nil {
+			out[provider] = make(map[string]time.Time)
+		}
+		out[provider][profile] = ts
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate last used: %w", err)
+	}
+	return out, nil
+}

@@ -540,3 +540,21 @@ func TestVerticalLayout_ExpansionListsTheWindowsWithoutAColumn(t *testing.T) {
 		}
 	}
 }
+
+// LAST USED comes from the activity log's last use of the account, carried
+// on the vault metadata; upstream's isolated-profile store, which nothing
+// writes, is only consulted first.
+func TestAccountsPane_LastUsedComesFromTheActivityLog(t *testing.T) {
+	m := modelWithLimits(t, 170, 40)
+	m.vaultMeta = map[string]map[string]vaultProfileMeta{
+		"claude": {"a@example.com": {LastUsed: time.Now().Add(-3 * time.Hour)}},
+	}
+	m.syncProfilesPanel()
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "3h ago") {
+		t.Fatalf("a@example.com was used 3h ago:\n%s", view)
+	}
+	if !strings.Contains(view, "never") {
+		t.Fatalf("b@example.com has no use on record and should say never:\n%s", view)
+	}
+}

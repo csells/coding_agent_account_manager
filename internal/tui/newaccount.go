@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
+	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
 )
 
 // The `n` key logs a NEW account into the selected provider without leaving
@@ -275,6 +276,7 @@ func (m Model) newAccountIdentified(msg newAccountIdentifiedMsg) (tea.Model, tea
 		m.statusMsg = "Capture failed: " + err.Error()
 		return m, m.addToast(m.statusMsg, StatusError)
 	}
+	logLoginEvent(msg.provider, msg.name)
 	m.selectedProfileName = msg.name
 	delete(m.limits, limitsKey(msg.provider, msg.name))
 	m.setNotice(msg.provider, msg.name, "Logged in and captured "+msg.name, false)
@@ -293,4 +295,22 @@ func (m Model) captureLive(provider, name string) error {
 		return fmt.Errorf("unknown provider %s", provider)
 	}
 	return authfile.NewVault(m.vaultPath).Backup(fileSet, name)
+}
+
+// logLoginEvent records the login in the activity log, which is where the
+// LAST USED column reads from; a fresh login is the account's first use.
+// The log is optional, so a missing database is not an error.
+func logLoginEvent(provider, name string) {
+	db, err := caamdb.Open()
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	_ = db.LogEvent(caamdb.Event{
+		Timestamp:   time.Now(),
+		Type:        caamdb.EventLogin,
+		Provider:    provider,
+		ProfileName: name,
+		Details:     map[string]any{"source": "tui"},
+	})
 }

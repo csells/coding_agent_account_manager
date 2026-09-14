@@ -221,3 +221,44 @@ func TestDB_ProfileStats_LastErrorIsMonotonic(t *testing.T) {
 		t.Fatalf("LastError = %s, want %s", stats.LastError.Format(time.RFC3339Nano), newer.Format(time.RFC3339Nano))
 	}
 }
+
+func TestDB_LastUsed_IsTheLatestUseEventPerProfile(t *testing.T) {
+	d, err := OpenAt(t.TempDir() + "/caam.db")
+	if err != nil {
+		t.Fatalf("OpenAt() error = %v", err)
+	}
+	defer d.Close()
+
+	base := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	for _, ev := range []Event{
+		{Timestamp: base, Type: EventActivate, Provider: "claude", ProfileName: "a"},
+		{Timestamp: base.Add(time.Hour), Type: EventDeactivate, Provider: "claude", ProfileName: "a"},
+		{Timestamp: base.Add(time.Hour), Type: EventActivate, Provider: "claude", ProfileName: "b"},
+		{Timestamp: base.Add(2 * time.Hour), Type: EventLogin, Provider: "codex", ProfileName: "c"},
+		{Timestamp: base.Add(3 * time.Hour), Type: EventError, Provider: "codex", ProfileName: "c"},
+		{Timestamp: base.Add(4 * time.Hour), Type: EventRefresh, Provider: "codex", ProfileName: "d"},
+	} {
+		if err := d.LogEvent(ev); err != nil {
+			t.Fatalf("LogEvent(%+v) error = %v", ev, err)
+		}
+	}
+
+	got, err := d.LastUsed()
+	if err != nil {
+		t.Fatalf("LastUsed() error = %v", err)
+	}
+	want := map[string]map[string]time.Time{
+		"claude": {"a": base.Add(time.Hour), "b": base.Add(time.Hour)},
+		"codex":  {"c": base.Add(2 * time.Hour)},
+	}
+	for provider, profiles := range want {
+		for profile, ts := range profiles {
+			if !got[provider][profile].Equal(ts) {
+				t.Errorf("%s/%s = %v, want %v", provider, profile, got[provider][profile], ts)
+			}
+		}
+	}
+	if _, ok := got["codex"]["d"]; ok {
+		t.Errorf("a refresh is not a use; codex/d should be absent, got %v", got["codex"])
+	}
+}

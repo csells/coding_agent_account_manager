@@ -84,6 +84,9 @@ type Profile struct {
 type vaultProfileMeta struct {
 	Description string
 	Account     string
+	// LastUsed is the last time the activity log saw this account in use:
+	// switched to, switched away from, or logged in. Zero when never.
+	LastUsed time.Time
 	// NoCredential: the profile directory holds no file a credential can be
 	// read from, so activating it would install settings and no login.
 	NoCredential bool
@@ -561,7 +564,31 @@ func (m Model) loadProfiles() tea.Msg {
 		profiles[name] = ps
 	}
 
+	applyLastUsed(vaultMeta)
 	return profilesLoadedMsg{profiles: profiles, meta: meta, vaultMeta: vaultMeta, health: m.computeHealthMap(profiles)}
+}
+
+// applyLastUsed stamps each vault profile with the activity log's last use
+// of it. The log is optional (analytics off, no database yet): without it
+// every account simply stays "never".
+func applyLastUsed(vaultMeta map[string]map[string]vaultProfileMeta) {
+	db, err := caamdb.Open()
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	used, err := db.LastUsed()
+	if err != nil {
+		return
+	}
+	for provider, profiles := range vaultMeta {
+		for name, vm := range profiles {
+			if ts, ok := used[provider][name]; ok {
+				vm.LastUsed = ts
+				profiles[name] = vm
+			}
+		}
+	}
 }
 
 func authFileSetForProvider(provider string) (authfile.AuthFileSet, bool) {
@@ -2333,6 +2360,9 @@ func (m Model) buildProfileInfo(provider string, p Profile, projectDefault strin
 	}
 
 	vmeta := m.vaultMetaFor(provider, p.Name)
+	if lastUsed.IsZero() {
+		lastUsed = vmeta.LastUsed
+	}
 	if account == "" {
 		account = vmeta.Account
 	}
@@ -3474,6 +3504,7 @@ func (m Model) refreshProfiles(ctx refreshContext) tea.Cmd {
 			profiles[name] = ps
 		}
 
+		applyLastUsed(vaultMeta)
 		return profilesRefreshedMsg{profiles: profiles, meta: meta, vaultMeta: vaultMeta, health: m.computeHealthMap(profiles), ctx: ctx}
 	}
 }

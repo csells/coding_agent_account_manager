@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
 	"os/exec"
 	"strings"
 	"testing"
@@ -156,6 +157,16 @@ func TestNewAccount_IdentifiedAccountIsCapturedAndSelected(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatalf("the profile list should reload after the capture")
+	}
+	// The login is the account's first use on record.
+	db, err := caamdb.Open()
+	if err != nil {
+		t.Fatalf("open activity log: %v", err)
+	}
+	defer db.Close()
+	used, err := db.LastUsed()
+	if err != nil || used["claude"]["new@example.com"].IsZero() {
+		t.Fatalf("a captured login should be in the activity log: used=%v err=%v", used, err)
 	}
 }
 
