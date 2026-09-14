@@ -3,6 +3,7 @@ package monitor
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -119,27 +120,53 @@ func TestDashboard_ColumnsAreTheUnionOfWindowsInOrder(t *testing.T) {
 	}
 }
 
+// Every window is two columns: what is left under the window's name, and
+// the local clock it resets at under a RESETS column beside it.
 func TestDashboard_CellsShowPercentLeftAndLocalReset(t *testing.T) {
 	d, _ := newTestDashboard([]*MonitorState{stateWith(claudeProfile("chris", true), codexProfile("ops", true))}, nil)
 	load(t, d)
 	view := d.View()
 
-	for _, want := range []string{
-		"* claude/chris",
-		"82% left, resets 6:10 PM", // the 5-hour window resets today
-		"50% left, resets Tue 5:00 PM",
-		"10% left, resets Tue 5:00 PM", // Fable, per-model weekly
-		"* codex/ops",
-		"30% left, resets Sep 20 8:45 AM", // a week out: date, not weekday
-	} {
-		if !strings.Contains(view, want) {
-			t.Errorf("view lacks %q:\n%s", want, view)
+	wantRows := map[string][]string{
+		"PROFILE": {"PROFILE", "5-HOUR", "RESETS", "WEEKLY", "RESETS", "WEEKLY FABLE", "RESETS", "STATUS"},
+		// The 5-hour window resets today (clock only); Fable is the per-model
+		// weekly; a reset a week out shows the date, not the weekday.
+		"* claude/chris": {"* claude/chris", "82% left", "6:10 PM", "50% left", "Tue 5:00 PM", "10% left", "Tue 5:00 PM", "ok"},
+		"* codex/ops":    {"* codex/ops", "-", "-", "30% left", "Sep 20 8:45 AM", "-", "-", "ok"},
+	}
+	found := 0
+	for _, line := range strings.Split(view, "\n") {
+		fields := tableFields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if want, ok := wantRows[fields[0]]; ok {
+			found++
+			if strings.Join(fields, "|") != strings.Join(want, "|") {
+				t.Errorf("row %q fields = %q, want %q", fields[0], fields, want)
+			}
 		}
 	}
-	// No secrets, no "used" framing.
-	if strings.Contains(view, "used") {
-		t.Errorf("view talks about used, not left:\n%s", view)
+	if found != len(wantRows) {
+		t.Errorf("found %d of %d expected rows:\n%s", found, len(wantRows), view)
 	}
+	// No secrets, no "used" framing, no combined cell.
+	for _, gone := range []string{"used", ", resets "} {
+		if strings.Contains(view, gone) {
+			t.Errorf("view still says %q:\n%s", gone, view)
+		}
+	}
+}
+
+// tableFields splits a padded table line on its two-space-or-wider gaps.
+func tableFields(line string) []string {
+	var fields []string
+	for _, f := range regexp.MustCompile(`\s{2,}`).Split(strings.TrimSpace(line), -1) {
+		if f != "" {
+			fields = append(fields, f)
+		}
+	}
+	return fields
 }
 
 func TestDashboard_EnterConfirmsThenSwitchesAndMovesTheStar(t *testing.T) {
