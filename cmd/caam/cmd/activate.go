@@ -13,7 +13,6 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
-	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/refresh"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/rotation"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/stealth"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
@@ -453,20 +452,13 @@ func performSwitch(ctx context.Context, fileSet authfile.AuthFileSet, profileNam
 }
 
 // coreOptions completes switcher.Options with what the command layer
-// supplies to every switch: the token refresher (behind the core's one
-// gate), the health reader it decides with, and the vault. DB and Config
-// are the caller's; the core gates logging on Config.Analytics itself.
+// supplies to every switch: the vault. The refresh gate and the safety
+// config are the core's own defaults, the same on every path that
+// switches; DB is the caller's, and the core gates logging on
+// Config.Analytics itself.
 func coreOptions(o switcher.Options) switcher.Options {
 	if vault == nil {
 		vault = authfile.NewVault(authfile.DefaultVaultPath())
-	}
-	if o.Refresher == nil {
-		o.Refresher = switcher.RefresherFunc(func(ctx context.Context, tool, profile string) error {
-			return refresh.RefreshProfile(ctx, tool, profile, vault, healthStore)
-		})
-	}
-	if o.HealthOf == nil {
-		o.HealthOf = getProfileHealth
 	}
 	return o
 }

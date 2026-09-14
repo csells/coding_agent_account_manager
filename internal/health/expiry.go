@@ -18,6 +18,7 @@ import (
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/identity"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/keychain"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider/kimi"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/zcodecred"
 )
 
@@ -26,6 +27,29 @@ var ErrNoExpiry = errors.New("expiry not found in auth file")
 
 // ErrNoAuthFile indicates that the auth file does not exist.
 var ErrNoAuthFile = errors.New("auth file not found")
+
+// ParseVaultExpiry reads the expiry of the credential a vault profile
+// directory holds, using the tool's own parser and the file the vault keeps
+// for it. A tool caam has no expiry parser for is an error.
+func ParseVaultExpiry(tool, profileDir string) (*ExpiryInfo, error) {
+	switch tool {
+	case "claude":
+		return ParseClaudeExpiry(profileDir)
+	case "codex":
+		return ParseCodexExpiry(filepath.Join(profileDir, "auth.json"))
+	case "gemini":
+		return ParseGeminiExpiry(profileDir)
+	case "agy":
+		return ParseAgyExpiry(profileDir)
+	case "kimi":
+		return ParseKimiExpiry(filepath.Join(profileDir, "kimi-code.json"))
+	case "zcode":
+		return ParseZcodeExpiry(filepath.Join(profileDir, "credentials.json"))
+	case "grok":
+		return ParseGrokExpiry(filepath.Join(profileDir, "auth.json"))
+	}
+	return nil, fmt.Errorf("no expiry parser for %s", tool)
+}
 
 // ExpiryInfo contains parsed token expiry information.
 type ExpiryInfo struct {
@@ -891,12 +915,7 @@ func parseAgyTokenJSON(data []byte) (*ExpiryInfo, error) {
 // logged-out state and reports ErrNoAuthFile.
 func ParseKimiExpiry(authPath string) (*ExpiryInfo, error) {
 	if authPath == "" {
-		home := strings.TrimSpace(os.Getenv("KIMI_CODE_HOME"))
-		if home == "" {
-			homeDir, _ := os.UserHomeDir()
-			home = filepath.Join(homeDir, ".kimi-code")
-		}
-		authPath = filepath.Join(home, "credentials", "kimi-code.json")
+		authPath = kimi.CredentialsPath(kimi.Home())
 	}
 	data, err := os.ReadFile(authPath)
 	if err != nil {

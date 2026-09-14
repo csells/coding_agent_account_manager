@@ -1,41 +1,21 @@
-// Package handoff provides login handlers for PTY-based profile switching.
-// It enables the smart session handoff feature where we can inject login
-// commands into a running CLI session to switch accounts.
+// Package handoff names, per provider, how a switched account is put to use
+// in a running session: the flags that reopen the tool's most recent
+// conversation. The smart runner ends the session after a switch and
+// respawns the tool with them; nothing is typed into a login.
 package handoff
 
 import (
 	"sync"
 )
 
-// LoginHandler defines the interface for provider-specific login handling.
-// Each provider (Claude, Codex, Gemini) has different login flows and
-// success/failure patterns.
+// LoginHandler is a provider's handoff knowledge.
 type LoginHandler interface {
 	// Provider returns the provider ID this handler supports (e.g., "claude").
 	Provider() string
 
-	// LoginCommand returns the command to trigger login (e.g., "/login").
-	LoginCommand() string
-
 	// ResumeArgs are the flags that reopen the tool's most recent session,
 	// so a switched account is in use at once with the conversation kept.
 	ResumeArgs() []string
-
-	// IsLoginInProgress returns true if the output indicates
-	// a login flow has started (e.g., waiting for browser auth).
-	IsLoginInProgress(output string) bool
-
-	// IsLoginComplete returns true if the output indicates
-	// the login succeeded.
-	IsLoginComplete(output string) bool
-
-	// IsLoginFailed returns true if the output indicates
-	// login failed, along with an error message extracted from output.
-	IsLoginFailed(output string) (failed bool, message string)
-
-	// ExpectedPatterns returns regex patterns for common login states.
-	// Keys: "progress", "success", "failure"
-	ExpectedPatterns() map[string]string
 }
 
 // Registry manages provider-to-handler mappings.
@@ -97,56 +77,4 @@ var DefaultRegistry = NewRegistry()
 // GetHandler returns the handler for a provider from the default registry.
 func GetHandler(provider string) LoginHandler {
 	return DefaultRegistry.Get(provider)
-}
-
-// LoginState represents the current state of a login attempt.
-type LoginState int
-
-const (
-	// LoginStateUnknown indicates we don't know the login state.
-	LoginStateUnknown LoginState = iota
-	// LoginStateIdle indicates no login is in progress.
-	LoginStateIdle
-	// LoginStateInProgress indicates login is waiting for user action.
-	LoginStateInProgress
-	// LoginStateComplete indicates login succeeded.
-	LoginStateComplete
-	// LoginStateFailed indicates login failed.
-	LoginStateFailed
-)
-
-// String returns a human-readable state name.
-func (s LoginState) String() string {
-	switch s {
-	case LoginStateIdle:
-		return "idle"
-	case LoginStateInProgress:
-		return "in_progress"
-	case LoginStateComplete:
-		return "complete"
-	case LoginStateFailed:
-		return "failed"
-	default:
-		return "unknown"
-	}
-}
-
-// DetermineState analyzes output using a handler to determine login state.
-func DetermineState(handler LoginHandler, output string) LoginState {
-	if handler == nil {
-		return LoginStateUnknown
-	}
-
-	// Check in order of specificity
-	if failed, _ := handler.IsLoginFailed(output); failed {
-		return LoginStateFailed
-	}
-	if handler.IsLoginComplete(output) {
-		return LoginStateComplete
-	}
-	if handler.IsLoginInProgress(output) {
-		return LoginStateInProgress
-	}
-
-	return LoginStateIdle
 }

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 )
 
 // TestCooldownBasics tests basic cooldown functionality.
@@ -1160,7 +1162,7 @@ func TestCoordinator_FallsBackToLoginWhenNoOtherAccount(t *testing.T) {
 	client := &fakePaneClient{panes: []Pane{{PaneID: 1, Title: "claude-code"}}}
 	cfg := DefaultConfig()
 	cfg.LoginCooldown = 10 * time.Millisecond
-	cfg.Recover = func(ctx context.Context, paneID int) (string, error) { return "", ErrNoOtherAccount }
+	cfg.Recover = func(ctx context.Context, paneID int) (string, error) { return "", switcher.ErrNoOtherAccount }
 	captured := 0
 	cfg.BeforeLogin = func(ctx context.Context, paneID int) error { captured++; return nil }
 	coord := New(cfg)

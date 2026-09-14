@@ -365,9 +365,7 @@ func TestRefreshSingle_KimiUpdatesTheVaultToken(t *testing.T) {
 		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600,"token_type":"Bearer"}`))
 	}))
 	defer ts.Close()
-	oldTokenURL := refresh.KimiTokenURL
-	refresh.KimiTokenURL = ts.URL + refresh.KimiTokenPath
-	t.Cleanup(func() { refresh.KimiTokenURL = oldTokenURL })
+	t.Setenv("KIMI_CODE_OAUTH_HOST", ts.URL)
 
 	// Time left: skipped, nothing spent.
 	writeKimi(time.Now().Add(2 * time.Hour).Unix())

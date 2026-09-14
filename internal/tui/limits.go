@@ -41,10 +41,12 @@ type Hooks struct {
 	Capture func(provider, name string) error
 }
 
-// limitsTTL is how long a fetched set of windows is shown before the
-// selection landing on that profile again triggers a new fetch. Arrowing
-// through the list therefore costs one request per profile per minute at
-// most.
+// limitsTTL is how long a fetched set of windows — or a failed fetch — is
+// left alone before the selection landing on that profile again triggers
+// a new fetch. Arrowing through the list therefore costs one request per
+// profile per minute at most, and a profile whose fetch fails (expired
+// auth, a 403, a 429) is not retried on every keypress — a 429 is exactly
+// the answer hammering earns.
 const limitsTTL = 60 * time.Second
 
 // limitsEntry is the cached result for one provider/profile.
@@ -75,15 +77,8 @@ type limitsLoadedMsg struct {
 
 func limitsKey(provider, profile string) string { return provider + "/" + profile }
 
-// limitsErrTTL is how long a failed fetch is left alone before the
-// selection landing on that profile again retries it. Without it a
-// profile whose fetch fails (expired auth, a 403, a 429) was retried on
-// every keypress — and a 429 is exactly the answer hammering earns.
-const limitsErrTTL = limitsTTL
-
 // limitsFetchFor starts a fetch for one profile when the cached entry is
-// missing or has aged past its TTL (limitsTTL for a result, limitsErrTTL
-// for a failure); nil otherwise.
+// missing or has aged past limitsTTL; nil otherwise.
 func (m *Model) limitsFetchFor(provider, profile string) tea.Cmd {
 	if m.hooks.Limits == nil || provider == "" || profile == "" {
 		return nil
@@ -93,14 +88,8 @@ func (m *Model) limitsFetchFor(provider, profile string) tea.Cmd {
 	}
 	key := limitsKey(provider, profile)
 	e, ok := m.limits[key]
-	if ok {
-		ttl := limitsTTL
-		if e.err != nil {
-			ttl = limitsErrTTL
-		}
-		if e.loading || time.Since(e.at) < ttl {
-			return nil
-		}
+	if ok && (e.loading || time.Since(e.at) < limitsTTL) {
+		return nil
 	}
 	e.loading = true
 	m.limits[key] = e

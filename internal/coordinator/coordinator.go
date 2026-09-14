@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/handoff"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 	"github.com/google/uuid"
 )
 
@@ -100,8 +102,8 @@ type Config struct {
 	// Recover switches the pane's tool to another vaulted account (through
 	// the switch core) and returns the command that resumes the session on
 	// its history; the coordinator then ends the session and types it.
-	// ErrNoOtherAccount means there is nothing to switch to, and the login
-	// path below is used instead.
+	// switcher.ErrNoOtherAccount means there is nothing to switch to, and
+	// the login path below is used instead.
 	Recover func(ctx context.Context, paneID int) (resume string, err error)
 	// ResumeDelay is how long to wait between ending the session (/exit)
 	// and typing the resume command.
@@ -123,7 +125,7 @@ func DefaultConfig() Config {
 		ResumePrompt:               "proceed. Reread AGENTS.md so it's still fresh in your mind. Use ultrathink.\n",
 		LocalAgentURL:              "http://localhost:7890",
 		LoginCooldown:              5 * time.Second,
-		ResumeDelay:                1500 * time.Millisecond,
+		ResumeDelay:                handoff.DefaultResumeDelay,
 		MethodSelectCooldown:       2 * time.Second,
 		ResumeCooldown:             10 * time.Second,
 		CompactionReminderEnabled:  false, // Opt-in feature
@@ -132,10 +134,6 @@ func DefaultConfig() Config {
 		CompactionReminderRegex:    nil, // Use default Patterns.CompactingBanner
 	}
 }
-
-// ErrNoOtherAccount is what Recover returns when the tool has no other
-// vaulted account to switch to.
-var ErrNoOtherAccount = errors.New("no other account to switch to")
 
 // AuthRequest represents a pending authentication request.
 type AuthRequest struct {
@@ -465,25 +463,17 @@ func (c *Coordinator) handleIdleState(ctx context.Context, tracker *PaneTracker,
 			resume, err := c.config.Recover(ctx, tracker.PaneID)
 			switch {
 			case err == nil:
-				if sendErr := c.paneClient.SendText(ctx, tracker.PaneID, "/exit\n", true); sendErr != nil {
-					c.logger.Error("could not end the session for a resume", "pane_id", tracker.PaneID, "error", sendErr, "action", "resume_failed")
-					return
-				}
-				if c.config.ResumeDelay > 0 {
-					select {
-					case <-time.After(c.config.ResumeDelay):
-					case <-ctx.Done():
-						return
+				send := func(text string) error { return c.paneClient.SendText(ctx, tracker.PaneID, text, true) }
+				if resumeErr := handoff.ResumeInPane(ctx, send, resume, c.config.ResumeDelay); resumeErr != nil {
+					if ctx.Err() == nil {
+						c.logger.Error("could not resume the session after the switch", "pane_id", tracker.PaneID, "error", resumeErr, "action", "resume_failed")
 					}
-				}
-				if sendErr := c.paneClient.SendText(ctx, tracker.PaneID, resume+"\n", true); sendErr != nil {
-					c.logger.Error("could not resume the session after the switch", "pane_id", tracker.PaneID, "error", sendErr, "action", "resume_failed")
 					return
 				}
 				c.logger.Info("switched the account under the pane and resumed it", "pane_id", tracker.PaneID, "action", "switch_resume")
 				tracker.SetCooldown("login", c.config.LoginCooldown)
 				return
-			case errors.Is(err, ErrNoOtherAccount):
+			case errors.Is(err, switcher.ErrNoOtherAccount):
 				// fall through to the login path
 			default:
 				c.logger.Error("switch failed; not injecting a login either", "pane_id", tracker.PaneID, "error", err, "action", "switch_failed")
