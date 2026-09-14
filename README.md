@@ -762,10 +762,10 @@ and lets you switch without leaving the screen:
 caam monitor  refreshed 14:16:59, next 14:17:59
 
 PROFILE                                 5-HOUR    RESETS   WEEKLY    RESETS          WEEKLY FABLE  RESETS       STATUS
-* claude/chris@gascity.com              70% left  6:10 PM  47% left  Tue 5:00 PM     6% left       Tue 5:00 PM  ok
-  claude/csells@sellsbrothers.com       -         -        -         -               -             -            no credential captured for this profile...
-* codex/ops+chris-claude-1@gascity.com  -         -        30% left  Sep 20 8:45 AM  -             -            ok
-* zcode/chris@gascity.com               -         -        -         -               -             -            no Z.ai coding plan on this account
+* claude/alice@example.com              70% left  6:10 PM  47% left  Tue 5:00 PM     6% left       Tue 5:00 PM  ok
+  claude/bob.builders@example.com       -         -        -         -               -             -            no credential captured for this profile...
+* codex/ops+alice-claude-1@example.com  -         -        30% left  Sep 20 8:45 AM  -             -            ok
+* zcode/alice@example.com               -         -        -         -               -             -            no Z.ai coding plan on this account
 
 up/down select   enter switch   r refresh   q quit     * = active account
 ```
@@ -816,15 +816,15 @@ again, so an agent with many accounts is one list to scroll through:
 ```
 ╭─ Agents (8) ──────────────────────────────────────────────────────────────────────────────────╮
 │ ▸ Claude (2)          Codex (1)             Antigravity (1)                                   │
-│ ● chris@gascity.com   ● ops+chris-claude-1… ● chris@gascity.com                           5 › │
+│ ● alice@example.com   ● ops+alice-claude-1… ● alice@example.com                           5 › │
 │ 5h 53% · wk 44% · …   wk 30%                auth expired (re-login)                           │
 ╰───────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Claude accounts ──────────────────────────────────────────────────────── limits as of 17:08 ─╮
 │ NAME                STATUS     5-HOUR   RESETS  WEEKLY   RESETS      WEEKLY FABLE RESETS      │
-│   chris@gascity.com 🟢 1h left 53% left 6:10 PM 44% left Tue 5:00 PM 0% left      Tue 5:00 PM │
-│ ● csells@sellsbro…  🟢 6h left 88% left 8:50 PM 78% left Wed 5:00 PM 64% left     Wed 5:00 PM │
+│   alice@example.com 🟢 1h left 53% left 6:10 PM 44% left Tue 5:00 PM 0% left      Tue 5:00 PM │
+│ ● bob.builders@ex…  🟢 6h left 88% left 8:50 PM 78% left Wed 5:00 PM 64% left     Wed 5:00 PM │
 │   ├─ oauth · max · Healthy · token 5h47m                                                      │
-│   ├─ ~/vault/claude/csells@sellsbrothers.com                                                  │
+│   ├─ ~/vault/claude/bob.builders@example.com                                                  │
 │   └─ enter switch   r refresh   e edit   o browser   d delete   i card                        │
 ╰───────────────────────────────────────────────────────────────────────────────────────────────╯
 ```

@@ -12,7 +12,7 @@ import (
 // the pane. The padded line is exactly the requested width.
 func TestPadStyledIgnoresTheStyleFrame(t *testing.T) {
 	framed := lipgloss.NewStyle().PaddingLeft(1).MarginRight(2).Background(lipgloss.Color("#dbeafe"))
-	for _, text := range []string{"", "x", "● csells@sellsbrothers.com", "▸ Kimi Code (0)"} {
+	for _, text := range []string{"", "x", "● bob.builders@example.com", "▸ Kimi Code (0)"} {
 		line := framed.Render(text)
 		if got := lipgloss.Width(padStyled(line, 30, framed.GetBackground())); got != 30 {
 			t.Errorf("padStyled(%q) = %d wide, want 30", text, got)
