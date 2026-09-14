@@ -18,6 +18,7 @@ import (
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/identity"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/keychain"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider/kimi"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/zcodecred"
 )
 
@@ -914,12 +915,7 @@ func parseAgyTokenJSON(data []byte) (*ExpiryInfo, error) {
 // logged-out state and reports ErrNoAuthFile.
 func ParseKimiExpiry(authPath string) (*ExpiryInfo, error) {
 	if authPath == "" {
-		home := strings.TrimSpace(os.Getenv("KIMI_CODE_HOME"))
-		if home == "" {
-			homeDir, _ := os.UserHomeDir()
-			home = filepath.Join(homeDir, ".kimi-code")
-		}
-		authPath = filepath.Join(home, "credentials", "kimi-code.json")
+		authPath = kimi.CredentialsPath(kimi.Home())
 	}
 	data, err := os.ReadFile(authPath)
 	if err != nil {
