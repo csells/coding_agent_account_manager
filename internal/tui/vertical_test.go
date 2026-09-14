@@ -558,3 +558,29 @@ func TestAccountsPane_LastUsedComesFromTheActivityLog(t *testing.T) {
 		t.Fatalf("b@example.com has no use on record and should say never:\n%s", view)
 	}
 }
+
+// TestDetailCard_LastUsedMatchesTheRow: the i card read only the isolated
+// store, so it said "never" under a row that said "3h ago". It falls back
+// to the activity log's time like the row.
+func TestDetailCard_LastUsedMatchesTheRow(t *testing.T) {
+	m := modelWithLimits(t, 170, 40)
+	used := time.Now().Add(-3 * time.Hour)
+	m.vaultMeta = map[string]map[string]vaultProfileMeta{
+		"claude": {"a@example.com": {LastUsed: used}},
+	}
+	m.syncProfilesPanel()
+
+	row := m.buildProfileInfo("claude", Profile{Name: "a@example.com"}, "")
+	if !row.LastUsed.Equal(used) {
+		t.Fatalf("row LastUsed = %v, want %v", row.LastUsed, used)
+	}
+
+	m.syncDetailPanel()
+	card := m.detailPanel.profile
+	if card == nil || card.Name != "a@example.com" {
+		t.Fatalf("detail card should describe the selected account, got %+v", card)
+	}
+	if !card.LastUsedAt.Equal(row.LastUsed) {
+		t.Errorf("card LastUsedAt = %v, row says %v", card.LastUsedAt, row.LastUsed)
+	}
+}

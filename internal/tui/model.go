@@ -2648,6 +2648,11 @@ func (m Model) syncDetailPanel() {
 	if description == "" {
 		description = vmeta.Description
 	}
+	// The activity log's last use, as the row shows it; the isolated store
+	// above is consulted first and is empty for vault profiles.
+	if lastUsedAt.IsZero() {
+		lastUsedAt = vmeta.LastUsed
+	}
 
 	if path == "" {
 		path = m.vaultPathFor(provider, profileName)
