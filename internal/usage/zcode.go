@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -151,51 +150,18 @@ func zcodeTime(v any) time.Time {
 // Fetch retrieves usage data from zcode's billing API. accessToken is the
 // zcode session JWT.
 func (f *ZcodeFetcher) Fetch(ctx context.Context, accessToken string) (*UsageInfo, error) {
-	if accessToken == "" {
-		return nil, fmt.Errorf("access token is empty")
-	}
-	req, err := http.NewRequestWithContext(ctx, "GET", f.base()+ZcodeBillingPath, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", ZcodeUserAgent)
-
-	resp, err := f.client.Do(req)
-	if err != nil {
-		return &UsageInfo{
-			Provider:  "zcode",
-			FetchedAt: time.Now(),
-			Error:     fmt.Sprintf("request failed: %v", err),
-		}, err
-	}
-	defer resp.Body.Close()
-
-	info := &UsageInfo{
-		Provider:  "zcode",
-		Source:    SourceAPI,
-		FetchedAt: time.Now(),
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		info.Error = fmt.Sprintf("read response: %v", err)
-		return info, fmt.Errorf("read response: %w", err)
-	}
-	switch resp.StatusCode {
-	case http.StatusOK:
-	case http.StatusUnauthorized, http.StatusForbidden:
-		info.Error = "unauthorized: token expired or invalid; run `zcode login`, then retry"
-		return info, fmt.Errorf("unauthorized: status %d", resp.StatusCode)
-	default:
-		info.Error = fmt.Sprintf("API error: status %d", resp.StatusCode)
-		return info, fmt.Errorf("API error: status %d", resp.StatusCode)
-	}
-
 	var billing zcodeBillingResponse
-	if err := json.Unmarshal(body, &billing); err != nil {
-		info.Error = fmt.Sprintf("decode error: %v", err)
-		return info, fmt.Errorf("decode response: %w", err)
+	info, err := getJSON(ctx, f.client, jsonRequest{
+		provider: "zcode",
+		url:      f.base() + ZcodeBillingPath,
+		token:    accessToken,
+		headers:  func(req *http.Request) { req.Header.Set("User-Agent", ZcodeUserAgent) },
+		unauthorized: func(string) string {
+			return "unauthorized: token expired or invalid; run `zcode login`, then retry"
+		},
+	}, &billing)
+	if err != nil {
+		return info, err
 	}
 	if billing.Code != 0 {
 		info.Error = fmt.Sprintf("API error: code %d %s", billing.Code, strings.TrimSpace(billing.Msg))

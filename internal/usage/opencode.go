@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -84,51 +83,23 @@ func (w *opencodeWindow) window(now time.Time, duration time.Duration) *UsageWin
 
 // Fetch retrieves usage data from the Zen usage API with a Zen API key.
 func (f *OpenCodeFetcher) Fetch(ctx context.Context, apiKey string) (*UsageInfo, error) {
-	if apiKey == "" {
-		return nil, fmt.Errorf("access token is empty")
-	}
 	url := OpenCodeUsageURL
 	if f.url != "" {
 		url = f.url
 	}
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", OpenCodeUserAgent)
-
-	resp, err := f.client.Do(req)
-	if err != nil {
-		return &UsageInfo{
-			Provider:  "opencode",
-			FetchedAt: time.Now(),
-			Error:     fmt.Sprintf("request failed: %v", err),
-		}, err
-	}
-	defer resp.Body.Close()
-	now := time.Now()
-	info := &UsageInfo{Provider: "opencode", Source: SourceAPI, FetchedAt: now}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		info.Error = fmt.Sprintf("read response: %v", err)
-		return info, fmt.Errorf("read response: %w", err)
-	}
-	switch resp.StatusCode {
-	case http.StatusOK:
-	case http.StatusUnauthorized, http.StatusForbidden:
-		info.Error = "unauthorized: Zen API key rejected"
-		return info, fmt.Errorf("unauthorized: status %d", resp.StatusCode)
-	default:
-		info.Error = fmt.Sprintf("API error: status %d", resp.StatusCode)
-		return info, fmt.Errorf("API error: status %d", resp.StatusCode)
-	}
 	var usage opencodeUsageResponse
-	if err := json.Unmarshal(body, &usage); err != nil {
-		info.Error = fmt.Sprintf("decode error: %v", err)
-		return info, fmt.Errorf("decode response: %w", err)
+	info, err := getJSON(ctx, f.client, jsonRequest{
+		provider:     "opencode",
+		url:          url,
+		token:        apiKey,
+		headers:      func(req *http.Request) { req.Header.Set("User-Agent", OpenCodeUserAgent) },
+		unauthorized: func(string) string { return "unauthorized: Zen API key rejected" },
+	}, &usage)
+	if err != nil {
+		return info, err
 	}
+	// The windows' reset clocks are relative to the fetch.
+	now := info.FetchedAt
 	if usage.Usage.Rolling == nil && usage.Usage.Weekly == nil && usage.Usage.Monthly == nil {
 		info.Error = "decode error: response carries no usage windows"
 		return info, fmt.Errorf("decode response: no usage windows")
