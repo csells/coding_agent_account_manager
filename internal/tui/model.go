@@ -1750,9 +1750,9 @@ func (m Model) tokenInTrouble(provider, name string) bool {
 }
 
 // refreshableProvider reports whether caam can refresh the provider's
-// token from outside: Codex and Gemini. The others renew their own.
+// token from outside: Codex, Gemini and Kimi. The others renew their own.
 func refreshableProvider(provider string) bool {
-	return provider == "codex" || provider == "gemini"
+	return provider == "codex" || provider == "gemini" || provider == "kimi"
 }
 
 // tokenNeedsRefresh reports whether r should refresh the account's token

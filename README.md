@@ -391,6 +391,8 @@ and a second sync writes nothing. Pass `--no-sync-config` to skip it.
 
 **Limits:** `caam limits kimi` calls `GET https://api.kimi.com/coding/v1/usages` with the same device-identity headers the CLI sends (the device id is read from `~/.kimi-code/device_id`, never created) and reports the five-hour rate limit as the primary window, the weekly request allowance as the secondary, and the membership tier as the plan.
 
+**Refresh:** caam can refresh Kimi's hourly access token itself (`caam refresh kimi <account>`, or `r` in the dashboard) the way the CLI does — `POST https://auth.kimi.com/api/oauth/token` with the CLI's client id and device headers, honouring `KIMI_CODE_OAUTH_HOST` / `KIMI_OAUTH_HOST` — but only when the token has expired or Kimi has just refused it, since a refresh spends the refresh token; a 401, 403 or `invalid_grant` answer means the session is gone and only `kimi login` fixes it.
+
 ### zcode (Z.ai)
 
 **Auth Files:**
@@ -838,8 +840,8 @@ to and selected, which puts a first-time provider on the strip. A
 provider whose credential carries no identity asks for a profile name
 instead. `r` refreshes what is on screen: the limits are re-fetched, and
 when the selected account's token has expired or the provider just
-refused it, the token is refreshed first (Codex and Gemini; the other
-tools renew their own) and the limits follow. When a refresh cannot help
+refused it, the token is refreshed first (Codex, Gemini and Kimi; the
+other tools renew their own) and the limits follow. When a refresh cannot help
 — the provider has ended the session, or renews its own tokens — `r`
 offers the login instead, right there, and yes runs it the way `n` does.
 `i` opens the full card as an overlay. Every question — switch this
@@ -1421,7 +1423,7 @@ Special thanks to **[@darvell](https://github.com/darvell)** for inspiring this 
 
 While codex-pool answers "which account should handle THIS request?" (real-time proxy), caam answers "which account should I USE for my work session?" (profile manager). The Smart Profile Management features adapt codex-pool's intelligence to caam's architecture:
 
-- **On-demand Token Refresh** — `caam refresh` and the dashboard's `r` refresh a token only when it has expired or the provider refused it, never early and never on a timer: a refresh consumes the refresh token, and the families rotate *(Codex and Gemini; Claude Code and the others renew their own)*
+- **On-demand Token Refresh** — `caam refresh` and the dashboard's `r` refresh a token only when it has expired or the provider refused it, never early and never on a timer: a refresh consumes the refresh token, and the families rotate *(Codex, Gemini and Kimi; Claude Code and the others renew their own)*
 - **Profile Health Scoring** — Visual indicators (🟢🟡🔴) showing token status, error history, penalty decay, and plan type *(Claude profiles may show limited identity info)*
 - **Smart Rotation** — Multi-factor algorithm picks the best available profile based on health, cooldown, recency, and usage patterns
 - **Cooldown Tracking** — Database-backed tracking of rate limit hits with configurable cooldown windows

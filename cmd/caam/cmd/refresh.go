@@ -17,7 +17,7 @@ import (
 
 var refreshCmd = &cobra.Command{
 	Use:   "refresh [tool] [profile]",
-	Short: "Refresh an expired OAuth token (Codex, Gemini)",
+	Short: "Refresh an expired OAuth token (Codex, Gemini, Kimi)",
 	Long: `Refresh the OAuth token of a vaulted account whose token has expired.
 
 A refresh consumes the account's refresh token — the families rotate — so
@@ -27,6 +27,7 @@ single profile. --all takes expired tokens only and refuses --force.
 Examples:
   caam refresh claude work
   caam refresh codex main --force
+  caam refresh kimi work
   caam refresh --all
   caam refresh --all --dry-run
 `,
@@ -77,7 +78,7 @@ func runRefresh(cmd *cobra.Command, args []string) error {
 }
 
 func refreshAll(ctx context.Context, dryRun, force, quiet bool) error {
-	toolsToCheck := []string{"codex", "claude", "gemini"}
+	toolsToCheck := []string{"codex", "claude", "gemini", "kimi"}
 
 	var hadFailure bool
 	var refreshed, skipped, failed int
@@ -317,6 +318,8 @@ func loadExpiryInfo(tool, profile string) (*health.ExpiryInfo, error) {
 		// Migrate legacy vault filename before reading.
 		_ = authfile.MigrateGeminiVaultDir(vaultPath)
 		return health.ParseGeminiExpiry(vaultPath)
+	case "kimi":
+		return health.ParseKimiExpiry(filepath.Join(vaultPath, "kimi-code.json"))
 	case "opencode", "cursor", "grok":
 		// No token expiry parsing for opencode/cursor/grok yet
 		return nil, nil

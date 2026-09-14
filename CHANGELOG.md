@@ -30,7 +30,13 @@ logging in again. Architecture and the facts behind it:
   login, then captures it under the account that signed in; a picker asks
   which provider.
 - **`r` refreshes** the limits on screen and, when the selected account's
-  token has expired or was just refused, its token first (Codex and Gemini).
+  token has expired or was just refused, its token first (Codex, Gemini
+  and Kimi).
+- **Kimi's token is caam's to refresh**: `caam refresh kimi <account>` and
+  the dashboard's `r` renew it through the CLI's own token endpoint (form
+  POST with its client id and device headers, honouring
+  `KIMI_CODE_OAUTH_HOST` / `KIMI_OAUTH_HOST`), behind the same one gate; a
+  401, 403 or `invalid_grant` answer offers the login.
 - **LAST USED** is filled from the activity log; a dashboard login is logged.
 - `limits` reads the active profile's live credential rather than its vault
   copy; shared window naming (`usage.WindowsOf`).

@@ -161,6 +161,12 @@ func (f *KimiFetcher) home() string {
 	if f.homeDir != "" {
 		return f.homeDir
 	}
+	return KimiHome()
+}
+
+// KimiHome is the Kimi Code CLI's home directory: $KIMI_CODE_HOME, else
+// ~/.kimi-code. The device id and the credential file live under it.
+func KimiHome() string {
 	if env := strings.TrimSpace(os.Getenv(kimiHomeEnv)); env != "" {
 		return env
 	}
@@ -184,11 +190,21 @@ func asciiHeader(raw, fallback string) string {
 }
 
 // setKimiHeaders adds the authorization and the device identity headers the
-// Kimi Code CLI sends. The device id is read from <home>/device_id and never
-// created: creating one is the CLI's job.
+// Kimi Code CLI sends.
 func (f *KimiFetcher) setKimiHeaders(req *http.Request, accessToken string) {
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
+	SetKimiDeviceHeaders(req, f.home())
+}
+
+// SetKimiDeviceHeaders adds the User-Agent and the X-Msh-* device identity
+// headers the Kimi Code CLI sends with every request, to its API and to
+// its OAuth host alike. The device id is read from <home>/device_id (home
+// "" means KimiHome()) and never created: creating one is the CLI's job.
+func SetKimiDeviceHeaders(req *http.Request, home string) {
+	if home == "" {
+		home = KimiHome()
+	}
 	req.Header.Set("User-Agent", KimiUserAgent)
 	req.Header.Set("X-Msh-Platform", kimiPlatform)
 	req.Header.Set("X-Msh-Version", asciiHeader(version.Version, "dev"))
@@ -196,7 +212,7 @@ func (f *KimiFetcher) setKimiHeaders(req *http.Request, accessToken string) {
 	req.Header.Set("X-Msh-Device-Name", asciiHeader(host, "unknown"))
 	req.Header.Set("X-Msh-Device-Model", asciiHeader(runtime.GOOS+" "+runtime.GOARCH, "unknown"))
 	req.Header.Set("X-Msh-Os-Version", asciiHeader(runtime.GOOS, "unknown"))
-	if data, err := os.ReadFile(filepath.Join(f.home(), "device_id")); err == nil {
+	if data, err := os.ReadFile(filepath.Join(home, "device_id")); err == nil {
 		if id := asciiHeader(string(data), ""); id != "" {
 			req.Header.Set("X-Msh-Device-Id", id)
 		}
@@ -258,7 +274,7 @@ func (f *KimiFetcher) Fetch(ctx context.Context, accessToken string) (*UsageInfo
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusUnauthorized, http.StatusForbidden:
-		info.Error = "unauthorized: token expired or invalid" + kimiErrorDetail(body) + "; Kimi Code renews its token when it runs — start kimi once, then retry"
+		info.Error = "unauthorized: token expired or invalid" + kimiErrorDetail(body) + "; refresh it (caam refresh kimi <account>, or r in the dashboard), then retry"
 		return info, fmt.Errorf("unauthorized: status %d%s", resp.StatusCode, kimiErrorDetail(body))
 	default:
 		info.Error = fmt.Sprintf("API error: status %d%s", resp.StatusCode, kimiErrorDetail(body))

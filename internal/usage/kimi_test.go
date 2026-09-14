@@ -97,7 +97,7 @@ func TestKimiFetcher_FetchUnauthorizedAndUserInfo(t *testing.T) {
 	if err == nil {
 		t.Fatal("Fetch() returned no error on 401")
 	}
-	if !strings.HasPrefix(info.Error, "unauthorized") || !strings.Contains(info.Error, "token expired") || !strings.Contains(info.Error, "start kimi once") {
+	if !strings.HasPrefix(info.Error, "unauthorized") || !strings.Contains(info.Error, "token expired") || !strings.Contains(info.Error, "caam refresh kimi") {
 		t.Errorf("error = %q", info.Error)
 	}
 	email, err := f.KimiUserInfo(context.Background(), "SYNTHETIC")

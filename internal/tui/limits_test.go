@@ -535,3 +535,32 @@ func TestTUISwitchWithoutAHookSaysSo(t *testing.T) {
 		t.Fatalf("with no Switch hook the switch must be refused as unavailable, got %#v", msg)
 	}
 }
+
+// Kimi is a provider caam can refresh from outside: a refused Kimi token
+// makes r refresh the token first, rather than offering a login. The gate
+// is still NeedsRefresh — a Kimi token with time left is left alone.
+func TestRefreshKey_KimiTokenIsRefreshedWhenRefused(t *testing.T) {
+	rec := &limitsRecorder{info: sampleLimits()}
+	m := modelWithTwoClaudeProfiles(Hooks{Limits: rec.fetch})
+	m.profiles["kimi"] = []Profile{{Name: "k@example.com", Provider: "kimi", IsActive: true}}
+	m.syncProfilesPanel()
+	for m.currentProvider() != "kimi" {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+		m = updated.(Model)
+	}
+	if !refreshableProvider("kimi") {
+		t.Fatal("caam refreshes Kimi's token itself")
+	}
+	if m.tokenNeedsRefresh("kimi", "k@example.com") {
+		t.Fatal("nothing is wrong with the token yet")
+	}
+	m.applyLimitsLoaded(limitsLoadedMsg{provider: "kimi", profile: "k@example.com", err: errors.New("unauthorized: status 401")})
+	if !m.tokenNeedsRefresh("kimi", "k@example.com") {
+		t.Fatal("a refused Kimi token should be refreshed")
+	}
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	m = updated.(Model)
+	if m.state == stateReloginConfirm || !strings.Contains(m.statusMsg, "token, then its limits") {
+		t.Fatalf("r should refresh the token, not offer a login: state=%v status=%q", m.state, m.statusMsg)
+	}
+}
