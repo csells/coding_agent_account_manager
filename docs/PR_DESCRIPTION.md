@@ -89,7 +89,11 @@ if the account were never onboarded.
   (`refresh_threshold` is still accepted; nothing refreshes on it); no
   daemon timer refresh; `refresh --all --force` is refused.
 - The smart handoff switches and resumes instead of injecting a login;
-  `LoginHandler` lost `TriggerLogin` and gained `ResumeArgs`.
+  `LoginHandler` is now `Provider()` and `ResumeArgs()`; its login-state
+  pattern tables are gone.
+- `caam add` logs in every agent the dashboard can; `status` uses the one
+  display order; `ls` says "Nmo ago" past four weeks; the account-name
+  dialog accepts `@` and `+`.
 - The three-panel TUI is replaced by the dashboard; the `b` and `l` keys are
   gone (`l` now moves right); `caam add` no longer files `_auto_backup_`
   profiles.

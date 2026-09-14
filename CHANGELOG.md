@@ -108,8 +108,8 @@ The design and the facts behind it are in `docs/ACCOUNT_SWITCHER.md`.
 - **The smart handoff switches and resumes instead of injecting a login.**
   On a rate limit it switches through the core, ends the session and
   respawns it on its history (`claude --continue`, `codex resume --last`,
-  `gemini --resume latest`). `LoginHandler` lost `TriggerLogin` and gained
-  `ResumeArgs`; the dead `handoffConfig` field is gone. Reason: an injected
+  `gemini --resume latest`). `LoginHandler` is now `Provider()` and
+  `ResumeArgs()`; the login-state pattern tables are gone; the dead `handoffConfig` field is gone. Reason: an injected
   login is a logout first, and a restored credential is already logged in.
 - **The coordinator and `wezterm login-all` no longer inject `/login` into
   a live pane without capturing first.** The coordinator's `Recover` hook
@@ -170,6 +170,22 @@ The design and the facts behind it are in `docs/ACCOUNT_SWITCHER.md`.
 - `next`'s single-profile path logs its switch like the multi-profile path.
 - A credential-namespace error from `limits --source` names the other
   source to try.
+
+- **One table per fact.** The agent's login command, the resume command,
+  the window-column order, the usage fetchers, the HTTP scaffolding of the
+  usage fetchers, the short limits-error phrases and the relative-time
+  words each live in one place now. Visible consequences: `caam add`
+  logs in every agent the dashboard can (`agy`, `kimi`, `zcode`; OpenCode
+  runs `opencode auth login`); `caam next` prints the same switch warnings
+  as `activate`; `caam status` lists agents in the display order every
+  other list uses; `ls` and `robot` say "Nmo ago" past four weeks instead
+  of a date; `monitor`'s STATUS cell uses the dashboard's short phrases
+  ("no coding plan", "no limits API"); the account-name dialog accepts
+  `@` and `+`, the vault's own rule, so an email is a valid name. Every
+  switch path, including the wrap retry loop, the HTTP API and the smart
+  handoff, now gets the refresh gate and the safety config by default.
+  `KIMI_CODE_OAUTH_HOST` (or `KIMI_OAUTH_HOST`) is the only override of
+  Kimi's token endpoint.
 
 ### Fixed
 
