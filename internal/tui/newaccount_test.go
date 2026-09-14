@@ -3,8 +3,11 @@ package tui
 import (
 	"context"
 	"errors"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -267,5 +270,66 @@ func TestRecapture_TakesTheSignedInAccountOnly(t *testing.T) {
 	}
 	if m.state != stateList {
 		t.Fatalf("no dialog should open, state=%v", m.state)
+	}
+}
+
+// A tool's login is a logout first: Codex revokes the session it finds, and
+// the vault copy shares that refresh-token family. So n vaults the signed-in
+// account and then clears the live credential before the login runs.
+func TestNewAccount_ClearsTheVaultedLiveCredentialBeforeTheLogin(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	authPath := filepath.Join(codexHome, "auth.json")
+	if err := os.WriteFile(authPath, []byte(`{"tokens":{"access_token":"SYNTHETIC-A","refresh_token":"SYNTHETIC-A"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &newAccountHooks{}
+	hooks := h.hooks(t)
+	hooks.Capture = nil // the real vault, so ActiveProfile and the clear see the same files
+	m := modelWithTwoClaudeProfiles(hooks)
+	m.vaultPath = t.TempDir()
+	m.profiles["codex"] = []Profile{{Name: "a@example.com", Provider: "codex", IsActive: true}}
+	m.syncProfilesPanel()
+	fileSet, _ := authFileSetForProvider("codex")
+	if err := authfile.NewVault(m.vaultPath).Backup(fileSet, "a@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	m, cmd := pickProvider(t, m, "codex")
+	if cmd == nil {
+		t.Fatalf("the login should start: status=%q notice=%q", m.statusMsg, m.notice)
+	}
+	if _, err := os.Stat(authPath); !os.IsNotExist(err) {
+		t.Fatalf("the live credential should be cleared before the login runs (err=%v)", err)
+	}
+	vaulted := filepath.Join(m.vaultPath, "codex", "a@example.com", "auth.json")
+	if data, err := os.ReadFile(vaulted); err != nil || !strings.Contains(string(data), "SYNTHETIC-A") {
+		t.Fatalf("the vault should hold the account that was signed in: %v", err)
+	}
+}
+
+// A live credential caam cannot match to a vault profile is not cleared:
+// clearing it would lose an account for good. The login then replaces it,
+// which is what the user asked for.
+func TestNewAccount_LeavesAnUnknownLiveCredentialAlone(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	authPath := filepath.Join(codexHome, "auth.json")
+	if err := os.WriteFile(authPath, []byte(`{"tokens":{"access_token":"SYNTHETIC-X","refresh_token":"SYNTHETIC-X"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := &newAccountHooks{}
+	hooks := h.hooks(t)
+	hooks.Capture = nil
+	m := modelWithTwoClaudeProfiles(hooks)
+	m.vaultPath = t.TempDir()
+
+	m, cmd := pickProvider(t, m, "codex")
+	if cmd == nil {
+		t.Fatalf("the login should start: status=%q", m.statusMsg)
+	}
+	if _, err := os.Stat(authPath); err != nil {
+		t.Fatalf("an unvaulted live credential must survive until the login replaces it: %v", err)
 	}
 }

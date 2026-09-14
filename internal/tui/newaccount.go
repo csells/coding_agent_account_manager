@@ -222,13 +222,24 @@ func (m Model) startNewAccountLogin(provider string) (tea.Model, tea.Cmd) {
 	}
 
 	// The login will replace the live credential. Whatever account holds
-	// it now goes back into the vault first, newest tokens and all.
+	// it now goes back into the vault first, newest tokens and all — and
+	// then leaves the machine. A tool's login is a logout first: Codex
+	// revokes the session it finds (its refresh-token family with it, so
+	// the vault copy would die too), and the others may. A login that
+	// finds nothing has nothing to revoke. Only a credential whose account
+	// is in the vault is cleared; an unknown one stays, since clearing it
+	// would lose it for good.
 	if fileSet, ok := authFileSetForProvider(provider); ok {
 		vault := authfile.NewVault(m.vaultPath)
 		if active, _ := vault.ActiveProfile(fileSet); active != "" {
 			if err := m.captureLive(provider, active); err != nil {
 				m.setNotice(provider, active, fmt.Sprintf("Not starting a login: the active account %s could not be re-captured first (%v)", active, err), true)
 				m.statusMsg = "Login not started: re-capture of the active account failed"
+				return m, m.addToast(m.statusMsg, StatusError)
+			}
+			if err := authfile.ClearAuthFiles(fileSet); err != nil {
+				m.setNotice(provider, active, fmt.Sprintf("Not starting a login: %s is in the vault but its live credential could not be cleared (%v); the login would revoke it", active, err), true)
+				m.statusMsg = "Login not started: could not clear the live credential"
 				return m, m.addToast(m.statusMsg, StatusError)
 			}
 		}
@@ -243,8 +254,8 @@ func (m Model) startNewAccountLogin(provider string) (tea.Model, tea.Cmd) {
 // newAccountLoggedIn follows the native login: read who is logged in now.
 func (m Model) newAccountLoggedIn(msg newAccountLoginDoneMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.statusMsg = fmt.Sprintf("%s login did not complete: %v", providerLabel(msg.provider), msg.err)
-		return m, m.addToast(m.statusMsg, StatusError)
+		m.statusMsg = fmt.Sprintf("%s login did not complete: %v — the previous account is in the vault; select it and press enter to restore it", providerLabel(msg.provider), msg.err)
+		return m, tea.Batch(m.addToast(m.statusMsg, StatusError), m.refreshProfiles(refreshContext{provider: msg.provider}))
 	}
 	identify := m.hooks.LiveIdentity
 	provider := msg.provider

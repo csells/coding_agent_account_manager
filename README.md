@@ -823,8 +823,12 @@ nothing to switch between on the others. `n` asks which provider to log
 in to — every provider caam manages, the selected one preselected, and
 those whose CLI is not on `PATH` say so — then logs a new account in
 without leaving the dashboard: that provider's active account is
-re-captured first, so its newest tokens are in the vault before the
-tool's login replaces them; the terminal goes to the provider's own login
+re-captured first, so its newest tokens are in the vault, and its live
+credential is then cleared, because a tool's login is a logout first —
+Codex revokes the session it finds, refresh-token family and vault copy
+included, and a login that finds nothing has nothing to revoke (a live
+credential caam cannot match to a vault profile is left for the login to
+replace); the terminal goes to the provider's own login
 (`codex login`, Claude Code with `/login`, `zcode login`, …); and when it
 returns, the live credential is captured under the account it now belongs
 to and selected, which puts a first-time provider on the strip. A
