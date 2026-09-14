@@ -82,6 +82,31 @@ func TestWindowLeftText_LocalResetPhrasing(t *testing.T) {
 	}
 }
 
+// WindowLeftShort is the table cell form of the same sentence: the share
+// left and the local clock, joined by a middle dot as the dashboard's
+// wide tier spells it.
+func TestWindowLeftShort_CompactCell(t *testing.T) {
+	loc := time.FixedZone("PDT", -7*3600)
+	now := time.Date(2026, 9, 13, 13, 40, 0, 0, loc)
+	cases := []struct {
+		w    UsageWindow
+		want string
+	}{
+		{UsageWindow{UsedPercent: 12, ResetsAt: now.Add(4*time.Hour + 30*time.Minute)}, "88% left · 6:10 PM"},
+		{UsageWindow{UsedPercent: 50, ResetsAt: time.Date(2026, 9, 15, 17, 0, 0, 0, loc)}, "50% left · Tue 5:00 PM"},
+		{UsageWindow{Utilization: 0.9}, "10% left"},
+		{UsageWindow{UsedPercent: 40, Rolled: true}, "100% left (reset)"},
+	}
+	for _, c := range cases {
+		if got := WindowLeftShort(&c.w, now); got != c.want {
+			t.Errorf("WindowLeftShort(%+v) = %q, want %q", c.w, got, c.want)
+		}
+	}
+	if WindowLeftShort(nil, now) != "-" {
+		t.Errorf("nil window should render as -")
+	}
+}
+
 // Per-model providers (agy) name every window by its model. The pro and
 // flash picks are the primary and secondary windows: they lead the list,
 // once each, ahead of the alphabetical rest.

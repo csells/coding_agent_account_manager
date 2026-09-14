@@ -313,8 +313,8 @@ func TestCachedProfileUsage(t *testing.T) {
 	if cold.Usage.PrimaryWindow != nil || cold.Usage.SecondaryWindow != nil {
 		t.Error("a profile with no snapshot must have no windows, not zeroed ones")
 	}
-	if got := formatWindowPercent(cold.Usage.PrimaryWindow); got != "-" {
-		t.Errorf("primary column = %q, want %q", got, "-")
+	if got := usage.WindowLeftShort(cold.Usage.PrimaryWindow, now); got != "-" {
+		t.Errorf("window cell = %q, want %q", got, "-")
 	}
 	if got := formatCacheAge(cold.Usage, now); got != "-" {
 		t.Errorf("AS OF for an uncached profile = %q, want %q", got, "-")
@@ -350,11 +350,11 @@ func TestRenderLimitsCachedTable(t *testing.T) {
 	}
 
 	var b strings.Builder
-	if err := renderLimits(&b, "table", rows, ""); err != nil {
+	if err := renderLimits(&b, "table", rows, now); err != nil {
 		t.Fatal(err)
 	}
 	out := b.String()
-	for _, want := range []string{"AS OF", "no cached data", "0% (rolled)", "1h30m ago", "no network"} {
+	for _, want := range []string{"AS OF", "no cached data", "100% left (reset)", "1h30m ago", "no network"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("cached table missing %q:\n%s", want, out)
 		}
@@ -366,7 +366,7 @@ func TestRenderLimitsCachedTable(t *testing.T) {
 		Usage: &usage.UsageInfo{Provider: "claude", Source: usage.SourceAPI, FetchedAt: now},
 	}}
 	b.Reset()
-	if err := renderLimits(&b, "table", live, ""); err != nil {
+	if err := renderLimits(&b, "table", live, now); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(b.String(), "AS OF") {
