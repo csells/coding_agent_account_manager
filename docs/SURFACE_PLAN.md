@@ -326,11 +326,14 @@ string a person reads in the dashboard and in CLI help says agent
 in help). Flag and subcommand names (`--tool`, `provider`) stay: they are
 the CLI's contract. One test per surface pins the wording.
 
-## R5 — The handoff document
+## R5 — The handoff document (done)
 
 `caam-handoff.md` is rewritten around the product mission per ADR-0001: what
 the switcher is, where it lives (`docs/ACCOUNT_SWITCHER.md`), the rules,
 what is done, what needs Chris. The v1 file stays as history.
+
+Status: rewritten 2026-09-14; the v2 text it replaced is kept as
+`caam-handoff-v2-superseded.md`.
 
 ## R6 — Waiting on Chris
 

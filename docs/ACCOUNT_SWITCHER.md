@@ -264,8 +264,9 @@ that run.
 - Which "pro" model becomes Antigravity's primary Window is decided by usage
   then name, so with everything untouched it is `gemini-2.5-pro` rather than
   a 3.x model.
-- The parent handoff (`caam-handoff.md`) still describes the mission in its
-  pre-product framing; ADR-0001 says it should be rewritten.
+- The parent handoff (`caam-handoff.md`) is now written around the product
+  mission per ADR-0001 and points here; the two earlier framings are kept
+  beside it as `caam-handoff-v1-superseded.md` and `-v2-superseded.md`.
 - `docs/SURFACE_AUDIT_2026-09-13.md` and `docs/SURFACE_PLAN.md` record the
   gaps between the dashboard and the rest of caam and the plan that closed
   them. Gaps 1 (one switch core), 2 (one refresh gate, no timers), 3
