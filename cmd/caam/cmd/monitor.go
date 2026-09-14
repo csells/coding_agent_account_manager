@@ -147,6 +147,10 @@ func runMonitor(cmd *cobra.Command, args []string) error {
 	healthStore = health.NewStorage("")
 
 	lookup := buildCredentialLookup(vaultPath)
+	// The monitor runs for as long as the terminal is open and must see
+	// every switch made under it, its own dashboard's or another
+	// terminal's, so it asks the vault on every poll rather than once.
+	lookup.ActiveName = activeProfileName
 	mon := monitor.NewMonitor(
 		monitor.WithInterval(interval),
 		monitor.WithProviders(providers),

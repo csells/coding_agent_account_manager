@@ -127,43 +127,40 @@ func TestAddCommandValidatesSystemProfileNames(t *testing.T) {
 	}
 }
 
+// `caam add` and the dashboard's n key share one table of login commands,
+// so every agent caam vaults has a login flow; --device-code selects
+// Codex's headless flow.
 func TestRunToolLoginCommands(t *testing.T) {
-	// Test that we have the right commands for each tool
-	// This is a table-driven test for the command construction logic
 	tests := []struct {
-		tool     string
-		wantBin  string
-		wantArgs []string
+		tool       string
+		deviceCode bool
+		wantBin    string
+		wantArgs   string
 	}{
-		{"claude", "claude", nil},
-		{"codex", "codex", []string{"login"}},
-		{"gemini", "gemini", nil},
+		{"claude", false, "claude", ""},
+		{"codex", false, "codex", "login"},
+		{"codex", true, "codex", "login --device-auth"},
+		{"gemini", false, "gemini", ""},
+		{"opencode", false, "opencode", "auth login"},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.tool, func(t *testing.T) {
-			// We can't actually run the commands, but we can verify
-			// the switch statement logic is correct
-			switch tt.tool {
-			case "claude":
-				if tt.wantBin != "claude" {
-					t.Errorf("claude should use 'claude' binary")
-				}
-			case "codex":
-				if tt.wantBin != "codex" {
-					t.Errorf("codex should use 'codex' binary")
-				}
-				if len(tt.wantArgs) != 1 || tt.wantArgs[0] != "login" {
-					t.Errorf("codex should use 'login' args")
-				}
-			case "gemini":
-				if tt.wantBin != "gemini" {
-					t.Errorf("gemini should use 'gemini' binary")
-				}
-				if tt.wantArgs != nil {
-					t.Errorf("gemini should use no args")
-				}
+			login, err := loginCommandFor(tt.tool, tt.deviceCode)
+			if err != nil {
+				t.Fatalf("loginCommandFor(%s): %v", tt.tool, err)
+			}
+			if login.Bin != tt.wantBin || strings.Join(login.Args, " ") != tt.wantArgs {
+				t.Errorf("loginCommandFor(%s, %v) = %s %q, want %s %q", tt.tool, tt.deviceCode, login.Bin, login.Args, tt.wantBin, tt.wantArgs)
 			}
 		})
+	}
+
+	for tool := range tools {
+		if login, err := loginCommandFor(tool, false); err != nil || login.Bin == "" || login.Hint == "" {
+			t.Errorf("caam add %s has no complete login command: %+v, %v", tool, login, err)
+		}
+	}
+	if _, err := loginCommandFor("notreal", false); err == nil {
+		t.Error("an unknown agent should have no login flow")
 	}
 }

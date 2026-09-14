@@ -393,28 +393,38 @@ func CursorAuthFiles() AuthFileSet {
 
 // GetAuthFileSet returns the AuthFileSet for the given provider name.
 func GetAuthFileSet(provider string) (AuthFileSet, bool) {
-	switch strings.ToLower(provider) {
-	case "claude":
-		return ClaudeAuthFiles(), true
-	case "codex":
-		return CodexAuthFiles(), true
-	case "gemini":
-		return GeminiAuthFiles(), true
-	case "agy", "antigravity":
-		return AntigravityAuthFiles(), true
-	case "grok", "grok-build":
-		return GrokAuthFiles(), true
-	case "opencode", "oc":
-		return OpenCodeAuthFiles(), true
-	case "cursor", "cur":
-		return CursorAuthFiles(), true
-	case "kimi", "kimi-code":
-		return KimiAuthFiles(), true
-	case "zcode":
-		return ZcodeAuthFiles(), true
-	default:
+	id := strings.ToLower(provider)
+	if canonical, ok := authFileAliases[id]; ok {
+		id = canonical
+	}
+	get, ok := authFileSets[id]
+	if !ok {
 		return AuthFileSet{}, false
 	}
+	return get(), true
+}
+
+// authFileSets is the file set of every tool caam vaults, by its canonical
+// id. It is the one list of tools this package knows.
+var authFileSets = map[string]func() AuthFileSet{
+	"claude":   ClaudeAuthFiles,
+	"codex":    CodexAuthFiles,
+	"gemini":   GeminiAuthFiles,
+	"agy":      AntigravityAuthFiles,
+	"grok":     GrokAuthFiles,
+	"opencode": OpenCodeAuthFiles,
+	"cursor":   CursorAuthFiles,
+	"kimi":     KimiAuthFiles,
+	"zcode":    ZcodeAuthFiles,
+}
+
+// authFileAliases are the other names GetAuthFileSet accepts for a tool.
+var authFileAliases = map[string]string{
+	"antigravity": "agy",
+	"grok-build":  "grok",
+	"oc":          "opencode",
+	"cur":         "cursor",
+	"kimi-code":   "kimi",
 }
 
 // Vault manages stored auth file backups.
@@ -1600,15 +1610,11 @@ func ClearAuthFiles(fileSet AuthFileSet) error {
 // sharedWithAnotherTool reports whether another tool's file set lists path.
 func sharedWithAnotherTool(tool, path string) bool {
 	clean := filepath.Clean(path)
-	for _, other := range []string{"claude", "codex", "gemini", "agy", "grok", "opencode", "cursor", "kimi", "zcode"} {
+	for other, get := range authFileSets {
 		if other == tool {
 			continue
 		}
-		set, ok := GetAuthFileSet(other)
-		if !ok {
-			continue
-		}
-		for _, spec := range set.Files {
+		for _, spec := range get().Files {
 			if filepath.Clean(spec.Path) == clean {
 				return true
 			}
@@ -2073,10 +2079,7 @@ func stableAgyHash(path string) (string, error) {
 	if refresh == "" {
 		return hashBytes(data), nil
 	}
-	h := sha256.New()
-	h.Write([]byte("agy:refresh-token:"))
-	h.Write([]byte(refresh))
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return hashLabeled("agy:refresh-token:", refresh), nil
 }
 
 // stableClaudeHash extracts identity-bearing fields from Claude auth files and

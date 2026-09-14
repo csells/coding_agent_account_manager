@@ -377,22 +377,31 @@ func buildCredentialLookup(vaultDir string) credentialLookup {
 	if mgr, err := shallow.NewManager("", ""); err == nil {
 		l.Shallow = mgr
 	}
-	l.ActiveName = func(provider string) string {
-		if vault == nil {
-			return ""
-		}
-		get, ok := tools[provider]
-		if !ok {
-			return ""
-		}
-		name, err := vault.ActiveProfile(get())
-		if err != nil {
-			return ""
-		}
-		return name
-	}
+	// One command asks per provider two or three times (applyLiveCredentials,
+	// candidatePaths, claudeJSONPath) and the answer cannot change under it,
+	// so it is taken once per lookup. A lookup that outlives switches, such
+	// as the monitor's, takes activeProfileName itself.
+	l.ActiveName = memoizeActiveName(activeProfileName)
 	l.LivePath = liveCredentialPath
 	return l
+}
+
+// activeProfileName reports which vault profile the tool's live auth
+// currently matches, "" when none does. Each call refreshes the keychain
+// mirror and hashes every vault profile.
+func activeProfileName(provider string) string {
+	if vault == nil {
+		return ""
+	}
+	get, ok := tools[provider]
+	if !ok {
+		return ""
+	}
+	name, err := vault.ActiveProfile(get())
+	if err != nil {
+		return ""
+	}
+	return name
 }
 
 // liveCredentialPath returns the file the tool itself reads its access token

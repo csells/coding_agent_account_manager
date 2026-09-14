@@ -308,58 +308,16 @@ func runWeztermLoginAll(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unknown tool: %s (supported: claude, codex, gemini, opencode, cursor)", tool)
 	}
 
-	if _, err := weztermLookupFunc("wezterm"); err != nil {
-		return fmt.Errorf("wezterm CLI not found in PATH; install from https://wezfurlong.org/wezterm/install/")
-	}
-
-	all, _ := cmd.Flags().GetBool("all")
 	yes, _ := cmd.Flags().GetBool("yes")
 	force, _ := cmd.Flags().GetBool("force")
 	yes = yes || force
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	subscription, _ := cmd.Flags().GetBool("subscription")
-	matchOverride, _ := cmd.Flags().GetString("match")
 
-	logger := weztermDebugLogger()
-
-	panes, err := weztermListPanesFunc()
+	targets, err := weztermTargetsFor(cmd, tool)
 	if err != nil {
 		return err
 	}
-	if len(panes) == 0 {
-		return fmt.Errorf("no wezterm panes found; start wezterm first or use 'wezterm cli list-clients' to verify")
-	}
-
-	var matcher *regexp.Regexp
-	if !all && matchOverride != "" {
-		matcher, err = regexp.Compile(matchOverride)
-		if err != nil {
-			return fmt.Errorf("invalid match pattern: %w", err)
-		}
-	}
-
-	var targets []weztermTarget
-	for _, pane := range panes {
-		if all {
-			targets = append(targets, weztermTarget{Pane: pane, Reason: "all"})
-			continue
-		}
-		text, err := weztermGetTextFunc(pane.ID)
-		if err != nil {
-			if logger != nil {
-				logger.Warn("wezterm pane read failed", "pane_id", pane.ID, "title", pane.Title, "error", err)
-			}
-			continue
-		}
-		match := matchWeztermPane(tool, text, matcher)
-		if logger != nil {
-			logger.Debug("pane scan", "pane_id", pane.ID, "title", pane.Title, "matched", match.Matched, "reason", match.Reason, "tool", tool)
-		}
-		if match.Matched {
-			targets = append(targets, weztermTarget{Pane: pane, Reason: match.Reason})
-		}
-	}
-
 	if len(targets) == 0 {
 		return fmt.Errorf("no panes matched (use --all to force)")
 	}

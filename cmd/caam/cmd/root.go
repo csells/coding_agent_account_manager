@@ -996,28 +996,12 @@ type statusHealth struct {
 	health.Signals
 }
 
-// statusTools is the order `caam status` reports every managed tool in: the
-// three original providers first, as they always were, then the rest in the
-// order the root help lists them. Every tool caam can swap auth for is shown,
-// so a logged-in tool is never silently missing from the active-account view;
-// a tool with no auth reads "(not logged in)".
+// statusTools is every tool `caam status` reports, in the one order caam
+// lists tools in (toolsInDisplayOrder). Every tool caam can swap auth for
+// is shown, so a logged-in tool is never silently missing from the
+// active-account view; a tool with no auth reads "(not logged in)".
 func statusTools() []string {
-	preferred := []string{"codex", "claude", "gemini", "agy", "grok", "opencode", "cursor", "kimi", "zcode"}
-	seen := make(map[string]bool, len(preferred))
-	var out []string
-	for _, tool := range preferred {
-		if _, ok := tools[tool]; ok && !seen[tool] {
-			out = append(out, tool)
-			seen[tool] = true
-		}
-	}
-	for _, tool := range supportedTools() {
-		if !seen[tool] {
-			out = append(out, tool)
-			seen[tool] = true
-		}
-	}
-	return out
+	return toolsInDisplayOrder(supportedTools())
 }
 
 // statusCmd shows which profile is currently active.
@@ -1292,29 +1276,6 @@ func lastUsedByProfile() map[string]map[string]time.Time {
 	return used
 }
 
-// formatLastUsed says how long ago an account was used, in the words the
-// dashboard uses: never, now, 5m ago, 3h ago, 2d ago, 1w ago, or the date.
-func formatLastUsed(t, now time.Time) string {
-	if t.IsZero() {
-		return "never"
-	}
-	d := now.Sub(t)
-	switch {
-	case d < time.Minute:
-		return "now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	case d < 7*24*time.Hour:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-	case d < 30*24*time.Hour:
-		return fmt.Sprintf("%dw ago", int(d.Hours()/(24*7)))
-	default:
-		return t.Format("Jan 2, 2006")
-	}
-}
-
 type lsHealth struct {
 	Status     string `json:"status"`
 	ExpiresAt  string `json:"expires_at,omitempty"`
@@ -1454,7 +1415,7 @@ func runLs(cmd *cobra.Command, args []string) error {
 
 				email, plan := formatIdentityDisplay(id)
 				healthStr := health.FormatHealthStatus(status, ph, formatOpts)
-				fmt.Printf("%s%-20s  %-24s  %-10s  %-10s  %s\n", marker, displayName, email, plan, formatLastUsed(lastUsed, now), healthStr)
+				fmt.Printf("%s%-20s  %-24s  %-10s  %-10s  %s\n", marker, displayName, email, plan, tui.FormatRelativeTime(lastUsed, now), healthStr)
 			}
 		}
 
@@ -1556,7 +1517,7 @@ func runLs(cmd *cobra.Command, args []string) error {
 
 				email, plan := formatIdentityDisplay(id)
 				healthStr := health.FormatHealthStatus(status, ph, formatOpts)
-				fmt.Printf("  %s%-20s  %-24s  %-10s  %-10s  %s\n", marker, displayName, email, plan, formatLastUsed(lastUsed, now), healthStr)
+				fmt.Printf("  %s%-20s  %-24s  %-10s  %-10s  %s\n", marker, displayName, email, plan, tui.FormatRelativeTime(lastUsed, now), healthStr)
 			}
 		}
 	}

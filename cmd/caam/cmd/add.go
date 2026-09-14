@@ -51,6 +51,7 @@ Examples:
 func init() {
 	rootCmd.AddCommand(addCmd)
 	addCmd.Flags().Bool("no-activate", false, "don't activate the new profile after adding")
+	_ = addCmd.Flags().MarkDeprecated("no-activate", "the account that logs in is the live one; there is nothing to activate")
 	addCmd.Flags().Duration("timeout", 5*time.Minute, "timeout for login flow completion")
 	addCmd.Flags().Bool("force", false, "skip confirmation prompts")
 	addCmd.Flags().Bool("device-code", false, "use device code flow for codex (headless)")
@@ -58,7 +59,6 @@ func init() {
 
 func runAdd(cmd *cobra.Command, args []string) error {
 	tool := strings.ToLower(args[0])
-	noActivate, _ := cmd.Flags().GetBool("no-activate")
 	timeout, _ := cmd.Flags().GetDuration("timeout")
 	force, _ := cmd.Flags().GetBool("force")
 	deviceCode, _ := cmd.Flags().GetBool("device-code")
@@ -169,8 +169,6 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		}
 	}
 	fmt.Printf("  Saved %s/%s\n", tool, profileName)
-	// The account that just logged in is the live one; nothing to activate.
-	_ = noActivate
 
 	fmt.Println()
 	fmt.Println("Done! Your new account has been added.")
@@ -201,36 +199,20 @@ func runToolLoginInterruptible(ctx context.Context, tool string, deviceCode bool
 	}
 }
 
+// runToolLogin runs the provider's own login (the same command the
+// dashboard's n key runs) in this terminal. Codex is first pointed at the
+// file credential store so the login lands where caam can capture it.
 func runToolLogin(ctx context.Context, tool string, deviceCode bool) error {
-	var cmd *exec.Cmd
-
-	switch tool {
-	case "claude":
-		// Claude uses interactive login
-		cmd = execCommand(ctx, "claude")
-	case "codex":
+	login, err := loginCommandFor(tool, deviceCode)
+	if err != nil {
+		return err
+	}
+	if tool == "codex" {
 		if err := codexprovider.EnsureFileCredentialStore(codexprovider.ResolveHome()); err != nil {
 			return fmt.Errorf("configure codex credential store: %w", err)
 		}
-		cmdArgs := []string{"login"}
-		if deviceCode {
-			cmdArgs = append(cmdArgs, "--device-auth")
-		}
-		cmd = execCommand(ctx, "codex", cmdArgs...)
-	case "gemini":
-		// Gemini uses interactive login
-		cmd = execCommand(ctx, "gemini")
-	case "grok":
-		// Grok Build uses `grok login` (browser OIDC)
-		cmd = execCommand(ctx, "grok", "login")
-	case "opencode":
-		cmd = execCommand(ctx, "opencode")
-	case "cursor":
-		cmd = execCommand(ctx, "cursor")
-	default:
-		return fmt.Errorf("unsupported agent: %s", tool)
 	}
-
+	cmd := execCommand(ctx, login.Bin, login.Args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

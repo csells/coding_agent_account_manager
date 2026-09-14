@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -286,7 +287,7 @@ func runActivate(cmd *cobra.Command, args []string) error {
 	backupFirst, _ := cmd.Flags().GetBool("backup-current")
 	reloadDaemon, _ := cmd.Flags().GetBool("reload-daemon")
 
-	res, err := performSwitch(cmd.Context(), fileSet, profileName, previousProfile, source, spmCfg, db, switchOptions{
+	res, err := performSwitch(cmd.Context(), fileSet, profileName, source, spmCfg, db, switchOptions{
 		Force:         force,
 		BackupCurrent: backupFirst,
 		ReloadDaemon:  reloadDaemon,
@@ -334,18 +335,31 @@ type switchOptions struct {
 }
 
 // switchResult reports what performSwitch did on the way to installing the
-// incoming profile.
+// incoming profile: the switch core's result plus the Codex daemon check.
 type switchResult struct {
-	PreviousProfile string
-	Refreshed       bool
-	AutoBackup      string
-	// Recaptured is true when the outgoing profile's vault copy was refreshed
-	// from the live credential before it was overwritten.
-	Recaptured bool
-	// RecaptureWarning holds the re-capture failure when Force carried the
-	// switch past it.
-	RecaptureWarning string
-	CodexDaemon      codexDaemonWarning
+	*switcher.Result
+	CodexDaemon codexDaemonWarning
+}
+
+// printSwitchResult reports what the switch core did on the way to the
+// incoming profile: the warnings it carried past, the auto-backup it made
+// and the re-capture of the outgoing profile.
+func printSwitchResult(w io.Writer, res *switcher.Result) {
+	if res.RefreshWarning != "" {
+		fmt.Fprintf(w, "Warning: %s\n", res.RefreshWarning)
+	}
+	if res.AutoBackupWarning != "" {
+		fmt.Fprintf(w, "Warning: %s\n", res.AutoBackupWarning)
+	}
+	if res.AutoBackup != "" {
+		fmt.Fprintf(w, "Auto-backed up current state to %s\n", res.AutoBackup)
+	}
+	if res.RecaptureWarning != "" {
+		fmt.Fprintf(w, "Warning: %s\n", res.RecaptureWarning)
+	}
+	if res.Recaptured {
+		fmt.Fprintf(w, "Re-captured outgoing profile %s (token rotation safety)\n", res.PreviousProfile)
+	}
 }
 
 // switchProfile makes profileName the active profile for tool, from a cold
@@ -364,7 +378,6 @@ func switchProfile(ctx context.Context, tool, profileName string, opts switchOpt
 		vault = authfile.NewVault(authfile.DefaultVaultPath())
 	}
 	fileSet := getFileSet()
-	previousProfile, _ := vault.ActiveProfile(fileSet)
 
 	if _, err := vault.BackupOriginal(fileSet); err != nil {
 		return nil, fmt.Errorf("backup original auth: %w", err)
@@ -391,7 +404,7 @@ func switchProfile(ctx context.Context, tool, profileName string, opts switchOpt
 		}
 	}
 
-	return performSwitch(ctx, fileSet, profileName, previousProfile, "", spmCfg, db, opts)
+	return performSwitch(ctx, fileSet, profileName, "", spmCfg, db, opts)
 }
 
 // performSwitch is `caam activate`'s switch: the shared core
@@ -399,13 +412,12 @@ func switchProfile(ctx context.Context, tool, profileName string, opts switchOpt
 // re-capture-or-abort, restore, activity log) wrapped in what only the
 // interactive command does — printing, the stealth delay, and the Codex
 // daemon reload.
-func performSwitch(ctx context.Context, fileSet authfile.AuthFileSet, profileName, previousProfile, source string, spmCfg *config.SPMConfig, db *caamdb.DB, opts switchOptions) (*switchResult, error) {
+func performSwitch(ctx context.Context, fileSet authfile.AuthFileSet, profileName, source string, spmCfg *config.SPMConfig, db *caamdb.DB, opts switchOptions) (*switchResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	tool := fileSet.Tool
 	quiet := opts.Quiet
-	res := &switchResult{PreviousProfile: previousProfile}
 
 	// Stealth: optional delay before the actual switch happens.
 	// Skip stealth delay in quiet mode as it's for interactive use
@@ -426,26 +438,9 @@ func performSwitch(ctx context.Context, fileSet authfile.AuthFileSet, profileNam
 	if err != nil {
 		return nil, err
 	}
-	res.Refreshed = core.Refreshed
-	if !quiet && core.RefreshWarning != "" {
-		fmt.Printf("Warning: %s\n", core.RefreshWarning)
-	}
-	res.AutoBackup = core.AutoBackup
-	res.Recaptured = core.Recaptured
-	res.RecaptureWarning = core.RecaptureWarning
+	res := &switchResult{Result: core}
 	if !quiet {
-		if core.AutoBackupWarning != "" {
-			fmt.Printf("Warning: %s\n", core.AutoBackupWarning)
-		}
-		if core.AutoBackup != "" {
-			fmt.Printf("Auto-backed up current state to %s\n", core.AutoBackup)
-		}
-		if core.RecaptureWarning != "" {
-			fmt.Printf("Warning: %s\n", core.RecaptureWarning)
-		}
-		if core.Recaptured {
-			fmt.Printf("Re-captured outgoing profile %s (token rotation safety)\n", core.PreviousProfile)
-		}
+		printSwitchResult(os.Stdout, core)
 	}
 
 	// Codex daemon check: swapping auth.json on disk does not affect a running
@@ -514,12 +509,6 @@ func stealthDelay(ctx context.Context, spmCfg *config.SPMConfig) error {
 		fmt.Println("Skipping delay...")
 	}
 	return nil
-}
-
-// logProfileSwitch records a switch in the activity log; see
-// switcher.LogSwitch.
-func logProfileSwitch(db *caamdb.DB, tool, outgoing, incoming string, details map[string]any) {
-	switcher.LogSwitch(db, tool, outgoing, incoming, details)
 }
 
 func resolveActivateProfile(tool string, spmCfg *config.SPMConfig) (profileName string, source string, err error) {

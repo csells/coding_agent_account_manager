@@ -353,36 +353,9 @@ func emptyProfilesMessage(provider string) string {
 	return fmt.Sprintf("📭 No %s accounts yet\n\npress n to log in", providerLabel(provider))
 }
 
-// formatRelativeTime formats a time as a relative string (e.g., "2h ago", "1d ago").
+// formatRelativeTime says how long ago t was, as of now.
 func formatRelativeTime(t time.Time) string {
-	if t.IsZero() {
-		return "never"
-	}
-
-	duration := time.Since(t)
-
-	switch {
-	case duration < time.Minute:
-		return "now"
-	case duration < time.Hour:
-		mins := int(duration.Minutes())
-		return fmt.Sprintf("%dm ago", mins)
-	case duration < 24*time.Hour:
-		hours := int(duration.Hours())
-		return fmt.Sprintf("%dh ago", hours)
-	case duration < 7*24*time.Hour:
-		days := int(duration.Hours() / 24)
-		return fmt.Sprintf("%dd ago", days)
-	case duration < 30*24*time.Hour:
-		weeks := int(duration.Hours() / (24 * 7))
-		return fmt.Sprintf("%dw ago", weeks)
-	default:
-		months := int(duration.Hours() / (24 * 30))
-		if months == 0 {
-			months = 1
-		}
-		return fmt.Sprintf("%dmo ago", months)
-	}
+	return FormatRelativeTime(t, time.Now())
 }
 
 // padRight pads a string to the right with spaces.

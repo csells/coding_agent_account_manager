@@ -224,12 +224,7 @@ func runNext(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if !quiet {
-		if res.RecaptureWarning != "" {
-			fmt.Printf("Warning: %s\n", res.RecaptureWarning)
-		}
-		if res.Recaptured {
-			fmt.Printf("Re-captured outgoing profile %s (token rotation safety)\n", res.PreviousProfile)
-		}
+		printSwitchResult(os.Stdout, res)
 	}
 
 	if !quiet {

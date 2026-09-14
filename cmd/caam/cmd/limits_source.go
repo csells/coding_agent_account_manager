@@ -43,6 +43,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
@@ -103,6 +104,25 @@ type credentialLookup struct {
 	// the one its login writes and its refresh rotates. "" when unknown.
 	LivePath func(provider string) string
 	Now      time.Time
+}
+
+// memoizeActiveName answers each provider once for the lookup's lifetime,
+// which is one command: the lookup asks the same question two or three
+// times per provider and each answer is a keychain pull plus a hash of
+// every vault profile. Not for a lookup that outlives a switch.
+func memoizeActiveName(activeName func(provider string) string) func(provider string) string {
+	var mu sync.Mutex
+	names := make(map[string]string)
+	return func(provider string) string {
+		mu.Lock()
+		defer mu.Unlock()
+		if name, ok := names[provider]; ok {
+			return name
+		}
+		name := activeName(provider)
+		names[provider] = name
+		return name
+	}
 }
 
 // credentialCandidate is what one namespace holds for a name.

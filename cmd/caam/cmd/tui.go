@@ -21,12 +21,17 @@ import (
 // re-capture aborts) and the detail card's Limits section is fetched with
 // the same credential resolution as `caam limits` and `caam monitor`.
 func tuiHooks() tui.Hooks {
+	// One fetcher for the dashboard's life: the Antigravity fetcher caches
+	// the project it resolved, which a fetcher per request threw away.
+	fetcher := usage.NewMultiProfileFetcher()
 	return tui.Hooks{
 		Switch: func(ctx context.Context, provider, profile string) error {
 			_, err := switchProfile(ctx, provider, profile, switchOptions{Quiet: true})
 			return err
 		},
-		Limits:       fetchProfileLimits,
+		Limits: func(ctx context.Context, provider, profile string) (*usage.UsageInfo, error) {
+			return fetchProfileLimits(ctx, fetcher, provider, profile)
+		},
 		Health:       getProfileHealth,
 		Login:        nativeLoginCommand,
 		LiveIdentity: liveAccountIdentity,
@@ -38,36 +43,15 @@ func tuiHooks() tui.Hooks {
 // terminal against the real (live) credential store — the same command a
 // user would type. The hint tells them what the command will want.
 func nativeLoginCommand(provider string) (*exec.Cmd, string, error) {
-	var bin string
-	var args []string
-	var hint string
-	switch provider {
-	case "codex":
-		bin, args, hint = "codex", []string{"login"}, "Complete the Codex login in the browser, then come back here."
-	case "claude":
-		bin, hint = "claude", "Claude Code is starting: type /login, sign in, then exit to come back here."
-	case "gemini":
-		bin, hint = "gemini", "Gemini CLI is starting: choose 'Login with Google', then exit to come back here."
-	case "agy":
-		bin, hint = "agy", "Antigravity is starting: complete the Google login, then exit to come back here."
-	case "kimi":
-		bin, args, hint = "kimi", []string{"login"}, "Complete the Kimi Code device-code login, then come back here."
-	case "zcode":
-		bin, args, hint = "zcode", []string{"login"}, "Complete the Z.AI login, then come back here."
-	case "opencode":
-		bin, args, hint = "opencode", []string{"auth", "login"}, "Complete the OpenCode login, then come back here."
-	case "grok":
-		bin, args, hint = "grok", []string{"login"}, "Complete the Grok login in the browser, then come back here."
-	case "cursor":
-		bin, hint = "cursor", "Cursor is starting: complete the login, then exit to come back here."
-	default:
-		return nil, "", fmt.Errorf("no login flow for %s", provider)
-	}
-	path, err := exec.LookPath(bin)
+	login, err := loginCommandFor(provider, false)
 	if err != nil {
-		return nil, "", fmt.Errorf("%s is not installed (not on PATH)", bin)
+		return nil, "", err
 	}
-	return exec.Command(path, args...), hint, nil
+	path, err := lookPath(login.Bin)
+	if err != nil {
+		return nil, "", fmt.Errorf("%s is not installed (not on PATH)", login.Bin)
+	}
+	return exec.Command(path, login.Args...), login.Hint, nil
 }
 
 // liveAccountIdentity names the account the provider's live credential
@@ -225,7 +209,7 @@ var ErrNoOtherAccount = errors.New("no other account to switch to")
 // place, so the vault copy is stale for exactly that account), else from
 // its vault copy. It presents the access token and nothing more; it never
 // refreshes or rewrites a credential.
-func fetchProfileLimits(ctx context.Context, provider, profile string) (*usage.UsageInfo, error) {
+func fetchProfileLimits(ctx context.Context, fetcher *usage.MultiProfileFetcher, provider, profile string) (*usage.UsageInfo, error) {
 	if !isLimitsProvider(provider) {
 		return nil, fmt.Errorf("%s has no usage API", provider)
 	}
@@ -246,7 +230,7 @@ func fetchProfileLimits(ctx context.Context, provider, profile string) (*usage.U
 		}
 		return nil, fmt.Errorf("credential holds no access token")
 	}
-	results := usage.NewMultiProfileFetcher().FetchAllProfiles(ctx, provider, map[string]string{profile: cred.Token})
+	results := fetcher.FetchAllProfiles(ctx, provider, map[string]string{profile: cred.Token})
 	if len(results) == 0 || results[0].Usage == nil {
 		return nil, fmt.Errorf("no usage returned for %s/%s", provider, profile)
 	}

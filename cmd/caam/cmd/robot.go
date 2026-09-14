@@ -17,6 +17,7 @@ import (
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/tui"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/version"
 	"github.com/spf13/cobra"
@@ -770,7 +771,7 @@ func runRobotNext(cmd *cobra.Command, args []string) error {
 				age := now.Sub(ts)
 				share := min(1.0, age.Hours()/(7*24))
 				sp.score += weight * share
-				sp.reasons = append(sp.reasons, fmt.Sprintf("last used %s", formatLastUsed(ts, now)))
+				sp.reasons = append(sp.reasons, fmt.Sprintf("last used %s", tui.FormatRelativeTime(ts, now)))
 			} else {
 				sp.score += weight
 				sp.reasons = append(sp.reasons, "last used never")
@@ -1415,7 +1416,9 @@ type RobotProfileLimits struct {
 
 // robotFetchLimits reads one account's limits; it is the dashboard's
 // fetchProfileLimits, held in a variable so tests can stand in a fake.
-var robotFetchLimits = fetchProfileLimits
+var robotFetchLimits = func(ctx context.Context, provider, profile string) (*usage.UsageInfo, error) {
+	return fetchProfileLimits(ctx, usage.NewMultiProfileFetcher(), provider, profile)
+}
 
 func runRobotLimits(cmd *cobra.Command, args []string) error {
 	start := time.Now()

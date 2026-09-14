@@ -525,3 +525,27 @@ func TestApplyLiveCredentialsReplacesTheActiveVaultToken(t *testing.T) {
 		t.Error("active profile with no vault token got no live row")
 	}
 }
+
+// memoizeActiveName asks the vault once per provider, including for a
+// provider that has no active profile.
+func TestMemoizeActiveName(t *testing.T) {
+	calls := map[string]int{}
+	active := memoizeActiveName(func(provider string) string {
+		calls[provider]++
+		if provider == "claude" {
+			return "work"
+		}
+		return ""
+	})
+	for range 3 {
+		if got := active("claude"); got != "work" {
+			t.Errorf("active(claude) = %q, want work", got)
+		}
+		if got := active("codex"); got != "" {
+			t.Errorf("active(codex) = %q, want empty", got)
+		}
+	}
+	if calls["claude"] != 1 || calls["codex"] != 1 {
+		t.Errorf("vault asked %v times, want once per provider", calls)
+	}
+}
