@@ -38,36 +38,15 @@ func tuiHooks() tui.Hooks {
 // terminal against the real (live) credential store — the same command a
 // user would type. The hint tells them what the command will want.
 func nativeLoginCommand(provider string) (*exec.Cmd, string, error) {
-	var bin string
-	var args []string
-	var hint string
-	switch provider {
-	case "codex":
-		bin, args, hint = "codex", []string{"login"}, "Complete the Codex login in the browser, then come back here."
-	case "claude":
-		bin, hint = "claude", "Claude Code is starting: type /login, sign in, then exit to come back here."
-	case "gemini":
-		bin, hint = "gemini", "Gemini CLI is starting: choose 'Login with Google', then exit to come back here."
-	case "agy":
-		bin, hint = "agy", "Antigravity is starting: complete the Google login, then exit to come back here."
-	case "kimi":
-		bin, args, hint = "kimi", []string{"login"}, "Complete the Kimi Code device-code login, then come back here."
-	case "zcode":
-		bin, args, hint = "zcode", []string{"login"}, "Complete the Z.AI login, then come back here."
-	case "opencode":
-		bin, args, hint = "opencode", []string{"auth", "login"}, "Complete the OpenCode login, then come back here."
-	case "grok":
-		bin, args, hint = "grok", []string{"login"}, "Complete the Grok login in the browser, then come back here."
-	case "cursor":
-		bin, hint = "cursor", "Cursor is starting: complete the login, then exit to come back here."
-	default:
-		return nil, "", fmt.Errorf("no login flow for %s", provider)
-	}
-	path, err := exec.LookPath(bin)
+	login, err := loginCommandFor(provider, false)
 	if err != nil {
-		return nil, "", fmt.Errorf("%s is not installed (not on PATH)", bin)
+		return nil, "", err
 	}
-	return exec.Command(path, args...), hint, nil
+	path, err := exec.LookPath(login.Bin)
+	if err != nil {
+		return nil, "", fmt.Errorf("%s is not installed (not on PATH)", login.Bin)
+	}
+	return exec.Command(path, login.Args...), login.Hint, nil
 }
 
 // liveAccountIdentity names the account the provider's live credential

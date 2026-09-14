@@ -201,36 +201,20 @@ func runToolLoginInterruptible(ctx context.Context, tool string, deviceCode bool
 	}
 }
 
+// runToolLogin runs the provider's own login (the same command the
+// dashboard's n key runs) in this terminal. Codex is first pointed at the
+// file credential store so the login lands where caam can capture it.
 func runToolLogin(ctx context.Context, tool string, deviceCode bool) error {
-	var cmd *exec.Cmd
-
-	switch tool {
-	case "claude":
-		// Claude uses interactive login
-		cmd = execCommand(ctx, "claude")
-	case "codex":
+	login, err := loginCommandFor(tool, deviceCode)
+	if err != nil {
+		return err
+	}
+	if tool == "codex" {
 		if err := codexprovider.EnsureFileCredentialStore(codexprovider.ResolveHome()); err != nil {
 			return fmt.Errorf("configure codex credential store: %w", err)
 		}
-		cmdArgs := []string{"login"}
-		if deviceCode {
-			cmdArgs = append(cmdArgs, "--device-auth")
-		}
-		cmd = execCommand(ctx, "codex", cmdArgs...)
-	case "gemini":
-		// Gemini uses interactive login
-		cmd = execCommand(ctx, "gemini")
-	case "grok":
-		// Grok Build uses `grok login` (browser OIDC)
-		cmd = execCommand(ctx, "grok", "login")
-	case "opencode":
-		cmd = execCommand(ctx, "opencode")
-	case "cursor":
-		cmd = execCommand(ctx, "cursor")
-	default:
-		return fmt.Errorf("unsupported agent: %s", tool)
 	}
-
+	cmd := execCommand(ctx, login.Bin, login.Args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
