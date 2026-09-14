@@ -74,6 +74,9 @@ const (
 	confirmNone confirmAction = iota
 	confirmDelete
 	confirmActivate
+	// confirmSyncSend: copy vault credentials to and from the machine in
+	// pendingSyncMachine over SSH.
+	confirmSyncSend
 )
 
 // Profile represents a saved auth profile for display.
@@ -1074,8 +1077,9 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Sync panel overlay gets keys when visible.
-	if m.syncPanel != nil && m.syncPanel.Visible() {
+	// Sync panel overlay gets keys when visible — except while a question
+	// it asked (s) is on screen, which the confirm handler answers.
+	if m.syncPanel != nil && m.syncPanel.Visible() && m.state != stateConfirm {
 		return m.handleSyncPanelKeys(msg)
 	}
 
@@ -1654,10 +1658,13 @@ func (m Model) handleSyncPanelKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "s":
+		// Credentials leave the machine here; ask first.
 		if machine := m.syncPanel.SelectedMachine(); machine != nil {
-			m.statusMsg = "Syncing " + machine.Name + "..."
-			spinnerCmd := m.syncPanel.SetSyncing(true)
-			return m, tea.Batch(spinnerCmd, m.syncWithMachine(machine.ID))
+			m.pendingSyncMachine = machine.ID
+			m.openConfirm(confirmSyncSend,
+				fmt.Sprintf("Sync with %s?", machine.Name),
+				fmt.Sprintf("Copy the vault's credentials to and from %s (%s) over SSH?\n\nEvery account is compared and the newer copy replaces the older, on either machine.", machine.Name, machine.Address),
+				"Sync")
 		}
 		return m, nil
 
@@ -2260,6 +2267,22 @@ func (m Model) executeConfirmedAction() (tea.Model, tea.Cmd) {
 			}
 			return m, m.refreshProfiles(ctx)
 		}
+
+	case confirmSyncSend:
+		id := m.pendingSyncMachine
+		m.pendingSyncMachine = ""
+		m.state = stateList
+		m.pendingAction = confirmNone
+		if m.syncPanel == nil || id == "" {
+			return m, nil
+		}
+		name := id
+		if machine := m.syncPanel.SelectedMachine(); machine != nil && machine.ID == id {
+			name = machine.Name
+		}
+		m.statusMsg = "Syncing " + name + "..."
+		spinnerCmd := m.syncPanel.SetSyncing(true)
+		return m, tea.Batch(spinnerCmd, m.syncWithMachine(id))
 	}
 	m.state = stateList
 	m.pendingAction = confirmNone

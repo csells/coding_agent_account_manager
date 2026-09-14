@@ -6,7 +6,52 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/sync"
 )
+
+// s in the sync panel copies vault credentials to and from another machine
+// over SSH. That is asked in a dialog naming the machine, never done from
+// a bare keypress; cancelling sends nothing and leaves the panel up.
+func TestSyncSendAsksFirst(t *testing.T) {
+	m := modelWithTwoClaudeProfiles(Hooks{})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("S")})
+	m = updated.(Model)
+	if m.syncPanel == nil || !m.syncPanel.Visible() {
+		t.Fatalf("S should open the sync panel")
+	}
+	state := &sync.SyncState{Pool: sync.NewSyncPool()}
+	state.Pool.AddMachine(sync.NewMachine("laptop", "192.0.2.10"))
+	m.syncPanel.SetState(state)
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	m = updated.(Model)
+	if cmd != nil || m.state != stateConfirm || m.confirmDialog == nil || m.syncPanel.Syncing() {
+		t.Fatalf("s should ask before syncing: cmd=%v state=%v syncing=%v", cmd, m.state, m.syncPanel.Syncing())
+	}
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"laptop", "192.0.2.10", "SSH", "credential"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the sync question lacks %q:\n%s", want, view)
+		}
+	}
+
+	// Esc: nothing is sent, and the panel is still there.
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = updated.(Model)
+	if cmd != nil || m.state != stateList || m.syncPanel.Syncing() || !m.syncPanel.Visible() {
+		t.Fatalf("esc should send nothing: cmd=%v state=%v syncing=%v visible=%v", cmd, m.state, m.syncPanel.Syncing(), m.syncPanel.Visible())
+	}
+
+	// Yes: the sync starts. The command is not run — it would open SSH.
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	m = updated.(Model)
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = updated.(Model)
+	if cmd == nil || !m.syncPanel.Syncing() || m.state != stateList {
+		t.Fatalf("yes should start the sync: cmd=%v syncing=%v state=%v", cmd, m.syncPanel.Syncing(), m.state)
+	}
+}
 
 func TestSyncPanel_View_Empty(t *testing.T) {
 	p := NewSyncPanel()
