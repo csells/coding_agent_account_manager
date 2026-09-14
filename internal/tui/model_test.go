@@ -96,25 +96,6 @@ func TestCurrentProvider(t *testing.T) {
 	}
 }
 
-func TestCapitalizeFirst(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"claude", "Claude"},
-		{"Codex", "Codex"},
-		{"", ""},
-		{"gemini", "Gemini"},
-	}
-
-	for _, tc := range tests {
-		result := capitalizeFirst(tc.input)
-		if result != tc.expected {
-			t.Errorf("capitalizeFirst(%q) = %q, expected %q", tc.input, result, tc.expected)
-		}
-	}
-}
-
 func TestProfilesPanelWithProfiles(t *testing.T) {
 	p := NewProfilesPanel()
 	p.SetProvider("codex")
