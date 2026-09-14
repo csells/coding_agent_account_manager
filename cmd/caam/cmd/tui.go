@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/handoff"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/identity"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/tui"
@@ -161,22 +161,14 @@ func captureSignedInAccount(tool string) error {
 	return err
 }
 
-// resumeCommands are the commands that reopen a tool's most recent session
-// in a pane after the account under it was switched.
-var resumeCommands = map[string]string{
-	"claude": "claude --continue",
-	"codex":  "codex resume --last",
-	"gemini": "gemini --resume latest",
-	"kimi":   "kimi --continue",
-}
-
 // switchToNextAccount switches tool to the next vaulted account by the
 // configured rotation, through the switch core, and returns the account
-// and the command that resumes a session on its history. With no other
-// vaulted account it returns ErrNoOtherAccount.
+// and the command that resumes a session on its history
+// (handoff.ResumeCommand). With no other vaulted account it returns
+// switcher.ErrNoOtherAccount.
 func switchToNextAccount(ctx context.Context, tool string) (account, resume string, err error) {
-	resume, ok := resumeCommands[tool]
-	if !ok {
+	resume = handoff.ResumeCommand(tool)
+	if resume == "" {
 		return "", "", fmt.Errorf("%s has no resume command; switch and restart it by hand", tool)
 	}
 	get, ok := tools[tool]
@@ -199,7 +191,7 @@ func switchToNextAccount(ctx context.Context, tool string) (account, resume stri
 		}
 	}
 	if len(others) == 0 {
-		return "", "", ErrNoOtherAccount
+		return "", "", switcher.ErrNoOtherAccount
 	}
 	spmCfg, cfgErr := config.LoadSPMConfig()
 	if cfgErr != nil {
@@ -215,10 +207,6 @@ func switchToNextAccount(ctx context.Context, tool string) (account, resume stri
 	}
 	return selection.Selected, resume, nil
 }
-
-// ErrNoOtherAccount is returned by switchToNextAccount when the tool has
-// only the signed-in account vaulted.
-var ErrNoOtherAccount = errors.New("no other account to switch to")
 
 // fetchProfileLimits reads one profile's rate-limit windows: from the live
 // credential when the profile is the active one (the tool rotates it in

@@ -11,7 +11,7 @@ func (h *CodexLoginHandler) Provider() string {
 // ResumeArgs are the flags that reopen the most recent session, so a
 // switched account is in use at once without losing the conversation.
 func (h *CodexLoginHandler) ResumeArgs() []string {
-	return []string{"resume", "--last"}
+	return ResumeArgs(h.Provider())
 }
 
 // Ensure CodexLoginHandler implements LoginHandler.

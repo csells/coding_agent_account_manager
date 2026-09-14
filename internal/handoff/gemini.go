@@ -11,7 +11,7 @@ func (h *GeminiLoginHandler) Provider() string {
 // ResumeArgs are the flags that reopen the most recent session, so a
 // switched account is in use at once without losing the conversation.
 func (h *GeminiLoginHandler) ResumeArgs() []string {
-	return []string{"--resume", "latest"}
+	return ResumeArgs(h.Provider())
 }
 
 // Ensure GeminiLoginHandler implements LoginHandler.

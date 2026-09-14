@@ -20,6 +20,11 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/refresh"
 )
 
+// ErrNoOtherAccount is what a switch-to-the-next-account caller reports
+// when the tool has only the signed-in Account vaulted: there is nothing
+// to switch to, and the caller falls back (to a login, or to saying so).
+var ErrNoOtherAccount = errors.New("no other account to switch to")
+
 // Options describes one switch.
 type Options struct {
 	// Profile is the Account to make Active.

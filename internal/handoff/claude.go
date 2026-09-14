@@ -11,7 +11,7 @@ func (h *ClaudeLoginHandler) Provider() string {
 // ResumeArgs are the flags that reopen the most recent session, so a
 // switched account is in use at once without losing the conversation.
 func (h *ClaudeLoginHandler) ResumeArgs() []string {
-	return []string{"--continue"}
+	return ResumeArgs(h.Provider())
 }
 
 // Ensure ClaudeLoginHandler implements LoginHandler.

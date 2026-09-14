@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/handoff"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -172,7 +174,7 @@ var (
 		return account, err
 	}
 	// weztermResumeDelay is the pause between ending a session and resuming it.
-	weztermResumeDelay           = 1500 * time.Millisecond
+	weztermResumeDelay           = handoff.DefaultResumeDelay
 	weztermIsTerminal            = term.IsTerminal
 	weztermNow                   = time.Now
 	weztermDebugWriter io.Writer = os.Stderr
@@ -229,8 +231,9 @@ func weztermTargetsFor(cmd *cobra.Command, tool string) ([]weztermTarget, error)
 
 func runWeztermSwitchAll(cmd *cobra.Command, args []string) error {
 	tool := strings.ToLower(strings.TrimSpace(args[0]))
-	if _, ok := resumeCommands[tool]; !ok {
-		return fmt.Errorf("%s has no resume command (supported: claude, codex, gemini, kimi)", tool)
+	resume := handoff.ResumeCommand(tool)
+	if resume == "" {
+		return fmt.Errorf("%s has no resume command (supported: %s)", tool, strings.Join(handoff.ResumeProviders(), ", "))
 	}
 	targets, err := weztermTargetsFor(cmd, tool)
 	if err != nil {
@@ -266,27 +269,20 @@ func runWeztermSwitchAll(cmd *cobra.Command, args []string) error {
 	// One switch per tool: every pane shares the live credential.
 	account, err := weztermSwitchFunc(tool)
 	if err != nil {
-		if errors.Is(err, ErrNoOtherAccount) {
+		if errors.Is(err, switcher.ErrNoOtherAccount) {
 			return fmt.Errorf("%s has no other vaulted account to switch to; log another in (caam add %s, or n in the dashboard), or use login-all", tool, tool)
 		}
 		return fmt.Errorf("not resuming any pane: %w", err)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Switched %s to %s\n", tool, account)
 
-	resume := resumeCommands[tool]
 	successCount, failCount := 0, 0
 	for _, target := range targets {
-		if err := weztermSendTextFunc(target.Pane.ID, "/exit\n"); err != nil {
+		paneID := target.Pane.ID
+		send := func(text string) error { return weztermSendTextFunc(paneID, text) }
+		if err := handoff.ResumeInPane(context.Background(), send, resume, weztermResumeDelay); err != nil {
 			failCount++
-			fmt.Fprintf(cmd.ErrOrStderr(), "pane %d: %v\n", target.Pane.ID, err)
-			continue
-		}
-		if weztermResumeDelay > 0 {
-			time.Sleep(weztermResumeDelay)
-		}
-		if err := weztermSendTextFunc(target.Pane.ID, resume+"\n"); err != nil {
-			failCount++
-			fmt.Fprintf(cmd.ErrOrStderr(), "pane %d: %v\n", target.Pane.ID, err)
+			fmt.Fprintf(cmd.ErrOrStderr(), "pane %d: %v\n", paneID, err)
 			continue
 		}
 		successCount++

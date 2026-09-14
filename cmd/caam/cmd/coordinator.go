@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -145,9 +144,6 @@ func runCoordinator(cmd *cobra.Command, args []string) error {
 	// account goes into the vault first, since a login is a logout first.
 	config.Recover = func(ctx context.Context, paneID int) (string, error) {
 		_, resume, err := switchToNextAccount(ctx, "claude")
-		if errors.Is(err, ErrNoOtherAccount) {
-			return "", coordinator.ErrNoOtherAccount
-		}
 		return resume, err
 	}
 	config.BeforeLogin = func(ctx context.Context, paneID int) error {
