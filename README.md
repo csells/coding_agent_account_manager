@@ -756,20 +756,21 @@ and lets you switch without leaving the screen:
 ```
 caam monitor  refreshed 14:16:59, next 14:17:59
 
-PROFILE                                 5-HOUR                    WEEKLY                           WEEKLY FABLE                 STATUS
-* claude/chris@gascity.com              70% left, resets 6:10 PM  47% left, resets Tue 5:00 PM     6% left, resets Tue 5:00 PM  ok
-  claude/csells@sellsbrothers.com       -                         -                                -                            no credential captured for this profile...
-* codex/ops+chris-claude-1@gascity.com  -                         30% left, resets Sep 20 8:45 AM  -                            ok
-* zcode/chris@gascity.com               -                         -                                -                            no Z.ai coding plan on this account
+PROFILE                                 5-HOUR    RESETS   WEEKLY    RESETS          WEEKLY FABLE  RESETS       STATUS
+* claude/chris@gascity.com              70% left  6:10 PM  47% left  Tue 5:00 PM     6% left       Tue 5:00 PM  ok
+  claude/csells@sellsbrothers.com       -         -        -         -               -             -            no credential captured for this profile...
+* codex/ops+chris-claude-1@gascity.com  -         -        30% left  Sep 20 8:45 AM  -             -            ok
+* zcode/chris@gascity.com               -         -        -         -               -             -            no Z.ai coding plan on this account
 
 up/down select   enter switch   r refresh   q quit     * = active account
 ```
 
 - **Columns come from what each agent's service reports.** A 5-hour window, a
   weekly window, a per-model weekly window (`WEEKLY FABLE`, `WEEKLY OPUS`), a
-  monthly one where an agent has it. Nothing is invented: an agent without a
-  window leaves the cell as `-`, and neither Anthropic nor OpenAI publishes a
-  monthly cap.
+  monthly one where an agent has it. Every window is two columns: what is
+  left under the window's name, and the local clock it resets at under the
+  `RESETS` beside it. Nothing is invented: an agent without a window leaves
+  both cells as `-`, and neither Anthropic nor OpenAI publishes a monthly cap.
 - **The active account per agent is starred.** Select any other row and
   press Enter; the dashboard asks first, then switches through the same path
   as `caam activate`: the outgoing account is re-captured into the vault
@@ -800,26 +801,27 @@ selection would leave it, so nothing shifts under the cursor. Each slot shows
 the agent's account count, active account and tightest windows
 (`5h 53% · wk 44% · Fable 0%`). The selected agent's accounts fill the
 pane below, one row each, with every rate-limit window the agent's service
-reports as a column (`53% left · 6:10 PM`) and the active account marked
+reports as two columns — what is left (`53% left`) and, under `RESETS`
+beside it, when it comes back (`6:10 PM`) — and the active account marked
 `●`. ↑/↓ move between them, and the selected account expands in place,
 like a tree node, with the lines its row cannot hold: auth, plan, health
 and token, its vault path, and what the keys do. Move on and it folds up
 again, so an agent with many accounts is one list to scroll through:
 
 ```
-╭─ Agents (8) ─────────────────────────────────────────────────────────────╮
-│ ▸ Claude (2)          Codex (1)             Antigravity (1)               │
-│ ● chris@gascity.com   ● ops+chris-claude-1… ● chris@gascity.com     5 › │
-│ 5h 53% · wk 44% · …   wk 30%                auth expired (re-login)      │
-╰──────────────────────────────────────────────────────────────────────────╯
-╭─ Claude accounts ──────────────────────────────────── limits as of 17:08 ─╮
-│ NAME                 STATUS     5-HOUR             WEEKLY        FABLE     │
-│   chris@gascity.com  🟢 1h left 53% left · 6:10 PM 44% · Tue 5PM 0% · Tue │
-│ ● csells@sellsbro…   🟢 6h left 88% left · 8:50 PM 78% · Wed    64% · Wed │
-│   ├─ oauth · max · Healthy · token 5h47m                                  │
-│   ├─ ~/vault/claude/csells@sellsbrothers.com                              │
-│   └─ enter switch   r refresh   e edit   o browser   d delete   i card       │
-╰──────────────────────────────────────────────────────────────────────────╯
+╭─ Agents (8) ──────────────────────────────────────────────────────────────────────────────────╮
+│ ▸ Claude (2)          Codex (1)             Antigravity (1)                                   │
+│ ● chris@gascity.com   ● ops+chris-claude-1… ● chris@gascity.com                           5 › │
+│ 5h 53% · wk 44% · …   wk 30%                auth expired (re-login)                           │
+╰───────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Claude accounts ──────────────────────────────────────────────────────── limits as of 17:08 ─╮
+│ NAME                STATUS     5-HOUR   RESETS  WEEKLY   RESETS      WEEKLY FABLE RESETS      │
+│   chris@gascity.com 🟢 1h left 53% left 6:10 PM 44% left Tue 5:00 PM 0% left      Tue 5:00 PM │
+│ ● csells@sellsbro…  🟢 6h left 88% left 8:50 PM 78% left Wed 5:00 PM 64% left     Wed 5:00 PM │
+│   ├─ oauth · max · Healthy · token 5h47m                                                      │
+│   ├─ ~/vault/claude/csells@sellsbrothers.com                                                  │
+│   └─ enter switch   r refresh   e edit   o browser   d delete   i card                        │
+╰───────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
 Only agents with a captured account are on the strip; there is
