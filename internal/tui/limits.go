@@ -61,9 +61,9 @@ func limitsKey(provider, profile string) string { return provider + "/" + profil
 
 // limitsErrTTL is how long a failed fetch is left alone before the
 // selection landing on that profile again retries it. Without it a
-// profile whose fetch fails (expired auth, a 403, no network) was retried
-// on every keypress.
-const limitsErrTTL = 20 * time.Second
+// profile whose fetch fails (expired auth, a 403, a 429) was retried on
+// every keypress — and a 429 is exactly the answer hammering earns.
+const limitsErrTTL = limitsTTL
 
 // limitsFetchFor starts a fetch for one profile when the cached entry is
 // missing or has aged past its TTL (limitsTTL for a result, limitsErrTTL

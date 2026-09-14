@@ -133,6 +133,17 @@ func TestProviderStrip_FitsEveryWidthAndKeepsTheHighlight(t *testing.T) {
 	}
 }
 
+func TestProviderStrip_CardsFillTheRow(t *testing.T) {
+	m := nineProviders(t, 159, 42)
+	_, count := m.stripWindow(stripCards, m.stripItems(), paneGeom(m.width).inner)
+	if count != 5 {
+		t.Fatalf("159 columns should show 5 cards, got %d:\n%s", count, strings.Join(stripLines(m), "\n"))
+	}
+	if w := cardWidth(155, 9); w < minCardWidth || w > providerCardWidth {
+		t.Fatalf("cardWidth(155, 9) = %d, outside [%d, %d]", w, minCardWidth, providerCardWidth)
+	}
+}
+
 func TestProviderStrip_ZeroAccountProvidersHaveSlots(t *testing.T) {
 	m := nineProviders(t, 159, 42)
 	joined := strings.Join(stripLines(m), "\n")

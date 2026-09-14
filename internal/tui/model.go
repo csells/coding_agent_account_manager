@@ -2414,8 +2414,7 @@ func (m Model) syncDetailPanel() {
 	}
 
 	if path == "" {
-		vault := authfile.NewVault(m.vaultPath)
-		path = vault.ProfilePath(provider, profileName)
+		path = m.vaultPathFor(provider, profileName)
 	}
 
 	detail := &DetailInfo{

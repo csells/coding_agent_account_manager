@@ -103,6 +103,7 @@ func (k stripKind) lines() int {
 // cards rather than wider ones.
 const (
 	providerCardWidth = 30
+	minCardWidth      = 26
 	chipSummaryWidth  = 28
 	// Column bounds for the accounts table's NAME column.
 	maxNameWidth = 34
@@ -253,7 +254,7 @@ func (m Model) slotWidth(kind stripKind, it stripItem, inner int) int {
 	frame := m.stripStyles.Item.GetHorizontalFrameSize()
 	switch kind {
 	case stripCards:
-		return min(providerCardWidth, inner)
+		return cardWidth(inner, len(m.providers))
 	case stripChips:
 		w := frame + 2 + lipgloss.Width(it.label) + 1 + len(strconv.Itoa(it.count))
 		if it.summary != "" && it.count > 0 {
@@ -263,6 +264,28 @@ func (m Model) slotWidth(kind stripKind, it stripItem, inner int) int {
 	default:
 		return min(frame+2+lipgloss.Width(it.label)+1+len(strconv.Itoa(it.count))+1, inner)
 	}
+}
+
+// cardWidth is the card width that fits the most cards in a row of inner
+// columns, preferring wider cards among equal counts: 30 columns is the
+// ideal, 26 the least a card stays readable at. Room for the edge
+// indicators is reserved when not every card can fit.
+func cardWidth(inner, n int) int {
+	best, bestCount := providerCardWidth, 0
+	for w := providerCardWidth; w >= minCardWidth; w-- {
+		reserve := 0
+		if n*(w+1)-1 > inner {
+			reserve = 8
+		}
+		count := (inner - reserve + 1) / (w + 1)
+		if count > n {
+			count = n
+		}
+		if count > bestCount {
+			best, bestCount = w, count
+		}
+	}
+	return min(best, inner)
 }
 
 // stripWindow decides which slots are visible: the scroll offset kept on
@@ -324,11 +347,6 @@ func (m Model) stripWindow(kind stripKind, items []stripItem, inner int) (offset
 	}
 	for count = fit(offset); sel >= offset+count && offset < sel; count = fit(offset) {
 		offset++
-	}
-	// Do not leave slots hidden on the left while the row has room.
-	for offset > 0 && fit(offset-1) >= sel-offset+2 {
-		offset--
-		count = fit(offset)
 	}
 	return offset, count
 }

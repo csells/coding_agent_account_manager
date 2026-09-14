@@ -820,9 +820,9 @@ again, so a provider with many accounts is one list to scroll through:
 
 `i` opens the full card as an overlay and `r` refreshes the limits shown.
 Limits are fetched for the accounts on screen — the selected provider's
-rows and every provider's active account — at most once a minute each
-(a failed fetch is left alone for twenty seconds), through the same
-credential resolution as `caam limits`; a failed fetch keeps the last
+rows and every provider's active account — at most once a minute each,
+failures included, through the same credential resolution as
+`caam limits`; a failed fetch keeps the last
 known figures, marked `*`, and says so in the expansion. Keys typed into
 search or a dialog never start a fetch. Enter switches through the same
 re-capture-first path as `caam activate`, and the outcome — switched,
