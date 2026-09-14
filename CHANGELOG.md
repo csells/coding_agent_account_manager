@@ -189,6 +189,16 @@ The design and the facts behind it are in `docs/ACCOUNT_SWITCHER.md`.
 
 ### Fixed
 
+- **The test suite ran to the end.** A test that reached `syscall.Exec` was
+  replaced by the isolated test environment's no-op stand-in, which exited
+  0, so the cmd package silently ran 366 of its 476 tests and reported six
+  failures as green. The package's TestMain now fences the exec; the six
+  tests are fixed; every listed test runs (5240 pass / 0 fail / 5 skip).
+- **Isomorphic simplification pass** (15 one-lever commits, each carrying
+  its equivalence card): duplicated helpers folded into one, 302 non-test
+  lines removed, every help screen and `paths`/`detect`/completion output
+  byte-identical before and after, race clean.
+
 - A `caam monitor` refresh that yields no snapshot keeps the rows instead
   of panicking.
 - A dashboard status-bar message is dropped when the focus moves to another
