@@ -439,9 +439,9 @@ func TestKeyBindingsHaveHelp(t *testing.T) {
 	}{
 		{"Up", km.Up, "move up"},
 		{"Down", km.Down, "move down"},
-		{"Left", km.Left, "previous provider"},
-		{"Right", km.Right, "next provider"},
-		{"Tab", km.Tab, "cycle providers"},
+		{"Left", km.Left, "previous agent"},
+		{"Right", km.Right, "next agent"},
+		{"Tab", km.Tab, "cycle agents"},
 		{"Enter", km.Enter, "activate profile"},
 		{"Delete", km.Delete, "delete profile"},
 		{"Edit", km.Edit, "edit profile"},

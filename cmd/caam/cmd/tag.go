@@ -29,11 +29,11 @@ Examples:
   caam tag remove claude work personal  # Remove a tag from a profile
   caam tag list claude work             # List tags for a profile
   caam tag clear claude work            # Remove all tags from a profile
-  caam tag all claude                   # List all tags used for a provider`,
+  caam tag all claude                   # List all tags used for an agent`,
 }
 
 var tagAddCmd = &cobra.Command{
-	Use:   "add <tool> <profile> <tag> [tag...]",
+	Use:   "add <agent> <profile> <tag> [tag...]",
 	Short: "Add tags to a profile",
 	Long: `Add one or more tags to a profile.
 
@@ -48,7 +48,7 @@ Examples:
 }
 
 var tagRemoveCmd = &cobra.Command{
-	Use:   "remove <tool> <profile> <tag> [tag...]",
+	Use:   "remove <agent> <profile> <tag> [tag...]",
 	Short: "Remove tags from a profile",
 	Long: `Remove one or more tags from a profile.
 
@@ -60,7 +60,7 @@ Examples:
 }
 
 var tagListCmd = &cobra.Command{
-	Use:   "list <tool> <profile>",
+	Use:   "list <agent> <profile>",
 	Short: "List tags for a profile",
 	Long: `List all tags assigned to a profile.
 
@@ -72,7 +72,7 @@ Examples:
 }
 
 var tagClearCmd = &cobra.Command{
-	Use:   "clear <tool> <profile>",
+	Use:   "clear <agent> <profile>",
 	Short: "Remove all tags from a profile",
 	Long: `Remove all tags from a profile.
 
@@ -83,9 +83,9 @@ Examples:
 }
 
 var tagAllCmd = &cobra.Command{
-	Use:   "all <tool>",
-	Short: "List all tags used for a provider",
-	Long: `List all unique tags used across all profiles for a provider.
+	Use:   "all <agent>",
+	Short: "List all tags used for an agent",
+	Long: `List all unique tags used across all profiles for an agent.
 
 Examples:
   caam tag all claude

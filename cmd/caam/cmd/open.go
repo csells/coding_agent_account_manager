@@ -12,9 +12,9 @@ import (
 )
 
 var openCmd = &cobra.Command{
-	Use:   "open <tool> [profile]",
-	Short: "Open provider account page in browser",
-	Long: `Opens the account management page for a provider in your browser.
+	Use:   "open <agent> [profile]",
+	Short: "Open an agent's account page in a browser",
+	Long: `Opens the account management page for an agent in your browser.
 
 If a profile is specified and has browser configuration, the URL will be
 opened in that browser profile (so you see the correct account's dashboard).
@@ -22,7 +22,7 @@ opened in that browser profile (so you see the correct account's dashboard).
 If no profile is specified, or the profile has no browser config, the URL
 will be opened in your system's default browser.
 
-Providers and their URLs:
+Agents and their URLs:
   codex    - OpenAI Platform (https://platform.openai.com/account)
   claude   - Anthropic Console (https://console.anthropic.com/)
   gemini   - Google AI Studio (https://aistudio.google.com/)
@@ -42,7 +42,7 @@ Examples:
 		// Validate provider using centralized metadata
 		meta, ok := provider.GetProviderMeta(tool)
 		if !ok {
-			return fmt.Errorf("unknown provider: %s (supported: %s)", tool, supportedToolsList())
+			return fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList())
 		}
 
 		// Allow custom URL override

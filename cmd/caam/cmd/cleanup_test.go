@@ -100,8 +100,8 @@ func TestFormatBytes(t *testing.T) {
 // =============================================================================
 
 func TestUseCommand(t *testing.T) {
-	if useCmd.Use != "use <provider> <profile>" {
-		t.Errorf("Expected Use 'use <provider> <profile>', got %q", useCmd.Use)
+	if useCmd.Use != "use <agent> <profile>" {
+		t.Errorf("Expected Use 'use <agent> <profile>', got %q", useCmd.Use)
 	}
 
 	if useCmd.Short == "" {
@@ -137,8 +137,8 @@ func TestUseCommandArgs(t *testing.T) {
 }
 
 func TestWhichCommand(t *testing.T) {
-	if whichCmd.Use != "which [provider]" {
-		t.Errorf("Expected Use 'which [provider]', got %q", whichCmd.Use)
+	if whichCmd.Use != "which [agent]" {
+		t.Errorf("Expected Use 'which [agent]', got %q", whichCmd.Use)
 	}
 
 	if whichCmd.Short == "" {
@@ -173,8 +173,8 @@ func TestWhichCommandArgs(t *testing.T) {
 // =============================================================================
 
 func TestEnvCmd_Structure(t *testing.T) {
-	if envCmd.Use != "env <tool> <profile>" {
-		t.Errorf("Expected Use 'env <tool> <profile>', got %q", envCmd.Use)
+	if envCmd.Use != "env <agent> <profile>" {
+		t.Errorf("Expected Use 'env <agent> <profile>', got %q", envCmd.Use)
 	}
 
 	if envCmd.Short == "" {

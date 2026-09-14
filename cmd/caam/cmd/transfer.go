@@ -98,7 +98,7 @@ func resolveExportTargets(v *authfile.Vault, req exportRequest) ([]exportTarget,
 		entries, err := os.ReadDir(v.BasePath())
 		if err != nil {
 			if os.IsNotExist(err) {
-				return nil, fmt.Errorf("vault is empty; create profiles with 'caam backup <tool> <name>'")
+				return nil, fmt.Errorf("vault is empty; create profiles with 'caam backup <agent> <name>'")
 			}
 			return nil, fmt.Errorf("read vault: %w", err)
 		}
@@ -136,10 +136,10 @@ func resolveExportTargets(v *authfile.Vault, req exportRequest) ([]exportTarget,
 	case req.ToolAll:
 		tool := strings.ToLower(strings.TrimSpace(req.Tool))
 		if tool == "" {
-			return nil, fmt.Errorf("tool cannot be empty")
+			return nil, fmt.Errorf("agent cannot be empty")
 		}
 		if _, ok := tools[tool]; !ok {
-			return nil, fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList())
+			return nil, fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList())
 		}
 
 		profiles, err := v.List(tool)
@@ -162,10 +162,10 @@ func resolveExportTargets(v *authfile.Vault, req exportRequest) ([]exportTarget,
 		tool := strings.ToLower(strings.TrimSpace(req.Tool))
 		profile := strings.TrimSpace(req.Profile)
 		if tool == "" || profile == "" {
-			return nil, fmt.Errorf("tool and profile are required")
+			return nil, fmt.Errorf("agent and profile are required")
 		}
 		if _, ok := tools[tool]; !ok {
-			return nil, fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList())
+			return nil, fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList())
 		}
 
 		dirPath := v.ProfilePath(tool, profile)
@@ -367,11 +367,11 @@ func readAndValidateManifest(tr *tar.Reader) (*vaultExportManifest, error) {
 
 	seen := make(map[string]struct{})
 	for _, item := range manifest.Items {
-		if err := validateVaultSegment("tool", item.Tool); err != nil {
+		if err := validateVaultSegment("agent", item.Tool); err != nil {
 			return nil, err
 		}
 		if _, ok := tools[item.Tool]; !ok {
-			return nil, fmt.Errorf("unsupported tool in archive: %s", item.Tool)
+			return nil, fmt.Errorf("unsupported agent in archive: %s", item.Tool)
 		}
 		if err := validateVaultSegment("profile", item.Profile); err != nil {
 			return nil, err
@@ -422,16 +422,16 @@ func importArchive(r io.Reader, v *authfile.Vault, opt importOptions) (*vaultExp
 	renameToProfile := ""
 	if opt.AsTool != "" || opt.AsProfile != "" {
 		if opt.AsTool == "" || opt.AsProfile == "" {
-			return nil, fmt.Errorf("--as must include both tool and profile")
+			return nil, fmt.Errorf("--as must include both agent and profile")
 		}
 		if len(manifest.Items) != 1 {
 			return nil, fmt.Errorf("--as requires an archive containing exactly one profile")
 		}
-		if err := validateVaultSegment("tool", opt.AsTool); err != nil {
+		if err := validateVaultSegment("agent", opt.AsTool); err != nil {
 			return nil, err
 		}
 		if _, ok := tools[opt.AsTool]; !ok {
-			return nil, fmt.Errorf("unknown tool: %s (supported: %s)", opt.AsTool, supportedToolsList())
+			return nil, fmt.Errorf("unknown agent: %s (supported: %s)", opt.AsTool, supportedToolsList())
 		}
 		if err := validateVaultSegment("profile", opt.AsProfile); err != nil {
 			return nil, err
@@ -553,7 +553,7 @@ func importArchive(r io.Reader, v *authfile.Vault, opt importOptions) (*vaultExp
 			toolDir := filepath.Join(v.BasePath(), targetTool)
 			if err := os.MkdirAll(toolDir, 0700); err != nil {
 				cleanup()
-				return nil, fmt.Errorf("create tool dir: %w", err)
+				return nil, fmt.Errorf("create agent dir: %w", err)
 			}
 			tmpDir, err := os.MkdirTemp(toolDir, ".import_tmp_"+targetProfile+"_")
 			if err != nil {
@@ -633,7 +633,7 @@ func splitVaultTarPath(name string) (tool, profile, rel string, err error) {
 
 	tool = parts[1]
 	profile = parts[2]
-	if err := validateVaultSegment("tool", tool); err != nil {
+	if err := validateVaultSegment("agent", tool); err != nil {
 		return "", "", "", err
 	}
 	if err := validateVaultSegment("profile", profile); err != nil {

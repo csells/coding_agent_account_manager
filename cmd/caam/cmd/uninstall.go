@@ -22,7 +22,7 @@ var uninstallCmd = &cobra.Command{
 	Long: `Restore auth files from protected "_original" backups (if present) and then remove caam's data/config.
 
 Operation order is critical:
-  1) RESTORE original auth files from vault/<tool>/_original/
+  1) RESTORE original auth files from vault/<agent>/_original/
   2) THEN remove caam data (vault/profiles/health/config/db/etc)
 
 Examples:

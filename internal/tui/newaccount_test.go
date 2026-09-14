@@ -64,7 +64,7 @@ func TestNewAccount_RecapturesTheActiveAccountThenRunsTheLogin(t *testing.T) {
 		t.Fatalf("picker lists %d providers, want all %d", len(m.providerPicker.choices), len(m.allProviders))
 	}
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"Log in to which provider?", "▸ Claude", "2 accounts", "Cursor", "not installed"} {
+	for _, want := range []string{"Log in to which agent?", "▸ Claude", "2 accounts", "Cursor", "not installed"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("picker lacks %q:\n%s", want, view)
 		}

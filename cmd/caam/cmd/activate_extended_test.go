@@ -117,7 +117,7 @@ func TestActivateCommand_Extended(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(outputStr), &errOutput))
 
 	assert.False(t, errOutput.Success)
-	assert.Contains(t, errOutput.Error, "unknown tool")
+	assert.Contains(t, errOutput.Error, "unknown agent")
 
 	h.EndStep("Error")
 

@@ -28,13 +28,13 @@ var monitorCmd = &cobra.Command{
 
 In a terminal, table mode is an interactive dashboard: one row per captured
 account, one column per rate-limit window (5-hour, weekly, per-model weekly,
-and whatever else the provider reports) showing the share LEFT and the local
-reset time, a * on each provider's active account, and a STATUS column. It
+and whatever else the agent's service reports) showing the share LEFT and the local
+reset time, a * on each agent's active account, and a STATUS column. It
 refreshes on the interval and on demand. Refreshing only presents the access
 token caam already holds; it never refreshes or rewrites a credential, so
 leaving it running cannot disturb a rotating refresh-token family.
 
-Select a row and press Enter to switch that provider to that account. The
+Select a row and press Enter to switch that agent to that account. The
 switch goes through the same path as 'caam activate': the outgoing account is
 re-captured into the vault first, and a failed re-capture aborts the switch.
 Sessions already running keep their current login (codex until it restarts,
@@ -53,7 +53,7 @@ Examples:
   caam monitor --format brief --once        # tmux status bar integration
   caam monitor --format alerts --threshold 80  # Alert mode
   caam monitor --format json --once | jq .  # JSON output for scripting
-  caam monitor --provider claude            # Monitor specific provider
+  caam monitor --provider claude            # Monitor one agent
 
 Keyboard shortcuts (dashboard):
   up/down, j/k - Select a row
@@ -67,7 +67,7 @@ func init() {
 	rootCmd.AddCommand(monitorCmd)
 
 	monitorCmd.Flags().DurationP("interval", "i", 30*time.Second, "refresh interval")
-	monitorCmd.Flags().StringSliceP("provider", "p", nil, "providers to monitor (default: every provider with a usage API)")
+	monitorCmd.Flags().StringSliceP("provider", "p", nil, "agents to monitor (default: every agent with a usage API)")
 	monitorCmd.Flags().StringP("format", "f", "table", "output format: table, brief, json, alerts")
 	monitorCmd.Flags().Float64P("threshold", "t", 80.0, "alert threshold percentage")
 	monitorCmd.Flags().BoolP("once", "1", false, "fetch once and exit")

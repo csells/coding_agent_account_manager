@@ -23,12 +23,12 @@ import (
 
 // precheckCmd shows session planning with recommended profiles, burn rates, and rotation forecast.
 var precheckCmd = &cobra.Command{
-	Use:   "precheck [provider]",
+	Use:   "precheck [agent]",
 	Short: "Plan your session - see which profile is best",
 	Long: `Shows session planning information to help you choose the best profile.
 
-The precheck command fetches real-time rate limit data for all profiles of a
-provider and shows:
+The precheck command fetches real-time rate limit data for all profiles of an
+agent and shows:
 - Recommended profile based on rotation algorithm
 - Backup profiles in priority order
 - Profiles currently in cooldown
@@ -155,7 +155,7 @@ func runPrecheckCmd(cmd *cobra.Command, args []string) error {
 
 	// Validate provider
 	if _, ok := tools[provider]; !ok {
-		return fmt.Errorf("unknown provider: %s (supported: claude, codex, gemini)", provider)
+		return fmt.Errorf("unknown agent: %s (supported: %s)", provider, supportedToolsList())
 	}
 
 	// Initialize dependencies

@@ -46,7 +46,7 @@ type activateRotationAlternative struct {
 
 // activateCmd restores auth files from the vault.
 var activateCmd = &cobra.Command{
-	Use: "activate <tool> [profile-name]",
+	Use: "activate <agent> [profile-name]",
 	// "switch" is the unambiguous activation alias. "use" is intentionally NOT an
 	// alias here: there is a separate top-level `caam use <provider> <profile>`
 	// command that sets the default profile in config (different semantics), so
@@ -72,7 +72,7 @@ are available (configured in config.yaml):
   round_robin - Sequential rotation through profiles
   random      - Random selection
 
-After activating, just run the tool normally - it will use the new account.`,
+After activating, just run the agent normally - it will use the new account.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: runActivate,
 }
@@ -121,7 +121,7 @@ func runActivate(cmd *cobra.Command, args []string) error {
 
 	getFileSet, ok := tools[tool]
 	if !ok {
-		return emitJSONError(fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList()))
+		return emitJSONError(fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList()))
 	}
 
 	// Ensure vault is initialized before using it
@@ -358,7 +358,7 @@ func switchProfile(ctx context.Context, tool, profileName string, opts switchOpt
 	tool = strings.ToLower(strings.TrimSpace(tool))
 	getFileSet, ok := tools[tool]
 	if !ok {
-		return nil, fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList())
+		return nil, fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList())
 	}
 	if vault == nil {
 		vault = authfile.NewVault(authfile.DefaultVaultPath())

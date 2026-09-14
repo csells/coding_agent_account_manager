@@ -865,7 +865,7 @@ func DefaultCommands() []CommandAction {
 		{Name: "Refresh", Description: "Re-fetch limits, and the token first when it has expired", Shortcut: "r", Action: "refresh"},
 		{Name: "Delete Account", Description: "Delete the selected account from the vault", Shortcut: "d", Action: "delete"},
 		{Name: "Edit Account", Description: "Edit account details", Shortcut: "e", Action: "edit"},
-		{Name: "Open in Browser", Description: "Open provider in browser", Shortcut: "o", Action: "open"},
+		{Name: "Open in Browser", Description: "Open the agent's account page in the browser", Shortcut: "o", Action: "open"},
 		{Name: "Set Project Association", Description: "Link account to current project", Shortcut: "p", Action: "project"},
 		{Name: "Usage Statistics", Description: "View usage stats", Shortcut: "u", Action: "usage"},
 		{Name: "Sync Pool", Description: "Manage sync pool", Shortcut: "S", Action: "sync"},

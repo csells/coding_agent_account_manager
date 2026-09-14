@@ -22,9 +22,9 @@ The API enables web UIs and automation tools to interact with caam without shell
 
 ENDPOINTS:
   GET  /health                  Health check (no auth)
-  GET  /api/v1/status           Overall status for all tools
+  GET  /api/v1/status           Overall status for all agents
   GET  /api/v1/profiles         List all profiles
-  GET  /api/v1/profiles?tool=X  List profiles for a specific tool
+  GET  /api/v1/profiles?tool=X  List profiles for one agent
   GET  /api/v1/profiles/X/Y     Get profile details
   DELETE /api/v1/profiles/X/Y   Delete a profile
   GET  /api/v1/usage            Usage statistics

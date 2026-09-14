@@ -481,7 +481,7 @@ func TestProfileAuthModes(t *testing.T) {
 
 // TestLoginCommand tests the login command structure.
 func TestLoginCommand(t *testing.T) {
-	if loginCmd.Use != "login <tool> <profile>" {
+	if loginCmd.Use != "login <agent> <profile>" {
 		t.Errorf("Unexpected Use: %q", loginCmd.Use)
 	}
 

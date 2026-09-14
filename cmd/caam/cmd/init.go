@@ -23,7 +23,7 @@ import (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize caam with interactive setup wizard",
-	Long: `Interactive setup wizard that discovers existing AI tool sessions and guides
+	Long: `Interactive setup wizard that discovers existing agent sessions and guides
 you through first-time setup.
 
 The wizard will:
@@ -120,14 +120,14 @@ func printWelcomeBanner() {
 	fmt.Println()
 	fmt.Println("  ============================================================")
 	fmt.Println("          CAAM - Coding Agent Account Manager")
-	fmt.Println("        Instant switching for AI coding tools")
+	fmt.Println("        Instant switching for coding agents")
 	fmt.Println("  ============================================================")
 	fmt.Println()
 }
 
 func printDiscoveryResults(result *discovery.ScanResult) {
 	fmt.Println()
-	fmt.Println("Scanning for existing AI tool sessions...")
+	fmt.Println("Scanning for existing agent sessions...")
 	fmt.Println()
 
 	if len(result.Found) == 0 {
@@ -137,7 +137,7 @@ func printDiscoveryResults(result *discovery.ScanResult) {
 		fmt.Println("    1. Run: caam            (the dashboard)")
 		fmt.Println("    2. Press n and log in; the account is captured under its identity")
 		fmt.Println()
-		fmt.Println("  Or from the CLI: log in with the tool itself, then run: caam backup <tool> <name>")
+		fmt.Println("  Or from the CLI: log in with the agent itself, then run: caam backup <agent> <name>")
 		fmt.Println()
 		return
 	}
@@ -191,7 +191,7 @@ func saveDiscoveredSessions(found []discovery.DiscoveredAuth, autoSave bool) int
 		// Get the auth file set for this tool
 		fileSet := getAuthFileSetForTool(string(auth.Tool))
 		if fileSet == nil {
-			fmt.Printf("  Error: unknown tool %s\n", auth.Tool)
+			fmt.Printf("  Error: unknown agent %s\n", auth.Tool)
 			continue
 		}
 
@@ -496,12 +496,12 @@ func printSetupSummary(result *discovery.ScanResult, savedCount int, browserConf
 	fmt.Println("    caam             - The dashboard: accounts and their limits; enter switches, n logs in")
 	fmt.Println("    caam status      - Show current profiles and status")
 	fmt.Println("    caam ls          - List all saved profiles")
-	fmt.Println("    caam activate <tool> <profile> - Switch to a profile")
-	fmt.Println("    caam run <tool>  - Run with automatic rate limit handling")
+	fmt.Println("    caam activate <agent> <profile> - Switch to a profile")
+	fmt.Println("    caam run <agent>  - Run with automatic rate limit handling")
 	fmt.Println()
 
 	if len(result.NotFound) > 0 {
-		fmt.Println("  To add more accounts: run caam, press n, and pick the tool.")
+		fmt.Println("  To add more accounts: run caam, press n, and pick the agent.")
 		fmt.Println("  Or from the CLI:")
 		for _, tool := range result.NotFound {
 			fmt.Printf("    1. Log in to %s\n", tool)
@@ -533,7 +533,7 @@ func printSetupSummaryV2(detections []ProviderAuthDetection, savedCount int, bro
 	fmt.Println("  Quick commands:")
 	fmt.Println("    caam ls          - List all profiles")
 	fmt.Println("    caam status      - Show current status")
-	fmt.Println("    caam exec <tool> <profile> -- <command>  - Run with a profile")
+	fmt.Println("    caam exec <agent> <profile> -- <command>  - Run with a profile")
 	fmt.Println()
 	fmt.Println("  Example:")
 	fmt.Println("    caam exec claude default -- --help")
@@ -549,8 +549,8 @@ func printSetupSummaryV2(detections []ProviderAuthDetection, savedCount int, bro
 
 	if len(missingAuth) > 0 {
 		fmt.Println("  To add more accounts:")
-		fmt.Println("    1. Log in to the AI tool (claude, codex, or gemini)")
-		fmt.Println("    2. Run: caam auth import <tool>")
+		fmt.Println("    1. Log in to the agent (claude, codex, or gemini)")
+		fmt.Println("    2. Run: caam auth import <agent>")
 		fmt.Println()
 	}
 
@@ -603,10 +603,10 @@ func createDirectories(quiet bool) error {
 	return nil
 }
 
-// detectTools checks for installed CLI tools.
+// detectTools checks for installed agents.
 func detectTools(quiet bool) {
 	if !quiet {
-		fmt.Println("Detecting CLI tools...")
+		fmt.Println("Detecting agents...")
 	}
 
 	toolBinaries := map[string]string{
@@ -633,7 +633,7 @@ func detectTools(quiet bool) {
 	if !quiet {
 		fmt.Println()
 		if foundCount == 0 {
-			fmt.Println("  No CLI tools found. Install at least one:")
+			fmt.Println("  No agents found. Install at least one:")
 			fmt.Println("    - Codex CLI: https://github.com/openai/codex-cli")
 			fmt.Println("    - Claude Code: https://github.com/anthropics/claude-code")
 			fmt.Println("    - Gemini CLI: https://github.com/google/gemini-cli")
@@ -740,8 +740,8 @@ func printProviderDetectionResults(detections []ProviderAuthDetection) {
 		fmt.Println("  No existing auth credentials found.")
 		fmt.Println()
 		fmt.Println("  To get started:")
-		fmt.Println("    1. Log in to your AI tool (claude, codex, or gemini)")
-		fmt.Println("    2. Run: caam profile create <tool> <name>")
+		fmt.Println("    1. Log in to your agent (claude, codex, or gemini)")
+		fmt.Println("    2. Run: caam profile create <agent> <name>")
 		fmt.Println()
 	}
 }

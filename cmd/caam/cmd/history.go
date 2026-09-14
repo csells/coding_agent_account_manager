@@ -20,7 +20,7 @@ var historyCmd = &cobra.Command{
 Examples:
   caam history                     # Show last 20 events
   caam history --limit 50          # Show last 50 events
-  caam history --provider claude   # Filter by provider
+  caam history --provider claude   # Filter by agent
   caam history --type error        # Show only errors
   caam history --since 24h         # Events from last 24 hours
   caam history --json              # Output as JSON
@@ -33,7 +33,7 @@ Event types: activate, login, refresh, error, switch, deactivate`,
 func init() {
 	rootCmd.AddCommand(historyCmd)
 	historyCmd.Flags().IntP("limit", "n", 20, "maximum number of events to show")
-	historyCmd.Flags().String("provider", "", "filter by provider (claude, codex, gemini)")
+	historyCmd.Flags().String("provider", "", "filter by agent (claude, codex, gemini)")
 	historyCmd.Flags().String("profile", "", "filter by profile name")
 	historyCmd.Flags().String("type", "", "filter by event type (activate, error, refresh, etc.)")
 	historyCmd.Flags().String("since", "", "filter events newer than duration (e.g., '24h', '7d')")
@@ -181,7 +181,7 @@ func renderEventsJSON(w io.Writer, events []caamdb.Event) error {
 
 func renderEventList(w io.Writer, events []caamdb.Event) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "TIMESTAMP\tTYPE\tPROVIDER\tPROFILE")
+	_, _ = fmt.Fprintln(tw, "TIMESTAMP\tTYPE\tAGENT\tPROFILE")
 	for _, ev := range events {
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
 			ev.Timestamp.Local().Format("2006-01-02 15:04:05"),

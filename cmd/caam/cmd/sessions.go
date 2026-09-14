@@ -37,13 +37,13 @@ var sessionsCmd = &cobra.Command{
 	Long: `Shows all isolated profiles that are currently locked (in use).
 
 Displays which profiles are actively running with caam exec, including:
-  - Provider and profile name
+  - Agent and profile name
   - Process ID (PID)
   - When the session started
   - Whether the session is active or stale (process no longer running)
 
 Use --json for machine-readable output.
-Use --provider to filter by a specific provider.
+Use --provider to filter by one agent.
 
 Examples:
   caam sessions              # Show all sessions
@@ -74,7 +74,7 @@ Examples:
 
 func init() {
 	rootCmd.AddCommand(sessionsCmd)
-	sessionsCmd.Flags().String("provider", "", "filter by provider (codex, claude, gemini)")
+	sessionsCmd.Flags().String("provider", "", "filter by agent (codex, claude, gemini)")
 	sessionsCmd.Flags().Bool("json", false, "output in JSON format")
 }
 
@@ -166,15 +166,15 @@ func formatDuration(d time.Duration) string {
 func printSessionsReport(report *SessionsReport) {
 	if len(report.Sessions) == 0 {
 		fmt.Println("No active sessions found.")
-		fmt.Println("\nUse 'caam exec <tool> <profile>' to start a session.")
+		fmt.Println("\nUse 'caam exec <agent> <profile>' to start a session.")
 		return
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	defer w.Flush()
 
-	fmt.Fprintln(w, "PROVIDER\tPROFILE\tPID\tSTARTED\tSTATUS")
-	fmt.Fprintln(w, "--------\t-------\t---\t-------\t------")
+	fmt.Fprintln(w, "AGENT\tPROFILE\tPID\tSTARTED\tSTATUS")
+	fmt.Fprintln(w, "-----\t-------\t---\t-------\t------")
 
 	for _, session := range report.Sessions {
 		status := session.Status

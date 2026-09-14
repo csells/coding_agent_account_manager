@@ -50,7 +50,7 @@ var (
 func init() {
 	rootCmd.AddCommand(watchCmd)
 	watchCmd.Flags().BoolVar(&watchOnce, "once", false, "Scan once and exit (no daemon)")
-	watchCmd.Flags().StringSliceVar(&watchProviders, "provider", nil, "Providers to watch (default: all)")
+	watchCmd.Flags().StringSliceVar(&watchProviders, "provider", nil, "Agents to watch (default: all)")
 	watchCmd.Flags().BoolVar(&watchVerbose, "verbose", false, "Verbose output")
 }
 
@@ -74,7 +74,7 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	validProviders := map[string]bool{"claude": true, "codex": true, "gemini": true, "grok": true, "opencode": true, "cursor": true}
 	for _, p := range providers {
 		if !validProviders[strings.ToLower(p)] {
-			return fmt.Errorf("unknown provider: %s", p)
+			return fmt.Errorf("unknown agent: %s", p)
 		}
 	}
 
@@ -103,13 +103,13 @@ func runWatchOnce(providers []string, logger *slog.Logger) error {
 	for _, d := range discovered {
 		fmt.Printf("  + %s\n", d)
 	}
-	fmt.Println("\nProfiles saved to vault. Use 'caam activate <tool> <email>' to switch.")
+	fmt.Println("\nProfiles saved to vault. Use 'caam activate <agent> <email>' to switch.")
 	return nil
 }
 
 func runWatchDaemon(ctx context.Context, providers []string, logger *slog.Logger) error {
 	fmt.Println("Starting auth file watcher...")
-	fmt.Printf("Watching providers: %s\n", strings.Join(providers, ", "))
+	fmt.Printf("Watching agents: %s\n", strings.Join(providers, ", "))
 	fmt.Println("Press Ctrl+C to stop.")
 
 	// First do a one-time scan

@@ -54,7 +54,7 @@ var syncStatusCmd = &cobra.Command{
   - Local machine identity
   - Auto-sync status
   - Machines in pool with their status
-  - Profile counts by provider
+  - Profile counts by agent
   - Queue and history statistics`,
 	RunE: runSyncStatus,
 }
@@ -205,7 +205,7 @@ func init() {
 
 	// Sync command flags
 	syncCmd.Flags().String("machine", "", "sync only with specific machine")
-	syncCmd.Flags().String("provider", "", "sync only specific provider")
+	syncCmd.Flags().String("provider", "", "sync only a specific agent")
 	syncCmd.Flags().String("profile", "", "sync only specific profile")
 	syncCmd.Flags().Bool("dry-run", false, "show what would sync without doing it")
 	syncCmd.Flags().Bool("force", false, "force sync even if recently synced")
@@ -226,7 +226,7 @@ func init() {
 	// Log command flags
 	syncLogCmd.Flags().Int("limit", 20, "number of entries to show")
 	syncLogCmd.Flags().String("machine", "", "filter by machine")
-	syncLogCmd.Flags().String("provider", "", "filter by provider")
+	syncLogCmd.Flags().String("provider", "", "filter by agent")
 	syncLogCmd.Flags().Bool("errors", false, "show only errors")
 	syncLogCmd.Flags().Bool("json", false, "output as JSON")
 
@@ -281,7 +281,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	profileFilter, _ := cmd.Flags().GetString("profile")
 
 	if profileFilter != "" && providerFilter == "" {
-		return fmt.Errorf("--profile requires --provider (profile names are only unique within a provider)")
+		return fmt.Errorf("--profile requires --provider (profile names are only unique within an agent)")
 	}
 
 	machines := state.Pool.ListMachines()

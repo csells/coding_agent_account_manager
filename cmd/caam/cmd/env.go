@@ -11,7 +11,7 @@ import (
 )
 
 var envCmd = &cobra.Command{
-	Use:   "env <tool> <profile>",
+	Use:   "env <agent> <profile>",
 	Short: "Print environment variables for shell eval",
 	Long: `Prints environment variables that can be eval'd in your shell.
 
@@ -33,7 +33,7 @@ Examples:
   # Unset the variables when done
   eval "$(caam env codex work --unset)"
 
-On error (unknown provider, missing profile, etc.) this command writes a
+On error (unknown agent, missing profile, etc.) this command writes a
 diagnostic to stderr AND emits a failing shell command ('false') to stdout, so
 'eval "$(caam env ...)"' aborts loudly instead of silently keeping the parent
 shell's environment. With 'set -e' the script stops; otherwise check $? after
@@ -49,7 +49,7 @@ Use --export-prefix to change the export syntax (default: "export").`,
 		prov, ok := registry.Get(tool)
 		if !ok {
 			emitEvalFailure()
-			return fmt.Errorf("unknown provider: %s (supported: %s)", tool, supportedToolsList())
+			return fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList())
 		}
 
 		prof, err := profileStore.Load(tool, name)

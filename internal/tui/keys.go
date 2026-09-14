@@ -49,15 +49,15 @@ func defaultKeyMap() keyMap {
 		),
 		Left: key.NewBinding(
 			key.WithKeys("left", "h"),
-			key.WithHelp("←/h", "previous provider"),
+			key.WithHelp("←/h", "previous agent"),
 		),
 		Right: key.NewBinding(
 			key.WithKeys("right", "l"),
-			key.WithHelp("→/l", "next provider"),
+			key.WithHelp("→/l", "next agent"),
 		),
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),
-			key.WithHelp("tab", "cycle providers"),
+			key.WithHelp("tab", "cycle agents"),
 		),
 		Enter: key.NewBinding(
 			key.WithKeys("enter"),

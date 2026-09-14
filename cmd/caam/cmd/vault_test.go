@@ -29,7 +29,7 @@ func TestBackupCommand_UnknownTool(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for unknown tool")
 	}
-	if err != nil && err.Error() != "unknown tool: invalid-tool (supported: codex, claude, gemini)" {
+	if err != nil && err.Error() != "unknown agent: invalid-tool (supported: codex, claude, gemini)" {
 		t.Logf("Got error (expected): %v", err)
 	}
 

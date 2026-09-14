@@ -88,13 +88,13 @@ var doctorCmd = &cobra.Command{
 	Long: `Runs diagnostic checks on your caam installation and reports any issues.
 
 Checks performed:
-  - CLI tools: Are codex, claude, gemini installed and in PATH?
+  - Agents: Are codex, claude, gemini installed and in PATH?
   - Dependencies: Are optional tools (gum, wezterm, tailscale, playwright, etc.) available?
   - Data directories: Do vault/profiles directories exist with correct permissions?
   - Config: Is the configuration valid?
   - Profiles: Are all isolated profiles valid? Any broken symlinks?
   - Locks: Are there any stale lock files from crashed processes?
-  - Auth files: Do auth files exist for each provider?
+  - Auth files: Do auth files exist for each agent?
   - Token validation (with --validate): Are auth tokens actually valid?
 
 Flags:
@@ -232,7 +232,7 @@ func checkCLITools() []CheckResult {
 				Name:    tool,
 				Status:  "warn",
 				Message: "not found in PATH",
-				Details: fmt.Sprintf("Install %s to use caam with this tool", tool),
+				Details: fmt.Sprintf("Install %s to use caam with this agent", tool),
 			})
 		}
 	}
@@ -941,7 +941,7 @@ func checkAuthFiles() []CheckResult {
 				Name:    tool,
 				Status:  "warn",
 				Message: "no auth files",
-				Details: "Login with the tool first, then use 'caam backup' to save",
+				Details: "Log in with the agent first, then use 'caam backup' to save",
 			})
 		}
 
@@ -1214,7 +1214,7 @@ func classifyCodexProbeError(tool, profileName string, err error) *CheckResult {
 				Message: fmt.Sprintf("could not verify token (HTTP %d, transient)", status),
 				Details: fmt.Sprintf(
 					"Live API probe for %s/%s answered HTTP %d after %d attempt(s).\n"+
-						"This is rate limiting or a provider-side error, not a credential rejection;\n"+
+						"This is rate limiting or a service-side error, not a credential rejection;\n"+
 						"the token may still be valid. Re-run 'caam doctor' later to confirm.",
 					tool, profileName, status, verifyErr.Attempts),
 			}
@@ -1354,8 +1354,8 @@ func printDoctorReport(report *DoctorReport, validate bool) {
 	fmt.Println("caam doctor")
 	fmt.Println()
 
-	// CLI Tools
-	fmt.Println("Checking CLI tools...")
+	// Agents
+	fmt.Println("Checking agents...")
 	for _, check := range report.CLITools {
 		printCheck(check)
 	}

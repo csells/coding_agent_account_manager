@@ -155,7 +155,7 @@ func (m Model) verticalPanels(contentHeight int) string {
 
 // stripItem is one provider's slot.
 // noAccountsHint is what the panes say before any account is captured.
-const noAccountsHint = "No accounts captured yet — press n to log in to a provider"
+const noAccountsHint = "No accounts captured yet — press n to log in to an agent"
 
 type stripItem struct {
 	id       string
@@ -376,7 +376,7 @@ func (m Model) renderProviderStrip(g paneGeometry) string {
 		lines[0] = m.styles.StatusText.Render(noAccountsHint)
 		body := strings.Join(lines, "\n")
 		if kind == stripCards {
-			body = lipgloss.JoinVertical(lipgloss.Left, ss.Title.MarginBottom(0).Render("Providers (0)"), body)
+			body = lipgloss.JoinVertical(lipgloss.Left, ss.Title.MarginBottom(0).Render("Agents (0)"), body)
 		}
 		return ss.Border.Width(g.pane).Render(fitWidth(body, g.inner))
 	}
@@ -426,7 +426,7 @@ func (m Model) renderProviderStrip(g paneGeometry) string {
 	}
 	body := strings.Join(lines, "\n")
 	if kind == stripCards {
-		body = lipgloss.JoinVertical(lipgloss.Left, ss.Title.MarginBottom(0).Render(fmt.Sprintf("Providers (%d)", n)), body)
+		body = lipgloss.JoinVertical(lipgloss.Left, ss.Title.MarginBottom(0).Render(fmt.Sprintf("Agents (%d)", n)), body)
 	}
 	return ss.Border.Width(g.pane).Render(body)
 }

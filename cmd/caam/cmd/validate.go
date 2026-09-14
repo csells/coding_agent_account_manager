@@ -16,7 +16,7 @@ import (
 )
 
 var validateCmd = &cobra.Command{
-	Use:   "validate [tool] [profile]",
+	Use:   "validate [agent] [profile]",
 	Short: "Validate authentication tokens",
 	Long: `Validate that authentication tokens actually work.
 
@@ -26,7 +26,7 @@ By default, performs passive validation (no network calls):
   - Check expiry timestamps
 
 Use --active for active validation (makes minimal API calls):
-  - Verifies token is actually valid with the provider
+  - Verifies token is actually valid with the agent's service
   - May incur minimal API costs
 
 Examples:
@@ -85,7 +85,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 
 	if toolFilter != "" {
 		if _, ok := tools[toolFilter]; !ok {
-			return fmt.Errorf("unknown tool: %s (supported: %s)", toolFilter, supportedToolsList())
+			return fmt.Errorf("unknown agent: %s (supported: %s)", toolFilter, supportedToolsList())
 		}
 	}
 

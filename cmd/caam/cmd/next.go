@@ -18,10 +18,10 @@ import (
 
 // nextCmd rotates to the next available profile for a tool.
 var nextCmd = &cobra.Command{
-	Use:     "next <tool>",
+	Use:     "next <agent>",
 	Aliases: []string{"rotate"},
 	Short:   "Rotate to next available profile",
-	Long: `Instantly rotate to the next best profile for a tool.
+	Long: `Instantly rotate to the next best profile for an agent.
 
 Uses the configured rotation algorithm to select the next profile:
   smart       - Multi-factor scoring (health, cooldown, recency) [default]
@@ -68,7 +68,7 @@ func runNext(cmd *cobra.Command, args []string) error {
 	// Validate tool
 	getFileSet, ok := tools[tool]
 	if !ok {
-		return fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList())
+		return fmt.Errorf("unknown agent: %s (supported: %s)", tool, supportedToolsList())
 	}
 
 	// Ensure vault is initialized

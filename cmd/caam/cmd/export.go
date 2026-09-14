@@ -10,7 +10,7 @@ import (
 )
 
 var exportCmd = &cobra.Command{
-	Use:   "export [tool/profile] [tool profile]",
+	Use:   "export [agent/profile] [agent profile]",
 	Short: "Export profile(s) for transfer to another machine",
 	Long: `Export profile auth files for transfer to another machine.
 
@@ -27,7 +27,7 @@ The exported file contains only the auth credentials, not session state.`,
 }
 
 func init() {
-	exportCmd.Flags().Bool("all", false, "export all profiles (use with optional <tool>)")
+	exportCmd.Flags().Bool("all", false, "export all profiles (use with optional <agent>)")
 	exportCmd.Flags().StringP("output", "o", "", "write archive to file instead of stdout")
 }
 
@@ -42,7 +42,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 	case all && len(args) == 1:
 		req = exportRequest{ToolAll: true, Tool: args[0]}
 	case all:
-		return fmt.Errorf("usage: caam export --all [tool]")
+		return fmt.Errorf("usage: caam export --all [agent]")
 	case len(args) == 1:
 		tool, profile, err := parseToolProfileArg(args[0])
 		if err != nil {
@@ -52,7 +52,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 	case len(args) == 2:
 		req = exportRequest{Tool: args[0], Profile: args[1]}
 	default:
-		return fmt.Errorf("usage: caam export <tool/profile> or caam export <tool> <profile> or caam export --all [tool]")
+		return fmt.Errorf("usage: caam export <agent/profile> or caam export <agent> <profile> or caam export --all [agent]")
 	}
 
 	targets, err := resolveExportTargets(vault, req)
@@ -102,16 +102,16 @@ func runExport(cmd *cobra.Command, args []string) error {
 func parseToolProfileArg(arg string) (tool, profile string, err error) {
 	arg = strings.TrimSpace(arg)
 	if arg == "" {
-		return "", "", fmt.Errorf("tool/profile cannot be empty")
+		return "", "", fmt.Errorf("agent/profile cannot be empty")
 	}
 	parts := strings.Split(arg, "/")
 	if len(parts) != 2 {
-		return "", "", fmt.Errorf("expected tool/profile, got %q", arg)
+		return "", "", fmt.Errorf("expected agent/profile, got %q", arg)
 	}
 	tool = strings.ToLower(strings.TrimSpace(parts[0]))
 	profile = strings.TrimSpace(parts[1])
 	if tool == "" || profile == "" {
-		return "", "", fmt.Errorf("expected tool/profile, got %q", arg)
+		return "", "", fmt.Errorf("expected agent/profile, got %q", arg)
 	}
 	return tool, profile, nil
 }

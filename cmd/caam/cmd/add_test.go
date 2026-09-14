@@ -10,8 +10,8 @@ import (
 )
 
 func TestAddCommand(t *testing.T) {
-	if addCmd.Use != "add <tool> [profile-name]" {
-		t.Errorf("Expected Use 'add <tool> [profile-name]', got %q", addCmd.Use)
+	if addCmd.Use != "add <agent> [profile-name]" {
+		t.Errorf("Expected Use 'add <agent> [profile-name]', got %q", addCmd.Use)
 	}
 
 	if addCmd.Short == "" {
