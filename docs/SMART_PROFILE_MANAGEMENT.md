@@ -15,6 +15,12 @@ This document outlines enhancements to caam inspired by codex-pool's sophisticat
 
 ### 1. Proactive Token Refresh (Priority: P1)
 
+> **Superseded.** Refreshing spends the refresh token, and the families
+> rotate, so caam no longer refreshes early or on a timer. The one gate is
+> `refresh.NeedsRefresh`: expired, or just refused. See
+> `ACCOUNT_SWITCHER.md` §6. The design below is kept as the original
+> proposal.
+
 #### Background
 OAuth tokens expire. When they do, CLI tools fail mid-session, disrupting workflow. Users must manually re-authenticate, losing context and momentum.
 

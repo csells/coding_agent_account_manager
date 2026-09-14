@@ -111,6 +111,8 @@ and Cursor adapters are untouched. LICENSE is unchanged.
 
 `go test -race ./...`, `go vet`, `gofmt` and `make lint` (golangci-lint v2
 config; CI installs v2) are clean. The credential rules were
-checked against real accounts on every agent: switch round trips, `caam
-limits <agent>` for each, and plain HTTP probes with stored tokens that
-settled the Codex revocation and Antigravity project questions.
+checked against real accounts: `caam limits <agent>` for every agent,
+capture and login through the dashboard for each, Claude Code switch
+round trips, and plain HTTP probes with stored tokens that settled the
+Codex revocation and Antigravity project questions. The Codex switch
+round trip between two live accounts is the one check still to run.
