@@ -21,12 +21,17 @@ import (
 // re-capture aborts) and the detail card's Limits section is fetched with
 // the same credential resolution as `caam limits` and `caam monitor`.
 func tuiHooks() tui.Hooks {
+	// One fetcher for the dashboard's life: the Antigravity fetcher caches
+	// the project it resolved, which a fetcher per request threw away.
+	fetcher := usage.NewMultiProfileFetcher()
 	return tui.Hooks{
 		Switch: func(ctx context.Context, provider, profile string) error {
 			_, err := switchProfile(ctx, provider, profile, switchOptions{Quiet: true})
 			return err
 		},
-		Limits:       fetchProfileLimits,
+		Limits: func(ctx context.Context, provider, profile string) (*usage.UsageInfo, error) {
+			return fetchProfileLimits(ctx, fetcher, provider, profile)
+		},
 		Health:       getProfileHealth,
 		Login:        nativeLoginCommand,
 		LiveIdentity: liveAccountIdentity,
@@ -204,7 +209,7 @@ var ErrNoOtherAccount = errors.New("no other account to switch to")
 // place, so the vault copy is stale for exactly that account), else from
 // its vault copy. It presents the access token and nothing more; it never
 // refreshes or rewrites a credential.
-func fetchProfileLimits(ctx context.Context, provider, profile string) (*usage.UsageInfo, error) {
+func fetchProfileLimits(ctx context.Context, fetcher *usage.MultiProfileFetcher, provider, profile string) (*usage.UsageInfo, error) {
 	if !isLimitsProvider(provider) {
 		return nil, fmt.Errorf("%s has no usage API", provider)
 	}
@@ -225,7 +230,7 @@ func fetchProfileLimits(ctx context.Context, provider, profile string) (*usage.U
 		}
 		return nil, fmt.Errorf("credential holds no access token")
 	}
-	results := usage.NewMultiProfileFetcher().FetchAllProfiles(ctx, provider, map[string]string{profile: cred.Token})
+	results := fetcher.FetchAllProfiles(ctx, provider, map[string]string{profile: cred.Token})
 	if len(results) == 0 || results[0].Usage == nil {
 		return nil, fmt.Errorf("no usage returned for %s/%s", provider, profile)
 	}

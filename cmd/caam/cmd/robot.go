@@ -1416,7 +1416,9 @@ type RobotProfileLimits struct {
 
 // robotFetchLimits reads one account's limits; it is the dashboard's
 // fetchProfileLimits, held in a variable so tests can stand in a fake.
-var robotFetchLimits = fetchProfileLimits
+var robotFetchLimits = func(ctx context.Context, provider, profile string) (*usage.UsageInfo, error) {
+	return fetchProfileLimits(ctx, usage.NewMultiProfileFetcher(), provider, profile)
+}
 
 func runRobotLimits(cmd *cobra.Command, args []string) error {
 	start := time.Now()
