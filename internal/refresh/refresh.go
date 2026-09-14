@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -23,6 +24,10 @@ const maxErrorBodySize = 64 * 1024 // 64KB
 // DefaultRefreshThreshold is the time before expiry to trigger a refresh.
 const DefaultRefreshThreshold = 10 * time.Minute
 
+// refusedStatus matches an HTTP 401 as a status, not as digits inside a
+// larger number.
+var refusedStatus = regexp.MustCompile(`\b401\b`)
+
 // NeedsRefresh is the one gate for spending a refresh token: true only when
 // the token has expired, or the provider just refused it (lastErr from a
 // limits fetch or an API call). A token with time left is left alone — a
@@ -31,7 +36,7 @@ const DefaultRefreshThreshold = 10 * time.Minute
 func NeedsRefresh(h *health.ProfileHealth, lastErr error) bool {
 	if lastErr != nil {
 		msg := strings.ToLower(lastErr.Error())
-		if strings.Contains(msg, "unauthorized") || strings.Contains(msg, "401") || strings.Contains(msg, "token expired") || strings.Contains(msg, "invalid_grant") {
+		if strings.Contains(msg, "unauthorized") || refusedStatus.MatchString(msg) || strings.Contains(msg, "token expired") || strings.Contains(msg, "invalid_grant") {
 			return true
 		}
 	}

@@ -30,12 +30,10 @@ type LoginOptions struct {
 
 // LoginResult reports what a Login did.
 type LoginResult struct {
-	// Previous is the Account that was signed in and re-captured, "" if none
-	// caam knew.
+	// Previous is the name the signed-in credential was filed under before
+	// the login: its own Account, or a fresh _backup_ when caam did not know
+	// it. "" when nothing was signed in.
 	Previous string
-	// Cleared is true when Previous's live credential was removed before
-	// the login ran.
-	Cleared bool
 	// Account is the name the new session was filed under; "" with
 	// NeedsName when the caller has to ask for one (then Capture it).
 	Account   string
@@ -61,7 +59,6 @@ func (e *LoginFailedError) Unwrap() error { return e.Err }
 // Prepared is the state between PrepareLogin and FinishLogin.
 type Prepared struct {
 	Previous string
-	Cleared  bool
 }
 
 // PrepareLogin is the first half of a Login: the signed-in Account goes
@@ -76,30 +73,17 @@ type Prepared struct {
 // clear is an error and the login must not run.
 func PrepareLogin(vault *authfile.Vault, fileSet authfile.AuthFileSet) (*Prepared, error) {
 	p := &Prepared{}
-	active, _ := vault.ActiveProfile(fileSet)
-	switch {
-	case active != "":
-		p.Previous = active
-		if err := vault.Backup(fileSet, active); err != nil {
-			return nil, fmt.Errorf("not starting a login: the signed-in account %s could not be re-captured first (%w); its newest tokens would be lost", active, err)
-		}
-	case authfile.HasAuthFiles(fileSet):
-		name, err := vault.BackupCurrent(fileSet)
-		if err != nil {
-			return nil, fmt.Errorf("not starting a login: the live credential matches no vault profile and could not be filed first (%w); the login would lose it", err)
-		}
-		if name == "" {
-			return p, nil
-		}
-		p.Previous = name
-	default:
+	name, err := vault.CaptureSignedIn(fileSet)
+	if err != nil {
+		return nil, fmt.Errorf("not starting a login: the signed-in credential could not be captured first (%w); its newest tokens would be lost", err)
+	}
+	if name == "" {
 		return p, nil
 	}
-	active = p.Previous
+	p.Previous = name
 	if err := authfile.ClearAuthFiles(fileSet); err != nil {
-		return nil, fmt.Errorf("not starting a login: %s is in the vault but its live credential could not be cleared (%w); the login would revoke it", active, err)
+		return nil, fmt.Errorf("not starting a login: %s is in the vault but its live credential could not be cleared (%w); the login would revoke it", name, err)
 	}
-	p.Cleared = true
 	return p, nil
 }
 
@@ -110,7 +94,7 @@ func PrepareLogin(vault *authfile.Vault, fileSet authfile.AuthFileSet) (*Prepare
 func FinishLogin(ctx context.Context, vault *authfile.Vault, fileSet authfile.AuthFileSet, prep *Prepared, opts LoginOptions) (*LoginResult, error) {
 	res := &LoginResult{}
 	if prep != nil {
-		res.Previous, res.Cleared = prep.Previous, prep.Cleared
+		res.Previous = prep.Previous
 	}
 	name := ""
 	if opts.Identity != nil {

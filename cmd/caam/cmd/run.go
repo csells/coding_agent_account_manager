@@ -420,15 +420,11 @@ func switchForRun(tool, profile string, spmCfg *config.SPMConfig, db *caamdb.DB)
 	if spmCfg == nil {
 		spmCfg = config.DefaultSPMConfig()
 	}
-	var logDB *caamdb.DB
-	if spmCfg.Analytics.Enabled {
-		logDB = db
-	}
-	_, err := switcher.Switch(context.Background(), vault, getFileSet(), switcher.Options{
+	_, err := switcher.Switch(context.Background(), vault, getFileSet(), coreOptions(switcher.Options{
 		Profile: profile,
 		Config:  spmCfg,
-		DB:      logDB,
+		DB:      db,
 		Source:  "run",
-	})
+	}))
 	return err
 }

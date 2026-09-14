@@ -5,7 +5,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/ratelimit"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/rotation"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/testutil"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -698,7 +698,10 @@ func TestWrapRunOnce_SwitchesThroughTheCore(t *testing.T) {
 		t.Fatal(err)
 	}
 	vault := authfile.NewVault(filepath.Join(tmp, "vault"))
-	stale := []byte(`{"auth_mode":"chatgpt","tokens":{"id_token":"","access_token":"","refresh_token":"SYNTHETIC-a-stale"}}`)
+	base := int64(1_800_000_000)
+	stale := testutil.SyntheticCodexAuth(t, "a@example.com", "a-stale", base)
+	rotated := testutil.SyntheticCodexAuth(t, "a@example.com", "a-rotated", base+3600)
+	incoming := testutil.SyntheticCodexAuth(t, "b@example.com", "b", base)
 	write := func(path string, data []byte) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
@@ -708,9 +711,9 @@ func TestWrapRunOnce_SwitchesThroughTheCore(t *testing.T) {
 		}
 	}
 	write(filepath.Join(vault.ProfilePath("codex", "a"), "auth.json"), stale)
-	write(filepath.Join(vault.ProfilePath("codex", "b"), "auth.json"), []byte(`{"auth_mode":"chatgpt","tokens":{"id_token":"","access_token":"","refresh_token":"SYNTHETIC-b"}}`))
+	write(filepath.Join(vault.ProfilePath("codex", "b"), "auth.json"), incoming)
 	livePath := filepath.Join(os.Getenv("CODEX_HOME"), "auth.json")
-	write(livePath, stale) // a is signed in
+	write(livePath, rotated) // a is signed in, and has rotated since capture
 
 	cfg := DefaultConfig()
 	cfg.Provider = "codex"
@@ -723,8 +726,10 @@ func TestWrapRunOnce_SwitchesThroughTheCore(t *testing.T) {
 		// happens before the command runs, which is what is asserted.
 		t.Log("runOnce ran a command; fine")
 	}
-	got, _ := os.ReadFile(livePath)
-	if !strings.Contains(string(got), "SYNTHETIC-b") {
+	if gotA, _ := os.ReadFile(filepath.Join(vault.ProfilePath("codex", "a"), "auth.json")); string(gotA) != string(rotated) {
+		t.Fatalf("outgoing a was not re-captured before the switch; vault holds %s", gotA)
+	}
+	if got, _ := os.ReadFile(livePath); string(got) != string(incoming) {
 		t.Fatalf("live credential after runOnce = %s, want b", got)
 	}
 }

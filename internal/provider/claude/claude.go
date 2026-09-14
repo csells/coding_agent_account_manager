@@ -383,9 +383,6 @@ func (p *Provider) Env(ctx context.Context, prof *profile.Profile) (map[string]s
 
 // Login initiates the authentication flow.
 func (p *Provider) Login(ctx context.Context, prof *profile.Profile) error {
-	if err := refuseSharedKeychainLogin(); err != nil {
-		return err
-	}
 	switch provider.AuthMode(prof.AuthMode) {
 	case provider.AuthModeAPIKey:
 		return p.loginWithAPIKey(ctx, prof)
@@ -396,6 +393,9 @@ func (p *Provider) Login(ctx context.Context, prof *profile.Profile) error {
 
 // loginWithOAuth launches Claude Code for interactive /login.
 func (p *Provider) loginWithOAuth(ctx context.Context, prof *profile.Profile) error {
+	if err := refuseSharedKeychainLogin(); err != nil {
+		return err
+	}
 	env, err := p.Env(ctx, prof)
 	if err != nil {
 		return err

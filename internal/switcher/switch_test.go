@@ -2,8 +2,7 @@ package switcher
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/testutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,36 +11,8 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 )
-
-// syntheticCodexAuth builds a ChatGPT-mode Codex auth.json whose id_token
-// names email and whose tokens carry iat, the way Codex writes it. The
-// JWTs are unsigned and synthetic.
-func syntheticCodexAuth(t *testing.T, email, tag string, issuedAt int64) []byte {
-	t.Helper()
-	jwt := func(claims map[string]any) string {
-		payload, err := json.Marshal(claims)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`)) + "." +
-			base64.RawURLEncoding.EncodeToString(payload) + ".sig"
-	}
-	auth := map[string]any{
-		"auth_mode": "chatgpt",
-		"tokens": map[string]any{
-			"id_token":      jwt(map[string]any{"email": email, "iat": issuedAt, "exp": issuedAt + 3600}),
-			"access_token":  jwt(map[string]any{"sub": email, "iat": issuedAt, "exp": issuedAt + 3600}),
-			"refresh_token": "SYNTHETIC-REFRESH-" + tag,
-		},
-		"last_refresh": time.Unix(issuedAt, 0).UTC().Format(time.RFC3339),
-	}
-	data, err := json.Marshal(auth)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return data
-}
 
 // codexWorld is a Codex home and a vault in temp dirs: Account a is
 // captured (stale copy) and signed in (rotated live file); Account b is
@@ -62,9 +33,9 @@ func newCodexWorld(t *testing.T) *codexWorld {
 	}
 	w := &codexWorld{vault: authfile.NewVault(filepath.Join(tmp, "vault")), fileSet: authfile.CodexAuthFiles()}
 	base := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC).Unix()
-	w.stale = syntheticCodexAuth(t, "a@example.com", "a-stale", base)
-	w.rotated = syntheticCodexAuth(t, "a@example.com", "a-rotated", base+3600)
-	w.incoming = syntheticCodexAuth(t, "b@example.com", "b", base)
+	w.stale = testutil.SyntheticCodexAuth(t, "a@example.com", "a-stale", base)
+	w.rotated = testutil.SyntheticCodexAuth(t, "a@example.com", "a-rotated", base+3600)
+	w.incoming = testutil.SyntheticCodexAuth(t, "b@example.com", "b", base)
 	w.write(t, filepath.Join(w.vault.ProfilePath("codex", "a"), "auth.json"), w.stale)
 	w.write(t, filepath.Join(w.vault.ProfilePath("codex", "b"), "auth.json"), w.incoming)
 	w.livePath = filepath.Join(os.Getenv("CODEX_HOME"), "auth.json")
@@ -156,7 +127,7 @@ func TestSwitch_AbortsWhenTheOutgoingAccountCannotBeRecaptured(t *testing.T) {
 func TestSwitch_VaultsAnUnknownLiveCredentialBeforeReplacingIt(t *testing.T) {
 	w := newCodexWorld(t)
 	base := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC).Unix()
-	unknown := syntheticCodexAuth(t, "stranger@example.com", "x", base)
+	unknown := testutil.SyntheticCodexAuth(t, "stranger@example.com", "x", base)
 	w.write(t, w.livePath, unknown)
 
 	res, err := Switch(context.Background(), w.vault, w.fileSet, Options{Profile: "b"})
@@ -217,5 +188,55 @@ func TestSwitch_LogsTheSwitch(t *testing.T) {
 	}
 	if used["codex"]["a"].Before(time.Now().Add(-time.Minute)) {
 		t.Fatalf("a should be logged as deactivated just now: %v", used["codex"]["a"])
+	}
+}
+
+// fakeRefresher records refresh calls.
+type fakeRefresher struct{ calls []string }
+
+func (f *fakeRefresher) Refresh(ctx context.Context, tool, profile string) error {
+	f.calls = append(f.calls, tool+"/"+profile)
+	return nil
+}
+
+// The core refreshes the incoming token only when the one gate says so:
+// an expired token is refreshed before it is installed; a valid one is
+// not spent.
+func TestSwitch_RefreshesOnlyAnExpiredIncomingToken(t *testing.T) {
+	w := newCodexWorld(t)
+	fr := &fakeRefresher{}
+	expiry := map[string]time.Time{"b": time.Now().Add(time.Hour)}
+	healthOf := func(tool, profile string) *health.ProfileHealth {
+		return &health.ProfileHealth{TokenExpiresAt: expiry[profile]}
+	}
+	res, err := Switch(context.Background(), w.vault, w.fileSet, Options{Profile: "b", Refresher: fr, HealthOf: healthOf})
+	if err != nil || res.Refreshed || len(fr.calls) != 0 {
+		t.Fatalf("a valid incoming token must not be refreshed: res=%+v calls=%v err=%v", res, fr.calls, err)
+	}
+
+	expiry["a"] = time.Now().Add(-time.Minute)
+	res, err = Switch(context.Background(), w.vault, w.fileSet, Options{Profile: "a", Refresher: fr, HealthOf: healthOf})
+	if err != nil || !res.Refreshed || len(fr.calls) != 1 || fr.calls[0] != "codex/a" {
+		t.Fatalf("an expired incoming token should be refreshed first: res=%+v calls=%v err=%v", res, fr.calls, err)
+	}
+}
+
+// Analytics off means the switch is not logged, whatever DB is passed, so
+// callers can pass the database unconditionally.
+func TestSwitch_LogsNothingWhenAnalyticsIsOff(t *testing.T) {
+	w := newCodexWorld(t)
+	db, err := caamdb.OpenAt(filepath.Join(t.TempDir(), "caam.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cfg := config.DefaultSPMConfig()
+	cfg.Analytics.Enabled = false
+	if _, err := Switch(context.Background(), w.vault, w.fileSet, Options{Profile: "b", Config: cfg, DB: db}); err != nil {
+		t.Fatal(err)
+	}
+	used, _ := db.LastUsed()
+	if len(used) != 0 {
+		t.Fatalf("nothing should be logged with analytics off: %v", used)
 	}
 }

@@ -145,8 +145,10 @@ identity lookup, so the dashboard and `caam add` share it.
    vaulted and live, `Login` leaves A's vault copy fresh, the live file
    absent when the runner starts (the fake runner asserts it), and the
    new credential captured under the identity the lookup returns.
-2. `TestLogin_LeavesAnUnknownLiveCredentialForTheLoginToReplace` — no
-   vault match: not cleared, runner sees it, result names the new Account.
+2. `TestLogin_FilesAnUnknownLiveCredentialBeforeClearingIt` — no vault
+   match: filed as a `_backup_`, then cleared; the runner finds nothing.
+   (Revised from "left for the login to replace": leaving it is a rule-zero
+   risk and a rule-2 breach at once.)
 3. `TestLogin_AbortsWhenCaptureFails` / `..._WhenClearFails` — nothing
    runs.
 4. `TestLogin_AsksForANameWhenIdentityIsUnknown` — result carries

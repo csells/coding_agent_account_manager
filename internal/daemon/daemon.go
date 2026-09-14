@@ -1,4 +1,5 @@
-// Package daemon provides a background service for proactive token management.
+// Package daemon provides the background vault-backup service. It never
+// refreshes a token on its own: a refresh spends the refresh token.
 package daemon
 
 import (
@@ -20,18 +21,20 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/refresh"
 )
 
+// DefaultRefreshThreshold is the pool's "expiring soon" horizon for its
+// status view. Nothing refreshes on it.
+const DefaultRefreshThreshold = 30 * time.Minute
+
 // DefaultCheckInterval is the default time between refresh checks.
 const DefaultCheckInterval = 5 * time.Minute
 
-// DefaultRefreshThreshold is how long before expiry to trigger a refresh.
-const DefaultRefreshThreshold = 30 * time.Minute
-
 // Config holds daemon configuration.
 type Config struct {
-	// CheckInterval is how often to check for profiles needing refresh.
+	// CheckInterval is how often the loop runs (vault backup schedule).
 	CheckInterval time.Duration
 
-	// RefreshThreshold is how long before expiry to trigger refresh.
+	// RefreshThreshold is the pool's "expiring soon" horizon for its status
+	// view. Nothing refreshes on it.
 	RefreshThreshold time.Duration
 
 	// Verbose enables debug logging.
@@ -40,8 +43,7 @@ type Config struct {
 	// LogPath is the path to write daemon logs (empty for stdout).
 	LogPath string
 
-	// UseAuthPool enables the new AuthPool-based token monitoring.
-	// When enabled, the daemon uses authpool.Monitor for proactive refresh.
+	// UseAuthPool keeps the auth pool's cooldown bookkeeping current.
 	UseAuthPool bool
 
 	// MaxConcurrentRefreshes limits concurrent refresh operations when using AuthPool.
@@ -117,7 +119,7 @@ func (d *Daemon) getCheckInterval() time.Duration {
 	return d.config.CheckInterval
 }
 
-// getRefreshThreshold returns the refresh threshold with proper locking.
+// getRefreshThreshold returns the pool's expiring-soon horizon with proper locking.
 func (d *Daemon) getRefreshThreshold() time.Duration {
 	d.configMu.RLock()
 	defer d.configMu.RUnlock()
@@ -453,16 +455,10 @@ func (d *Daemon) GetPoolMonitor() *authpool.Monitor {
 
 // runLoop is the main daemon loop.
 func (d *Daemon) runLoop() {
-	// Helper to check if pool monitor is handling refresh
-	shouldUsePoolRefresh := func() bool {
-		return d.poolMonitor != nil && d.poolMonitor.IsRunning()
-	}
-
 	// The daemon never spends a refresh token on a timer (a refresh
 	// consumes it; the families rotate). It keeps the vault backed up and,
 	// with the pool, the cooldown bookkeeping current; refreshing is a
 	// person's ask, when a token has expired or been refused.
-	_ = shouldUsePoolRefresh
 	d.recordCheck()
 	d.checkAndBackup()
 

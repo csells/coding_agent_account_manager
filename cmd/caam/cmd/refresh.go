@@ -8,10 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
-	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/refresh"
 	"github.com/spf13/cobra"
@@ -19,8 +17,12 @@ import (
 
 var refreshCmd = &cobra.Command{
 	Use:   "refresh [tool] [profile]",
-	Short: "Refresh OAuth tokens for profiles",
-	Long: `Refresh OAuth tokens before they expire.
+	Short: "Refresh an expired OAuth token (Codex, Gemini)",
+	Long: `Refresh the OAuth token of a vaulted account whose token has expired.
+
+A refresh consumes the account's refresh token — the families rotate — so
+nothing is refreshed early: only an expired token, or one you --force for a
+single profile. --all takes expired tokens only and refuses --force.
 
 Examples:
   caam refresh claude work
@@ -35,7 +37,7 @@ Examples:
 func init() {
 	refreshCmd.Flags().Bool("all", false, "refresh all profiles")
 	refreshCmd.Flags().Bool("dry-run", false, "show what would be refreshed")
-	refreshCmd.Flags().Bool("force", false, "force refresh even if not expiring")
+	refreshCmd.Flags().Bool("force", false, "refresh one profile even though its token has not expired (spends its refresh token)")
 	refreshCmd.Flags().Bool("quiet", false, "suppress output")
 	rootCmd.AddCommand(refreshCmd)
 }
@@ -46,25 +48,18 @@ func runRefresh(cmd *cobra.Command, args []string) error {
 	force, _ := cmd.Flags().GetBool("force")
 	quiet, _ := cmd.Flags().GetBool("quiet")
 
-	threshold := refresh.DefaultRefreshThreshold
-	if spmCfg, err := config.LoadSPMConfig(); err == nil {
-		if v := spmCfg.Health.RefreshThreshold.Duration(); v > 0 {
-			threshold = v
-		}
-	}
-
 	ctx := cmd.Context()
 
 	if all {
 		if force && !dryRun {
 			return fmt.Errorf("refusing --all with --force: a refresh consumes each account's refresh token, and forcing every vaulted account at once spends them all for no reason; force one profile (caam refresh <tool> <profile> --force), or run --all without --force to refresh only what has expired")
 		}
-		return refreshAll(ctx, threshold, dryRun, force, quiet)
+		return refreshAll(ctx, dryRun, force, quiet)
 	}
 
 	if len(args) == 0 {
 		// Default: show what would be refreshed (status view).
-		return refreshAll(ctx, threshold, true, force, quiet)
+		return refreshAll(ctx, true, force, quiet)
 	}
 
 	tool := strings.ToLower(args[0])
@@ -74,14 +69,14 @@ func runRefresh(cmd *cobra.Command, args []string) error {
 
 	if len(args) == 1 {
 		// Tool-filtered status view.
-		return refreshAllForTool(ctx, tool, threshold, true, force, quiet)
+		return refreshAllForTool(ctx, tool, true, force, quiet)
 	}
 
 	profile := args[1]
-	return refreshSingle(ctx, tool, profile, threshold, dryRun, force, quiet)
+	return refreshSingle(ctx, tool, profile, dryRun, force, quiet)
 }
 
-func refreshAll(ctx context.Context, threshold time.Duration, dryRun, force, quiet bool) error {
+func refreshAll(ctx context.Context, dryRun, force, quiet bool) error {
 	toolsToCheck := []string{"codex", "claude", "gemini"}
 
 	var hadFailure bool
@@ -96,7 +91,7 @@ func refreshAll(ctx context.Context, threshold time.Duration, dryRun, force, qui
 	}
 
 	for _, tool := range toolsToCheck {
-		r, s, f, err := refreshTool(ctx, tool, threshold, dryRun, force, quiet)
+		r, s, f, err := refreshTool(ctx, tool, dryRun, force, quiet)
 		refreshed += r
 		skipped += s
 		failed += f
@@ -121,7 +116,7 @@ func refreshAll(ctx context.Context, threshold time.Duration, dryRun, force, qui
 	return nil
 }
 
-func refreshAllForTool(ctx context.Context, tool string, threshold time.Duration, dryRun, force, quiet bool) error {
+func refreshAllForTool(ctx context.Context, tool string, dryRun, force, quiet bool) error {
 	if !quiet {
 		if dryRun {
 			fmt.Printf("Would refresh %s profiles:\n", tool)
@@ -130,14 +125,14 @@ func refreshAllForTool(ctx context.Context, tool string, threshold time.Duration
 		}
 	}
 
-	_, _, failed, err := refreshTool(ctx, tool, threshold, dryRun, force, quiet)
+	_, _, failed, err := refreshTool(ctx, tool, dryRun, force, quiet)
 	if err != nil {
 		return fmt.Errorf("%s refresh failed (%d error(s))", tool, failed)
 	}
 	return nil
 }
 
-func refreshTool(ctx context.Context, tool string, threshold time.Duration, dryRun, force, quiet bool) (refreshed, skipped, failed int, err error) {
+func refreshTool(ctx context.Context, tool string, dryRun, force, quiet bool) (refreshed, skipped, failed int, err error) {
 	profiles, err := vault.List(tool)
 	if err != nil {
 		return 0, 0, 0, err
@@ -145,7 +140,7 @@ func refreshTool(ctx context.Context, tool string, threshold time.Duration, dryR
 	sort.Strings(profiles)
 
 	for _, profile := range profiles {
-		should, reason, infoErr := shouldRefreshProfile(tool, profile, threshold, force)
+		should, reason, infoErr := shouldRefreshProfile(tool, profile, force)
 		if infoErr != nil {
 			if !quiet {
 				fmt.Printf("  %-18s failed (%v)\n", tool+"/"+profile, infoErr)
@@ -213,8 +208,8 @@ func refreshTool(ctx context.Context, tool string, threshold time.Duration, dryR
 	return refreshed, skipped, failed, nil
 }
 
-func refreshSingle(ctx context.Context, tool, profile string, threshold time.Duration, dryRun, force, quiet bool) error {
-	should, reason, err := shouldRefreshProfile(tool, profile, threshold, force)
+func refreshSingle(ctx context.Context, tool, profile string, dryRun, force, quiet bool) error {
+	should, reason, err := shouldRefreshProfile(tool, profile, force)
 	if err != nil {
 		return err
 	}
@@ -270,7 +265,7 @@ func refreshSingle(ctx context.Context, tool, profile string, threshold time.Dur
 	return nil
 }
 
-func shouldRefreshProfile(tool, profile string, threshold time.Duration, force bool) (bool, string, error) {
+func shouldRefreshProfile(tool, profile string, force bool) (bool, string, error) {
 	if _, ok := tools[tool]; !ok {
 		return false, "", fmt.Errorf("unknown tool: %s (supported: %s)", tool, supportedToolsList())
 	}
@@ -303,11 +298,10 @@ func shouldRefreshProfile(tool, profile string, threshold time.Duration, force b
 	}
 
 	// One gate everywhere (refresh.NeedsRefresh): expired, or refused. A
-	// token with time left is not spent early, whatever the threshold.
+	// token with time left is not spent early.
 	if refresh.NeedsRefresh(&health.ProfileHealth{TokenExpiresAt: info.ExpiresAt}, nil) {
 		return true, "expired", nil
 	}
-	_ = threshold
 	return false, "expires " + health.FormatTimeRemaining(info.ExpiresAt), nil
 }
 

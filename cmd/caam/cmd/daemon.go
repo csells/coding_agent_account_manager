@@ -72,7 +72,6 @@ func init() {
 	// Start flags
 	daemonStartCmd.Flags().Bool("fg", false, "run in foreground (don't daemonize)")
 	daemonStartCmd.Flags().Duration("interval", daemon.DefaultCheckInterval, "check interval")
-	daemonStartCmd.Flags().Duration("threshold", daemon.DefaultRefreshThreshold, "kept for compatibility; the daemon no longer refreshes tokens")
 	daemonStartCmd.Flags().BoolP("verbose", "v", false, "verbose logging")
 	daemonStartCmd.Flags().Bool("pool", false, "enable auth pool for proactive token monitoring")
 
@@ -84,7 +83,6 @@ func init() {
 func runDaemonStart(cmd *cobra.Command, args []string) error {
 	foreground, _ := cmd.Flags().GetBool("fg")
 	interval, _ := cmd.Flags().GetDuration("interval")
-	threshold, _ := cmd.Flags().GetDuration("threshold")
 	verbose, _ := cmd.Flags().GetBool("verbose")
 	usePool, _ := cmd.Flags().GetBool("pool")
 
@@ -105,13 +103,13 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 	}
 
 	if foreground {
-		return runDaemonForeground(interval, threshold, verbose, usePool)
+		return runDaemonForeground(interval, verbose, usePool)
 	}
 
-	return runDaemonBackground(interval, threshold, verbose, usePool)
+	return runDaemonBackground(interval, verbose, usePool)
 }
 
-func runDaemonForeground(interval, threshold time.Duration, verbose, usePool bool) error {
+func runDaemonForeground(interval time.Duration, verbose, usePool bool) error {
 	fmt.Println("Starting daemon in foreground mode...")
 	if usePool {
 		fmt.Println("Auth pool enabled")
@@ -123,10 +121,9 @@ func runDaemonForeground(interval, threshold time.Duration, verbose, usePool boo
 	hs := health.NewStorage(health.DefaultHealthPath())
 
 	cfg := &daemon.Config{
-		CheckInterval:    interval,
-		RefreshThreshold: threshold,
-		Verbose:          verbose,
-		UseAuthPool:      usePool,
+		CheckInterval: interval,
+		Verbose:       verbose,
+		UseAuthPool:   usePool,
 	}
 
 	d := daemon.New(v, hs, cfg)
@@ -134,11 +131,10 @@ func runDaemonForeground(interval, threshold time.Duration, verbose, usePool boo
 	return d.Start()
 }
 
-func runDaemonBackground(interval, threshold time.Duration, verbose, usePool bool) error {
+func runDaemonBackground(interval time.Duration, verbose, usePool bool) error {
 	// Build the command to run in background
 	args := []string{"daemon", "start", "--fg",
 		"--interval", interval.String(),
-		"--threshold", threshold.String(),
 	}
 	if verbose {
 		args = append(args, "--verbose")
@@ -185,7 +181,6 @@ func runDaemonBackground(interval, threshold time.Duration, verbose, usePool boo
 		fmt.Printf("Daemon started (pid %d)\n", cmd.Process.Pid)
 		fmt.Printf("Logs: %s\n", logPath)
 		fmt.Printf("Check interval: %v\n", interval)
-		fmt.Printf("Refresh threshold: %v before expiry\n", threshold)
 	}
 
 	return nil

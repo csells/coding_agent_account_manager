@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -13,7 +12,6 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
-	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/refresh"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/rotation"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/stealth"
@@ -397,9 +395,10 @@ func switchProfile(ctx context.Context, tool, profileName string, opts switchOpt
 }
 
 // performSwitch is `caam activate`'s switch: the shared core
-// (internal/switcher: refresh gate, auto-backup, re-capture-or-abort,
-// restore, activity log) wrapped in what only the interactive command
-// does — printing, the stealth delay, and the Codex daemon reload.
+// (internal/switcher: refresh behind the one gate, auto-backup,
+// re-capture-or-abort, restore, activity log) wrapped in what only the
+// interactive command does — printing, the stealth delay, and the Codex
+// daemon reload.
 func performSwitch(ctx context.Context, fileSet authfile.AuthFileSet, profileName, previousProfile, source string, spmCfg *config.SPMConfig, db *caamdb.DB, opts switchOptions) (*switchResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -407,9 +406,6 @@ func performSwitch(ctx context.Context, fileSet authfile.AuthFileSet, profileNam
 	tool := fileSet.Tool
 	quiet := opts.Quiet
 	res := &switchResult{PreviousProfile: previousProfile}
-
-	// Step 1: Refresh if needed
-	res.Refreshed = refreshIfNeeded(ctx, tool, profileName, quiet)
 
 	// Stealth: optional delay before the actual switch happens.
 	// Skip stealth delay in quiet mode as it's for interactive use
@@ -419,20 +415,20 @@ func performSwitch(ctx context.Context, fileSet authfile.AuthFileSet, profileNam
 		}
 	}
 
-	var logDB *caamdb.DB
-	if spmCfg.Analytics.Enabled {
-		logDB = db
-	}
-	core, err := switcher.Switch(ctx, vault, fileSet, switcher.Options{
+	core, err := switcher.Switch(ctx, vault, fileSet, coreOptions(switcher.Options{
 		Profile:       profileName,
 		Force:         opts.Force,
 		BackupCurrent: opts.BackupCurrent,
 		Config:        spmCfg,
-		DB:            logDB,
+		DB:            db,
 		Source:        source,
-	})
+	}))
 	if err != nil {
 		return nil, err
+	}
+	res.Refreshed = core.Refreshed
+	if !quiet && core.RefreshWarning != "" {
+		fmt.Printf("Warning: %s\n", core.RefreshWarning)
 	}
 	res.AutoBackup = core.AutoBackup
 	res.Recaptured = core.Recaptured
@@ -459,6 +455,25 @@ func performSwitch(ctx context.Context, fileSet authfile.AuthFileSet, profileNam
 	res.CodexDaemon = checkCodexDaemon(tool, opts.ReloadDaemon)
 
 	return res, nil
+}
+
+// coreOptions completes switcher.Options with what the command layer
+// supplies to every switch: the token refresher (behind the core's one
+// gate), the health reader it decides with, and the vault. DB and Config
+// are the caller's; the core gates logging on Config.Analytics itself.
+func coreOptions(o switcher.Options) switcher.Options {
+	if vault == nil {
+		vault = authfile.NewVault(authfile.DefaultVaultPath())
+	}
+	if o.Refresher == nil {
+		o.Refresher = switcher.RefresherFunc(func(ctx context.Context, tool, profile string) error {
+			return refresh.RefreshProfile(ctx, tool, profile, vault, healthStore)
+		})
+	}
+	if o.HealthOf == nil {
+		o.HealthOf = getProfileHealth
+	}
+	return o
 }
 
 // stealthDelay waits the configured random delay, letting ctrl-c skip it.
@@ -541,49 +556,6 @@ func resolveActivateProfile(tool string, spmCfg *config.SPMConfig) (profileName 
 	}
 
 	return "", "", fmt.Errorf("no profile specified for %s and no project association/default found\nHint: run 'caam activate %s <profile-name>', 'caam use %s <profile-name>', or 'caam project set %s <profile-name>'", tool, tool, tool, tool)
-}
-
-// refreshIfNeeded refreshes a token if it's close to expiry.
-// Returns true if a refresh was actually performed successfully.
-// The quiet parameter suppresses all output (for JSON mode).
-func refreshIfNeeded(ctx context.Context, provider, profile string, quiet bool) bool {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	// Try to get health data. If missing, we might want to populate it?
-	// But RefreshProfile uses vault path.
-	// If we don't have health data, we don't know expiry, so we can't decide to refresh.
-	// `getProfileHealth` in root.go parses files.
-	// We should use that logic? `getProfileHealth` is in `root.go` (same package).
-	h := getProfileHealth(provider, profile)
-
-	if !refresh.NeedsRefresh(h, nil) {
-		return false
-	}
-
-	if !quiet {
-		fmt.Printf("Refreshing token (%s)... ", health.FormatTimeRemaining(h.TokenExpiresAt))
-	}
-
-	err := refresh.RefreshProfile(ctx, provider, profile, vault, healthStore)
-	if err != nil {
-		if errors.Is(err, refresh.ErrUnsupported) {
-			if !quiet {
-				fmt.Printf("skipped (%v)\n", err)
-			}
-			return false
-		}
-		if !quiet {
-			fmt.Printf("failed (%v)\n", err)
-		}
-		return false // Continue activation even if refresh fails
-	}
-
-	if !quiet {
-		fmt.Println("done")
-	}
-	return true
 }
 
 func selectProfileWithRotation(tool string, profiles []string, currentProfile string, spmCfg *config.SPMConfig, db *caamdb.DB) (*rotation.Result, error) {

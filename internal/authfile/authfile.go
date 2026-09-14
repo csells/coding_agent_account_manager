@@ -167,6 +167,12 @@ func GeminiAuthFiles() AuthFileSet {
 			},
 			{
 				Tool:        "gemini",
+				Path:        filepath.Join(geminiHome, "google_accounts.json"),
+				Description: "Active Google account for the Gemini CLI (google_accounts.json)",
+				Required:    false,
+			},
+			{
+				Tool:        "gemini",
 				Path:        filepath.Join(geminiHome, ".env"),
 				Description: "Gemini API key (.env file)",
 				Required:    false,
@@ -857,7 +863,7 @@ func (v *Vault) BackupCurrent(fileSet AuthFileSet) (string, error) {
 //
 // Guards (all skip silently, returning nil):
 //   - empty/missing outgoing profile (unknown live state)
-//   - system profiles (_original, _backup_*, _auto_backup_* — immutable)
+//   - system profiles (_original, _backup_* — immutable)
 //   - the target profile we are about to switch TO (would be pointless/racey)
 //   - no live auth files present
 //
@@ -905,6 +911,32 @@ func (v *Vault) ResnapshotOutgoing(fileSet AuthFileSet, outgoing, target string)
 	}
 
 	return v.Backup(fileSet, outgoing)
+}
+
+// CaptureSignedIn files the tool's live credential in the vault: under the
+// Active Account's own name when caam knows it (ResnapshotOutgoing's rules,
+// so system profiles are never rewritten and a Claude credential that lost
+// its refresh token is not written over a good copy), else — an unknown
+// credential, or one that matches only an immutable system profile — as a
+// fresh _backup_ profile. It returns the name the credential is now under,
+// "" when nothing is signed in. This is what has to happen before anything
+// replaces the live credential.
+func (v *Vault) CaptureSignedIn(fileSet AuthFileSet) (string, error) {
+	if !HasAuthFiles(fileSet) {
+		return "", nil
+	}
+	active, _ := v.ActiveProfile(fileSet)
+	if active != "" && !IsSystemProfile(active) {
+		if err := v.ResnapshotOutgoing(fileSet, active, ""); err != nil {
+			return "", err
+		}
+		return active, nil
+	}
+	name, err := v.BackupCurrent(fileSet)
+	if err != nil {
+		return "", err
+	}
+	return name, nil
 }
 
 // RotateAutoBackups removes old auto-backup profiles to stay within the limit.
@@ -1547,6 +1579,12 @@ func ClearAuthFiles(fileSet AuthFileSet) error {
 			}
 			continue
 		}
+		// An optional file another tool's set also lists is that tool's
+		// login too (Antigravity and the Gemini CLI share ~/.gemini's OAuth
+		// cache): clearing this tool must not log the other one out.
+		if !spec.Required && sharedWithAnotherTool(fileSet.Tool, spec.Path) {
+			continue
+		}
 		if err := os.Remove(spec.Path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove %s: %w", spec.Path, err)
 		}
@@ -1555,6 +1593,26 @@ func ClearAuthFiles(fileSet AuthFileSet) error {
 	// Removing the mirror is not a logout while the keychain still holds the
 	// token Claude Code prefers (issue #98).
 	return clearKeychain(fileSet)
+}
+
+// sharedWithAnotherTool reports whether another tool's file set lists path.
+func sharedWithAnotherTool(tool, path string) bool {
+	clean := filepath.Clean(path)
+	for _, other := range []string{"claude", "codex", "gemini", "agy", "grok", "opencode", "cursor", "kimi", "zcode"} {
+		if other == tool {
+			continue
+		}
+		set, ok := GetAuthFileSet(other)
+		if !ok {
+			continue
+		}
+		for _, spec := range set.Files {
+			if filepath.Clean(spec.Path) == clean {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // --- Claude Desktop OAuth token cache (macOS) -------------------------------

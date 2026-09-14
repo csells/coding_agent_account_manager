@@ -143,15 +143,8 @@ func captureSignedInAccount(tool string) error {
 	if vault == nil {
 		vault = authfile.NewVault(authfile.DefaultVaultPath())
 	}
-	fileSet := get()
-	if active, _ := vault.ActiveProfile(fileSet); active != "" {
-		return vault.Backup(fileSet, active)
-	}
-	if authfile.HasAuthFiles(fileSet) {
-		_, err := vault.BackupCurrent(fileSet)
-		return err
-	}
-	return nil
+	_, err := vault.CaptureSignedIn(get())
+	return err
 }
 
 // fetchProfileLimits reads one profile's rate-limit windows: from the live

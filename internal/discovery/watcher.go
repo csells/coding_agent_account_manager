@@ -315,7 +315,7 @@ func (w *Watcher) processChange(path string) {
 	// Extract identity from the auth file
 	ident, err := w.extractIdentity(provider, path)
 	if err != nil {
-		w.logger.Debug("failed to extract identity; falling back to auto profile",
+		w.logger.Debug("failed to extract identity; not captured",
 			"provider", provider,
 			"path", path,
 			"error", err)
@@ -592,7 +592,7 @@ func WatchOnce(vault *authfile.Vault, providers []string, logger *slog.Logger) (
 		}
 
 		if err != nil {
-			logger.Debug("failed to extract identity; falling back to auto profile",
+			logger.Debug("failed to extract identity; not captured",
 				"provider", provider,
 				"error", err)
 			ident = nil

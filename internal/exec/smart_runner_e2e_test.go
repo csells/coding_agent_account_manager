@@ -206,7 +206,15 @@ func TestSmartRunner_E2E(t *testing.T) {
 	activations, err := db.GetEvents("gemini", "active", time.Now().Add(-1*time.Hour), 10)
 	require.NoError(t, err)
 	assert.NotEmpty(t, activations, "Should have logged activation event")
-	assert.Equal(t, caamdb.EventActivate, activations[0].Type)
+	// The switch logs a deactivate for the outgoing account too; ordering
+	// is by second, so look for the activate rather than trusting [0].
+	sawActivate := false
+	for _, ev := range activations {
+		if ev.Type == caamdb.EventActivate {
+			sawActivate = true
+		}
+	}
+	assert.True(t, sawActivate, "expected an activate event")
 
 	// Check DB for Wrap Session
 	sessions, err := db.GetWrapSessions("gemini", time.Now().Add(-1*time.Hour), 10)

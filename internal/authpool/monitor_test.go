@@ -497,3 +497,43 @@ func TestPool_RefreshAllTakesExpiredOnlyAndARefusedRefreshIsTerminal(t *testing.
 		t.Fatalf("RefreshAll should refresh the expired profile only, got %v", calls)
 	}
 }
+
+// A refused refresh is terminal on the first refusal: the profile reads as
+// error (not stuck in refreshing), and RefreshAll does not re-present it.
+func TestPool_ARefusedRefreshIsTerminalThroughTheRefresher(t *testing.T) {
+	pool := NewAuthPool()
+	refresher := NewMockRefresher()
+	refresher.SetFail("claude", "dead", errors.New("refresh_token_invalidated"))
+	monitor := NewMonitor(pool, refresher, DefaultMonitorConfig())
+	pool.AddProfile("claude", "dead")
+	pool.UpdateTokenExpiry("claude", "dead", time.Now().Add(-time.Minute))
+
+	monitor.RefreshAll(context.Background())
+	if p := pool.GetProfile("claude", "dead"); p == nil || p.Status != PoolStatusError {
+		t.Fatalf("after a refusal the profile should read as error, got %+v", p)
+	}
+	monitor.RefreshAll(context.Background())
+	if n := refresher.CallCount(); n != 1 {
+		t.Fatalf("a refused profile must not be re-presented; refresh calls = %d", n)
+	}
+}
+
+// RefreshAll returns when the refreshes it started are done, so a command
+// that calls it and exits cannot cut a refresh mid-rotation.
+func TestPool_RefreshAllWaitsForItsRefreshes(t *testing.T) {
+	pool := NewAuthPool()
+	refresher := NewMockRefresher()
+	refresher.SetDelay(150 * time.Millisecond)
+	monitor := NewMonitor(pool, refresher, DefaultMonitorConfig())
+	pool.AddProfile("claude", "expired")
+	pool.UpdateTokenExpiry("claude", "expired", time.Now().Add(-time.Minute))
+
+	start := time.Now()
+	monitor.RefreshAll(context.Background())
+	if time.Since(start) < 150*time.Millisecond || refresher.CallCount() != 1 {
+		t.Fatalf("RefreshAll returned before its refresh completed (elapsed %v, calls %d)", time.Since(start), refresher.CallCount())
+	}
+	if p := pool.GetProfile("claude", "expired"); p == nil || p.Status != PoolStatusReady {
+		t.Fatalf("the refreshed profile should be ready, got %+v", p)
+	}
+}

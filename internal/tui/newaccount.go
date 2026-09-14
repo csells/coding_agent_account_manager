@@ -268,16 +268,11 @@ func (m Model) newAccountIdentified(msg newAccountIdentifiedMsg) (tea.Model, tea
 	}
 	fileSet, _ := authFileSetForProvider(msg.provider)
 	provider := msg.provider
-	_, err := switcher.FinishLogin(context.Background(), authfile.NewVault(m.vaultPath), fileSet, nil, switcher.LoginOptions{
-		Identity: func(context.Context) string { return msg.name },
-		Capture:  func(name string) error { return m.captureLive(provider, name) },
-	})
-	if err != nil {
+	if err := m.finishLogin(fileSet, msg.name, func(name string) error { return m.captureLive(provider, name) }); err != nil {
 		m.setNotice(msg.provider, msg.name, err.Error(), true)
 		m.showMessage(StatusError, "Capture failed", "%v", err)
 		return m, nil
 	}
-	logLoginEvent(msg.provider, msg.name)
 	m.selectedProfileName = msg.name
 	delete(m.limits, limitsKey(msg.provider, msg.name))
 	m.setNotice(msg.provider, msg.name, "Logged in and captured "+msg.name, false)
@@ -298,20 +293,19 @@ func (m Model) captureLive(provider, name string) error {
 	return authfile.NewVault(m.vaultPath).Backup(fileSet, name)
 }
 
-// logLoginEvent records the login in the activity log, which is where the
-// LAST USED column reads from; a fresh login is the account's first use.
-// The log is optional, so a missing database is not an error.
-func logLoginEvent(provider, name string) {
-	db, err := caamdb.Open()
-	if err != nil {
-		return
+// finishLogin files the new session under name through the shared
+// FinishLogin, which also logs the login (the LAST USED column's source).
+// The activity log is optional: a missing database is not an error.
+func (m Model) finishLogin(fileSet authfile.AuthFileSet, name string, capture func(string) error) error {
+	var db *caamdb.DB
+	if d, err := caamdb.Open(); err == nil {
+		db = d
+		defer db.Close()
 	}
-	defer db.Close()
-	_ = db.LogEvent(caamdb.Event{
-		Timestamp:   time.Now(),
-		Type:        caamdb.EventLogin,
-		Provider:    provider,
-		ProfileName: name,
-		Details:     map[string]any{"source": "tui"},
+	_, err := switcher.FinishLogin(context.Background(), authfile.NewVault(m.vaultPath), fileSet, nil, switcher.LoginOptions{
+		Name:    name,
+		Capture: capture,
+		DB:      db,
 	})
+	return err
 }

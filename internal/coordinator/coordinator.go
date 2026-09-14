@@ -443,7 +443,11 @@ func (c *Coordinator) handleIdleState(ctx context.Context, tracker *PaneTracker,
 		}
 
 		// A login is a logout first: the signed-in account must be in the
-		// vault before /login replaces it. No capture, no injection.
+		// vault before /login replaces it. No capture, no injection. This is
+		// capture-only, not capture-then-clear: the pane is a running Claude
+		// Code session that holds its credential in memory, and /login inside
+		// it replaces the credential itself — there is no live file to
+		// clear from outside without pulling the session out from under it.
 		if c.config.BeforeLogin != nil {
 			if err := c.config.BeforeLogin(ctx, tracker.PaneID); err != nil {
 				c.logger.Error("login not injected: the signed-in account could not be captured first",

@@ -61,13 +61,6 @@ type SmartRunner struct {
 	wg sync.WaitGroup
 
 	// Login detection channel
-	loginDone chan loginResult
-}
-
-// loginResult captures the outcome of a login attempt.
-type loginResult struct {
-	success bool
-	message string
 }
 
 // SmartRunnerOptions configures the SmartRunner.
@@ -99,7 +92,6 @@ func NewSmartRunner(runner *Runner, opts SmartRunnerOptions) *SmartRunner {
 		notifier:         notifier,
 		cooldownDuration: opts.CooldownDuration,
 		state:            Running,
-		loginDone:        make(chan loginResult, 1),
 	}
 }
 
@@ -368,12 +360,8 @@ func (r *SmartRunner) handleRateLimit(ctx context.Context) {
 		return
 	}
 
-	// 1. Save current state for rollback
+	// 1. Remember where we came from; the switch below captures it.
 	r.previousProfile = r.currentProfile
-	if err := r.vault.Backup(fileSet, r.currentProfile); err != nil {
-		r.failWithManual("failed to backup current profile: %v", err)
-		return
-	}
 
 	defer func() {
 		if r.getState() == HandoffFailed {
@@ -432,7 +420,7 @@ func (r *SmartRunner) handleRateLimit(ctx context.Context) {
 	// tool's login is a logout first — it would revoke what was just
 	// installed (docs/ACCOUNT_SWITCHER.md §2). The running session picks
 	// the new credential up on its next token refresh, or on restart.
-	r.setState(LoginComplete)
+	r.setState(Switched)
 	r.currentProfile = nextProfile
 	r.handoffCount++
 
@@ -449,7 +437,10 @@ func (r *SmartRunner) handleRateLimit(ctx context.Context) {
 
 func (r *SmartRunner) rollback(fileSet authfile.AuthFileSet) {
 	fmt.Fprintf(os.Stderr, "Rolling back to %s...\n", r.previousProfile)
-	if err := r.vault.Restore(fileSet, r.previousProfile); err != nil {
+	if r.previousProfile == "" {
+		return
+	}
+	if _, err := switcher.Switch(context.Background(), r.vault, fileSet, switcher.Options{Profile: r.previousProfile, DB: r.db, Source: "handoff-rollback"}); err != nil {
 		fmt.Fprintf(os.Stderr, "Rollback failed: %v\n", err)
 	}
 	r.currentProfile = r.previousProfile
@@ -493,17 +484,6 @@ func (r *SmartRunner) getState() HandoffState {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.state
-}
-
-func (r *SmartRunner) drainLoginDone() {
-	for {
-		select {
-		case <-r.loginDone:
-			continue
-		default:
-			return
-		}
-	}
 }
 
 func (r *SmartRunner) monitorOutput(ctx context.Context, ctrl pty.Controller, done chan<- struct{}, observer func(string)) {
@@ -557,22 +537,8 @@ func (r *SmartRunner) monitorOutput(ctx context.Context, ctrl pty.Controller, do
 				if !dispatched {
 					writer.Write([]byte(output))
 				}
-			} else if state == LoggingIn {
-				// Check for login completion and signal handleRateLimit
-				if r.loginHandler.IsLoginComplete(output) {
-					select {
-					case r.loginDone <- loginResult{success: true}:
-					default:
-						// Channel already has a value
-					}
-				} else if failed, msg := r.loginHandler.IsLoginFailed(output); failed {
-					select {
-					case r.loginDone <- loginResult{success: false, message: msg}:
-					default:
-						// Channel already has a value
-					}
-				}
 			}
+
 		}
 
 		// Check context cancellation

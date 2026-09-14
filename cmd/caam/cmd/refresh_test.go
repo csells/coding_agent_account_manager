@@ -57,7 +57,7 @@ func TestRefreshSingle_CodexUpdatesAuth(t *testing.T) {
 	refresh.CodexTokenURL = ts.URL
 	t.Cleanup(func() { refresh.CodexTokenURL = oldTokenURL })
 
-	if err := refreshSingle(context.Background(), "codex", "main", 10*time.Minute, false, false, true); err != nil {
+	if err := refreshSingle(context.Background(), "codex", "main", false, false, true); err != nil {
 		t.Fatalf("refreshSingle() error = %v", err)
 	}
 
@@ -108,7 +108,7 @@ func TestRefreshSingle_SkipsWhenNotExpiring(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	if err := refreshSingle(context.Background(), "codex", "main", 10*time.Minute, false, false, true); err != nil {
+	if err := refreshSingle(context.Background(), "codex", "main", false, false, true); err != nil {
 		t.Fatalf("refreshSingle() error = %v", err)
 	}
 
@@ -150,7 +150,7 @@ func TestRefreshSingle_SkipsWhenUnsupported(t *testing.T) {
 	}
 
 	// No oauth_creds.json present, so refresh should be treated as unsupported and skipped.
-	if err := refreshSingle(context.Background(), "gemini", "main", 10*time.Minute, false, false, true); err != nil {
+	if err := refreshSingle(context.Background(), "gemini", "main", false, false, true); err != nil {
 		t.Fatalf("refreshSingle() error = %v", err)
 	}
 
@@ -224,7 +224,7 @@ func TestRefreshSingle_GeminiUpdatesSettings(t *testing.T) {
 	refresh.GeminiTokenURL = ts.URL
 	t.Cleanup(func() { refresh.GeminiTokenURL = oldTokenURL })
 
-	if err := refreshSingle(context.Background(), "gemini", "main", 10*time.Minute, false, false, true); err != nil {
+	if err := refreshSingle(context.Background(), "gemini", "main", false, false, true); err != nil {
 		t.Fatalf("refreshSingle() error = %v", err)
 	}
 
@@ -289,7 +289,7 @@ func TestRefreshSingle_ClaudeReturnsUnsupported(t *testing.T) {
 
 	// Attempt refresh - should return nil (graceful skip) not an error
 	// because Claude refresh is disabled and handled via ErrUnsupported
-	err = refreshSingle(context.Background(), "claude", "test-profile", 10*time.Minute, false, false, true)
+	err = refreshSingle(context.Background(), "claude", "test-profile", false, false, true)
 
 	// Claude refresh should NOT return an error - it's skipped gracefully
 	if err != nil {

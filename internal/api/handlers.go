@@ -10,6 +10,7 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/identity"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/refresh"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 )
 
@@ -361,6 +362,19 @@ func (h *Handlers) GetUsage(tool string) (*UsageResponse, error) {
 	return resp, nil
 }
 
+// healthOf reads a profile's health record for the switch core's refresh
+// gate; nil when the store has none.
+func (h *Handlers) healthOf(tool, profile string) *health.ProfileHealth {
+	if h.healthStore == nil {
+		return nil
+	}
+	ph, err := h.healthStore.GetProfile(tool, profile)
+	if err != nil {
+		return nil
+	}
+	return ph
+}
+
 // GetCoordinators returns coordinator status.
 func (h *Handlers) GetCoordinators() (*CoordinatorsResponse, error) {
 	// For now, return empty - coordinator discovery could be added later
@@ -404,7 +418,16 @@ func (h *Handlers) Activate(req ActivateRequest) (*ActivateResponse, error) {
 	// Switch through the shared core: the outgoing account is re-captured
 	// first, and a switch that cannot keep the vault fresh is refused
 	// unless forced.
-	if _, err := switcher.Switch(context.Background(), h.vault, fileSet, switcher.Options{Profile: req.Profile, Force: req.Force, DB: h.db, Source: "api"}); err != nil {
+	if _, err := switcher.Switch(context.Background(), h.vault, fileSet, switcher.Options{
+		Profile: req.Profile,
+		Force:   req.Force,
+		DB:      h.db,
+		Source:  "api",
+		Refresher: switcher.RefresherFunc(func(ctx context.Context, tool, profile string) error {
+			return refresh.RefreshProfile(ctx, tool, profile, h.vault, h.healthStore)
+		}),
+		HealthOf: h.healthOf,
+	}); err != nil {
 		return nil, err
 	}
 

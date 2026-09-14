@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"encoding/base64"
 	"encoding/json"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/testutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -194,35 +194,6 @@ func TestActivate_AutoBackupsUnsavedStateBeforeSwitch(t *testing.T) {
 	}
 }
 
-// syntheticCodexAuth builds a ChatGPT-mode Codex auth.json whose id_token
-// names email and whose tokens carry iat, the way Codex writes it after a
-// login or an in-place refresh. The JWTs are unsigned and synthetic.
-func syntheticCodexAuth(t *testing.T, email, tag string, issuedAt int64) []byte {
-	t.Helper()
-	jwt := func(claims map[string]any) string {
-		payload, err := json.Marshal(claims)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`)) + "." +
-			base64.RawURLEncoding.EncodeToString(payload) + ".sig"
-	}
-	auth := map[string]any{
-		"auth_mode": "chatgpt",
-		"tokens": map[string]any{
-			"id_token":      jwt(map[string]any{"email": email, "iat": issuedAt, "exp": issuedAt + 3600}),
-			"access_token":  jwt(map[string]any{"sub": email, "iat": issuedAt, "exp": issuedAt + 3600}),
-			"refresh_token": "SYNTHETIC-REFRESH-" + tag,
-		},
-		"last_refresh": time.Unix(issuedAt, 0).UTC().Format(time.RFC3339),
-	}
-	data, err := json.Marshal(auth)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return data
-}
-
 // TestActivate_RecapturesOutgoingBeforeOverwriting is the Switch safety
 // rule of the switcher handoff (work item H): while a profile is active the
 // tool rotates its refresh-token family in place, so the outgoing profile's
@@ -241,9 +212,9 @@ func TestActivate_RecapturesOutgoingBeforeOverwriting(t *testing.T) {
 	t.Cleanup(func() { vault = oldVault })
 
 	base := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC).Unix()
-	stale := syntheticCodexAuth(t, "a@example.com", "a-stale", base)
-	rotated := syntheticCodexAuth(t, "a@example.com", "a-rotated", base+3600)
-	incoming := syntheticCodexAuth(t, "b@example.com", "b", base)
+	stale := testutil.SyntheticCodexAuth(t, "a@example.com", "a-stale", base)
+	rotated := testutil.SyntheticCodexAuth(t, "a@example.com", "a-rotated", base+3600)
+	incoming := testutil.SyntheticCodexAuth(t, "b@example.com", "b", base)
 
 	write := func(path string, data []byte) {
 		t.Helper()
@@ -317,10 +288,10 @@ func TestActivate_AbortsWhenOutgoingCannotBeRecaptured(t *testing.T) {
 		}
 	}
 	aDir := vault.ProfilePath("codex", "a")
-	write(filepath.Join(aDir, "auth.json"), syntheticCodexAuth(t, "a@example.com", "a", base))
-	write(filepath.Join(vault.ProfilePath("codex", "b"), "auth.json"), syntheticCodexAuth(t, "b@example.com", "b", base))
+	write(filepath.Join(aDir, "auth.json"), testutil.SyntheticCodexAuth(t, "a@example.com", "a", base))
+	write(filepath.Join(vault.ProfilePath("codex", "b"), "auth.json"), testutil.SyntheticCodexAuth(t, "b@example.com", "b", base))
 	livePath := filepath.Join(os.Getenv("CODEX_HOME"), "auth.json")
-	rotated := syntheticCodexAuth(t, "a@example.com", "a-rotated", base+3600)
+	rotated := testutil.SyntheticCodexAuth(t, "a@example.com", "a-rotated", base+3600)
 	write(livePath, rotated)
 
 	// The outgoing profile's vault directory cannot be written to.

@@ -897,14 +897,6 @@ func (c *SPMConfig) GetWarningThreshold() time.Duration {
 	return c.Health.WarningThreshold.Duration()
 }
 
-// ShouldRefresh returns true if a token expiring at the given time needs refresh.
-func (c *SPMConfig) ShouldRefresh(expiresAt time.Time) bool {
-	if expiresAt.IsZero() {
-		return false
-	}
-	return time.Until(expiresAt) < c.GetRefreshThreshold()
-}
-
 // NeedsWarning returns true if a token expiring at the given time should show warning status.
 func (c *SPMConfig) NeedsWarning(expiresAt time.Time) bool {
 	if expiresAt.IsZero() {

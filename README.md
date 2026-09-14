@@ -340,7 +340,7 @@ and a second sync writes nothing. Pass `--no-sync-config` to skip it.
 **Notes:** Claude Max has a 5-hour rolling usage window. When you hit it, you'll see rate limit messages. Switch accounts to continue.
 
 **Limitations:**
-- **Email/Identity Detection:** Claude's current auth format does not expose email or account ID. Profile names default to timestamp-based auto-names (`auto-YYYYMMDD-HHMMSS`) unless you specify a name when backing up.
+- **Email/Identity Detection:** Claude's current auth format does not expose email or account ID, so `caam backup claude` needs a name; the dashboard's `n` reads who signed in from the login itself and names the profile for you.
 - **Automatic Token Refresh:** Claude Code manages token refresh internally. CAAM cannot refresh Claude tokens—use `/login` in Claude Code if tokens expire.
 - **Usage API:** Claude's usage API is undocumented and may not be reliable.
 
@@ -829,8 +829,9 @@ re-captured first, so its newest tokens are in the vault, and its live
 credential is then cleared, because a tool's login is a logout first —
 Codex revokes the session it finds, refresh-token family and vault copy
 included, and a login that finds nothing has nothing to revoke (a live
-credential caam cannot match to a vault profile is left for the login to
-replace); the terminal goes to the provider's own login
+credential caam cannot match to a vault profile is filed as a backup first,
+then cleared, so it is neither lost nor left for the login to revoke); the
+terminal goes to the provider's own login
 (`codex login`, Claude Code with `/login`, `zcode login`, …); and when it
 returns, the live credential is captured under the account it now belongs
 to and selected, which puts a first-time provider on the strip. A

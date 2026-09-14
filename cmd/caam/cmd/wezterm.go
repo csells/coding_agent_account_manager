@@ -229,7 +229,10 @@ func runWeztermLoginAll(cmd *cobra.Command, args []string) error {
 	}
 
 	// A login is a logout first: the signed-in account goes into the vault
-	// before any pane is told to log in again. No capture, no send.
+	// before any pane is told to log in again. No capture, no send. Capture
+	// only (no clear): each pane is a running session that replaces its own
+	// credential on /login; clearing the live file under it would not stop
+	// that and would break the session meanwhile.
 	if err := weztermBeforeLogin(tool); err != nil {
 		return fmt.Errorf("not sending /login: %w", err)
 	}

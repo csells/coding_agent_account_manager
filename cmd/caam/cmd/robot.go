@@ -873,7 +873,7 @@ func runRobotAct(cmd *cobra.Command, args []string) error {
 		// Switch through the shared core: the outgoing account is
 		// re-captured first, and a switch that cannot keep the vault fresh
 		// is refused.
-		if _, err := switcher.Switch(cmd.Context(), vault, fileSet, switcher.Options{Profile: profile, Source: "robot"}); err != nil {
+		if _, err := switcher.Switch(cmd.Context(), vault, fileSet, coreOptions(switcher.Options{Profile: profile, Source: "robot"})); err != nil {
 			return robotError(cmd, "act", "ACTIVATE_FAILED",
 				fmt.Sprintf("failed to activate %s/%s", provider, profile),
 				err.Error(),

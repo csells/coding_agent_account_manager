@@ -10,7 +10,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/refresh"
 	"github.com/spf13/cobra"
@@ -68,7 +67,7 @@ Examples:
   caam verify              # Verify all profiles
   caam verify claude       # Verify only Claude profiles
   caam verify --json       # Machine-readable output
-  caam verify --fix        # Auto-refresh expiring tokens`,
+  caam verify --fix        # Refresh expired tokens (Codex, Gemini)`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runVerify,
 }
@@ -76,7 +75,7 @@ Examples:
 func init() {
 	rootCmd.AddCommand(verifyCmd)
 	verifyCmd.Flags().Bool("json", false, "output as JSON")
-	verifyCmd.Flags().Bool("fix", false, "auto-refresh expiring/expired tokens for refreshable profiles")
+	verifyCmd.Flags().Bool("fix", false, "refresh expired tokens for refreshable profiles (Codex, Gemini)")
 }
 
 func runVerify(cmd *cobra.Command, args []string) error {
@@ -160,13 +159,6 @@ func runVerify(cmd *cobra.Command, args []string) error {
 func runVerifyFix(cmd *cobra.Command, toolFilter string) []VerifyFixResult {
 	ctx := cmd.Context()
 
-	threshold := refresh.DefaultRefreshThreshold
-	if spmCfg, err := config.LoadSPMConfig(); err == nil {
-		if v := spmCfg.Health.RefreshThreshold.Duration(); v > 0 {
-			threshold = v
-		}
-	}
-
 	var results []VerifyFixResult
 
 	for _, provider := range supportedTools() {
@@ -181,7 +173,7 @@ func runVerifyFix(cmd *cobra.Command, toolFilter string) []VerifyFixResult {
 		sort.Strings(profiles)
 
 		for _, profileName := range profiles {
-			should, reason, err := shouldRefreshProfile(provider, profileName, threshold, false)
+			should, reason, err := shouldRefreshProfile(provider, profileName, false)
 			if err != nil {
 				results = append(results, VerifyFixResult{
 					Provider: provider, Profile: profileName,

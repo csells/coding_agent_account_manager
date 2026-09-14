@@ -16,11 +16,9 @@ const (
 	// SwappingAuth means we are updating the auth files on disk.
 	SwappingAuth
 
-	// LoggingIn means we are injecting the login command into the PTY.
-	LoggingIn
-
-	// LoginComplete means the login flow finished successfully.
-	LoginComplete
+	// Switched means the next account's credential is installed; no login
+	// is run (a login is a logout first and would revoke it).
+	Switched
 
 	// HandoffFailed means the handoff failed and we are rolling back or alerting.
 	HandoffFailed
@@ -39,10 +37,8 @@ func (s HandoffState) String() string {
 		return "SELECTING_BACKUP"
 	case SwappingAuth:
 		return "SWAPPING_AUTH"
-	case LoggingIn:
-		return "LOGGING_IN"
-	case LoginComplete:
-		return "LOGIN_COMPLETE"
+	case Switched:
+		return "SWITCHED"
 	case HandoffFailed:
 		return "HANDOFF_FAILED"
 	case ManualMode:

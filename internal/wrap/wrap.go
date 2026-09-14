@@ -23,6 +23,7 @@ import (
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/ratelimit"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/refresh"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/rotation"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 )
@@ -332,7 +333,24 @@ func (w *Wrapper) runOnce(ctx context.Context, profile string) (int, bool, error
 
 	// Switch through the shared core: the account that was signed in is
 	// re-captured before this one is installed.
-	if _, err := switcher.Switch(ctx, w.vault, fileSet, switcher.Options{Profile: profile, DB: w.db, Source: "wrap"}); err != nil {
+	if _, err := switcher.Switch(ctx, w.vault, fileSet, switcher.Options{
+		Profile: profile,
+		DB:      w.db,
+		Source:  "wrap",
+		Refresher: switcher.RefresherFunc(func(ctx context.Context, tool, prof string) error {
+			return refresh.RefreshProfile(ctx, tool, prof, w.vault, w.healthStore)
+		}),
+		HealthOf: func(tool, prof string) *health.ProfileHealth {
+			if w.healthStore == nil {
+				return nil
+			}
+			ph, err := w.healthStore.GetProfile(tool, prof)
+			if err != nil {
+				return nil
+			}
+			return ph
+		},
+	}); err != nil {
 		return 1, false, fmt.Errorf("activate profile %s: %w", profile, err)
 	}
 

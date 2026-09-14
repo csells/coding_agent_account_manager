@@ -28,8 +28,7 @@ func TestHandoffState_String(t *testing.T) {
 		{RateLimited, "RATE_LIMITED"},
 		{SelectingBackup, "SELECTING_BACKUP"},
 		{SwappingAuth, "SWAPPING_AUTH"},
-		{LoggingIn, "LOGGING_IN"},
-		{LoginComplete, "LOGIN_COMPLETE"},
+		{Switched, "SWITCHED"},
 		{HandoffFailed, "HANDOFF_FAILED"},
 		{ManualMode, "MANUAL_MODE"},
 		{HandoffState(999), "UNKNOWN"},
@@ -117,8 +116,7 @@ func TestSmartRunner_setState(t *testing.T) {
 		RateLimited,
 		SelectingBackup,
 		SwappingAuth,
-		LoggingIn,
-		LoginComplete,
+		Switched,
 		HandoffFailed,
 		ManualMode,
 	}
@@ -152,24 +150,6 @@ func TestSmartRunner_InitialState(t *testing.T) {
 	if sr.previousProfile != "" {
 		t.Errorf("initial previousProfile = %q, want empty", sr.previousProfile)
 	}
-}
-
-func TestSmartRunner_DrainLoginDone(t *testing.T) {
-	registry := provider.NewRegistry()
-	runner := NewRunner(registry)
-	sr := NewSmartRunner(runner, SmartRunnerOptions{})
-
-	sr.loginDone <- loginResult{success: true}
-	sr.drainLoginDone()
-
-	select {
-	case <-sr.loginDone:
-		t.Fatal("expected loginDone to be empty after drain")
-	default:
-	}
-
-	// Ensure drain is safe on empty channel
-	sr.drainLoginDone()
 }
 
 // =============================================================================

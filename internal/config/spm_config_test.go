@@ -774,25 +774,6 @@ func TestSPMConfigHelpers(t *testing.T) {
 		}
 	})
 
-	t.Run("ShouldRefresh", func(t *testing.T) {
-		// Expiring in 5 minutes - should refresh
-		expiresIn5m := time.Now().Add(5 * time.Minute)
-		if !cfg.ShouldRefresh(expiresIn5m) {
-			t.Error("ShouldRefresh(5m) should be true")
-		}
-
-		// Expiring in 15 minutes - should not refresh
-		expiresIn15m := time.Now().Add(15 * time.Minute)
-		if cfg.ShouldRefresh(expiresIn15m) {
-			t.Error("ShouldRefresh(15m) should be false")
-		}
-
-		// Zero time - should not refresh
-		if cfg.ShouldRefresh(time.Time{}) {
-			t.Error("ShouldRefresh(zero) should be false")
-		}
-	})
-
 	t.Run("NeedsWarning", func(t *testing.T) {
 		// Expiring in 30 minutes - should warn
 		expiresIn30m := time.Now().Add(30 * time.Minute)

@@ -244,7 +244,11 @@ func (m *Monitor) doRefresh(ctx context.Context, provider, profile string) {
 	newExpiry, err := m.refresher.Refresh(ctx, provider, profile)
 
 	if err != nil {
+		// A refused refresh is terminal on the first refusal: re-presenting
+		// a refused token is what trips reuse detection. Read as error, not
+		// stuck in refreshing, so a person can see it and act.
 		m.pool.SetError(provider, profile, err)
+		_ = m.pool.SetStatus(provider, profile, PoolStatusError)
 		if m.config.OnRefreshComplete != nil {
 			m.config.OnRefreshComplete(provider, profile, time.Time{}, err)
 		}
@@ -306,10 +310,13 @@ func (m *Monitor) ForceRefresh(ctx context.Context, provider, profile string) er
 	return nil
 }
 
-// RefreshAll refreshes every profile whose token has expired; see
-// refreshExpired for what it leaves alone.
+// RefreshAll refreshes every profile whose token has expired (see
+// refreshExpired for what it leaves alone) and returns when they are done,
+// so a command that calls it and exits cannot cut a refresh between the
+// provider rotating the family and the vault being written.
 func (m *Monitor) RefreshAll(ctx context.Context) {
 	m.refreshExpired(ctx)
+	m.refreshWg.Wait()
 }
 
 // Stats returns current monitor statistics.

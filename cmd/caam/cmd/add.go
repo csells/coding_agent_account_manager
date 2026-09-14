@@ -14,6 +14,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
+	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
 	codexprovider "github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider/codex"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 )
@@ -113,7 +115,12 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	// signed in.
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	var loginDB *caamdb.DB
+	if spm, err := config.LoadSPMConfig(); err == nil && spm.Analytics.Enabled {
+		loginDB, _ = getDB()
+	}
 	res, err := switcher.Login(ctx, vault, fileSet, switcher.LoginOptions{
+		DB: loginDB,
 		Run: func(ctx context.Context) error {
 			fmt.Printf("\nLaunching %s login...\n", tool)
 			fmt.Println("Complete the authentication in the terminal/browser.")
@@ -157,7 +164,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 				break
 			}
 		}
-		if err := vault.Backup(fileSet, profileName); err != nil {
+		if _, err := switcher.FinishLogin(ctx, vault, fileSet, nil, switcher.LoginOptions{Name: profileName, DB: loginDB}); err != nil {
 			return fmt.Errorf("save profile: %w", err)
 		}
 	}
@@ -174,7 +181,6 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runToolLogin launches the tool's login command.
 // runToolLoginInterruptible runs the tool's login, stopping on ctrl-c or
 // the timeout.
 func runToolLoginInterruptible(ctx context.Context, tool string, deviceCode bool, timeout time.Duration) error {

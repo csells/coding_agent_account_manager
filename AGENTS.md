@@ -41,9 +41,10 @@ The rules that cost real accounts to learn:
 2. **A login is a logout first.** `codex login` revokes the session it finds, and
    with it the refresh-token family the vault copy belongs to. Never run a
    provider's native login while a vaulted account's live credential is on disk:
-   capture, clear (`authfile.ClearAuthFiles`), then log in. Clear only a credential
-   whose account you have just captured; an unknown one is left for the login to
-   replace.
+   capture, clear (`authfile.ClearAuthFiles`), then log in — `switcher.Login`
+   does all three in order. A live credential that matches no vault profile is
+   somebody's session too: it is filed as a `_backup_` first, then cleared, never
+   destroyed and never left for the login to revoke.
 3. **Refreshing a token spends it.** Every refresh consumes the refresh token. Do it
    for a reason (expired, or just refused), never on a timer or a plain keypress,
    and never from a limits fetch — a fetch presents the access token and nothing more.

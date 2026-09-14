@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/testutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -37,9 +38,9 @@ func setupRotatedCodex(t *testing.T) *rotatedCodex {
 
 	base := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC).Unix()
 	r := &rotatedCodex{
-		stale:    syntheticCodexAuth(t, "a@example.com", "a-stale", base),
-		rotated:  syntheticCodexAuth(t, "a@example.com", "a-rotated", base+3600),
-		incoming: syntheticCodexAuth(t, "b@example.com", "b", base),
+		stale:    testutil.SyntheticCodexAuth(t, "a@example.com", "a-stale", base),
+		rotated:  testutil.SyntheticCodexAuth(t, "a@example.com", "a-rotated", base+3600),
+		incoming: testutil.SyntheticCodexAuth(t, "b@example.com", "b", base),
 		authPath: filepath.Join(os.Getenv("CODEX_HOME"), "auth.json"),
 	}
 	write := func(path string, data []byte) {
@@ -82,7 +83,7 @@ func TestRunPrecheck_SwitchesThroughTheCore(t *testing.T) {
 func TestRun_FirstSwitchVaultsAnUnknownLiveCredential(t *testing.T) {
 	r := setupRotatedCodex(t)
 	base := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC).Unix()
-	unknown := syntheticCodexAuth(t, "stranger@example.com", "x", base)
+	unknown := testutil.SyntheticCodexAuth(t, "stranger@example.com", "x", base)
 	if err := os.WriteFile(r.authPath, unknown, 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -96,7 +96,7 @@ func runNext(cmd *cobra.Command, args []string) error {
 		}
 		// Single profile case: switch to it through the shared core.
 		if !dryRun {
-			if _, err := switcher.Switch(cmd.Context(), vault, fileSet, switcher.Options{Profile: profiles[0], Force: force, Source: "next"}); err != nil {
+			if _, err := switcher.Switch(cmd.Context(), vault, fileSet, coreOptions(switcher.Options{Profile: profiles[0], Force: force, Source: "next"})); err != nil {
 				return err
 			}
 		}
@@ -213,17 +213,13 @@ func runNext(cmd *cobra.Command, args []string) error {
 	// Switch through the shared core: the outgoing profile is re-captured
 	// first and a failed re-capture refuses the switch unless --force; the
 	// activity log gets the deactivate/activate pair (issue #31).
-	var logDB *caamdb.DB
-	if spmCfg.Analytics.Enabled {
-		logDB = db
-	}
-	res, err := switcher.Switch(cmd.Context(), vault, fileSet, switcher.Options{
+	res, err := switcher.Switch(cmd.Context(), vault, fileSet, coreOptions(switcher.Options{
 		Profile: selection.Selected,
 		Force:   force,
 		Config:  spmCfg,
-		DB:      logDB,
+		DB:      db,
 		Source:  "next",
-	})
+	}))
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/testutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -322,9 +323,9 @@ func TestNext_AbortsWhenRecaptureFails(t *testing.T) {
 	// Real-shaped credentials: the live file is a's, rotated since capture,
 	// so it still reads as a but a re-capture has to write.
 	base := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC).Unix()
-	stale := syntheticCodexAuth(t, "a@example.com", "a-stale", base)
-	rotated := syntheticCodexAuth(t, "a@example.com", "a-rotated", base+3600)
-	incoming := syntheticCodexAuth(t, "b@example.com", "b", base)
+	stale := testutil.SyntheticCodexAuth(t, "a@example.com", "a-stale", base)
+	rotated := testutil.SyntheticCodexAuth(t, "a@example.com", "a-rotated", base+3600)
+	incoming := testutil.SyntheticCodexAuth(t, "b@example.com", "b", base)
 	write := func(path string, data []byte) {
 		t.Helper()
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

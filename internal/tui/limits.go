@@ -19,8 +19,8 @@ import (
 type Hooks struct {
 	// Switch makes profile the active profile for provider through the same
 	// path as `caam activate` (outgoing profile re-captured first, failed
-	// re-capture aborts). When nil the TUI falls back to a plain vault
-	// restore.
+	// re-capture aborts). When nil the dashboard reports that switching is
+	// not available.
 	Switch func(ctx context.Context, provider, profile string) error
 	// Limits fetches one profile's live rate-limit windows. When nil the
 	// detail card shows no Limits section.

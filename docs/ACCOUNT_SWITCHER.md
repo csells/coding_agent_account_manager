@@ -75,10 +75,11 @@ The rule, implemented once in `internal/switcher` (`PrepareLogin`, `Run`,
    live credential under that name; a credential with no readable identity
    asks for a name.
 
-Step 2 runs only when step 1 succeeded, i.e. when caam knows whose credential
-it is. A live credential caam cannot match to a vault profile is left alone:
-the login will replace it, which is what the user asked for, but clearing it
-first would lose an Account for good. A failed or cancelled login leaves the
+Step 2 runs only when step 1 succeeded. A live credential caam cannot match to
+a vault profile (or that matches only an immutable system profile) is
+somebody's session too: `CaptureSignedIn` files it as a fresh `_backup_`
+first, then it is cleared — never destroyed, never left for the login to
+revoke. A failed or cancelled login leaves the
 agent logged out; the dashboard says so and that Enter on the previous
 Account restores it.
 

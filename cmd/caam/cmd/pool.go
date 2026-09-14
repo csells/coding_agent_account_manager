@@ -19,16 +19,18 @@ import (
 var poolCmd = &cobra.Command{
 	Use:   "pool <command>",
 	Short: "Manage the authentication pool",
-	Long: `View and manage the authentication pool used for proactive token monitoring.
+	Long: `View and manage the authentication pool.
 
-The auth pool tracks token expiry across all profiles and can be used with the
-daemon (--pool flag) for automatic background refresh.
+The pool tracks token expiry and cooldowns across all profiles. Nothing in
+it refreshes a token on a timer — a refresh spends the refresh token —
+so "pool refresh" takes expired tokens only, and a refused refresh stays
+refused until you act.
 
 Examples:
   caam pool status             # Show pool status
   caam pool status --json      # Show pool status as JSON
-  caam pool refresh claude/work # Force refresh a profile
-  caam pool refresh --all      # Force refresh all profiles`,
+  caam pool refresh claude/work # Refresh one profile
+  caam pool refresh --all      # Refresh every profile whose token has expired`,
 }
 
 var poolStatusCmd = &cobra.Command{

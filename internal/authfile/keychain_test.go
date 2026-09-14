@@ -560,3 +560,43 @@ func TestRestoreAcceptsAPIKeyModeSnapshot(t *testing.T) {
 		t.Fatalf("settings.json not restored")
 	}
 }
+
+// Clearing one tool's credential must not log another tool out: an
+// optional file that another tool's set also lists (Antigravity and the
+// Gemini CLI share ~/.gemini/oauth_creds.json and google_accounts.json)
+// stays; the tool's own required credential goes.
+func TestClearAuthFiles_LeavesFilesSharedWithAnotherTool(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GEMINI_HOME", filepath.Join(home, ".gemini"))
+	t.Setenv("CAAM_KEYCHAIN", "0")
+	agy := AntigravityAuthFiles()
+	write := func(path string) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(`{"synthetic":true}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, spec := range agy.Files {
+		write(spec.Path)
+	}
+	if err := ClearAuthFiles(agy); err != nil {
+		t.Fatalf("ClearAuthFiles: %v", err)
+	}
+	for _, spec := range agy.Files {
+		_, err := os.Stat(spec.Path)
+		base := filepath.Base(spec.Path)
+		switch base {
+		case "oauth_creds.json", "google_accounts.json":
+			if err != nil {
+				t.Errorf("%s is Gemini's too and must survive an Antigravity clear", spec.Path)
+			}
+		case "antigravity-oauth-token":
+			if !os.IsNotExist(err) {
+				t.Errorf("%s is Antigravity's own credential and must be cleared (err=%v)", spec.Path, err)
+			}
+		}
+	}
+}

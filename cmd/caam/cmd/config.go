@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
+	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
@@ -78,7 +78,7 @@ emits, including nested sections to arbitrary depth.
 
 Examples of resolvable keys:
   version                             Config version
-  health.refresh_threshold            Token refresh threshold (duration)
+  health.refresh_threshold            Expiring-soon horizon for status views (duration; nothing refreshes on it)
   analytics.retention_days            Detailed log retention (int)
   runtime.file_watching               File watching enabled (bool)
   project.auto_activate               Auto-activate by CWD (bool)

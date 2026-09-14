@@ -170,6 +170,9 @@ type Model struct {
 	messageDialog *MessageDialog
 	// pendingRelogin is the provider a confirmed re-login starts for.
 	pendingRelogin string
+	// refreshRefused remembers accounts whose last token refresh the
+	// provider refused, so r does not re-present the same token.
+	refreshRefused map[string]bool
 	confirmDialog  *ConfirmDialog
 	pendingProfile string // Profile name pending overwrite confirmation
 	editDialog     *MultiFieldDialog
@@ -1009,12 +1012,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case refreshResultMsg:
 		if msg.err != nil {
+			// A refused refresh is not re-presented on the next r: that is
+			// what trips reuse detection. It stays refused until a fetch
+			// succeeds or the account logs in again.
+			if m.refreshRefused == nil {
+				m.refreshRefused = make(map[string]bool)
+			}
+			m.refreshRefused[limitsKey(msg.provider, msg.profile)] = true
 			if sessionEnded(msg.err) {
 				return m.offerRelogin(msg.provider, msg.profile, "the provider has ended its session and a refresh cannot revive it")
 			}
 			m.showError(msg.err, "Refresh")
 			return m, nil
 		}
+		delete(m.refreshRefused, limitsKey(msg.provider, msg.profile))
 		m.showRefreshSuccess(msg.profile, time.Time{}) // TODO: pass actual expiry time
 		// The new token changes what the limits API will say: fetch again.
 		delete(m.limits, limitsKey(msg.provider, msg.profile))
@@ -1690,12 +1701,12 @@ func (m Model) captureNamed(name string) (tea.Model, tea.Cmd) {
 	m.nameDialog = nil
 	m.nameProvider = ""
 
-	if err := m.captureLive(provider, name); err != nil {
-		m.setNotice(provider, name, "Logged in as "+name+", but capturing it failed: "+err.Error(), true)
-		m.showMessage(StatusError, "Capture failed", "Logged in to %s as %s, but capturing it failed: %v", providerLabel(provider), name, err)
+	fileSet, _ := authFileSetForProvider(provider)
+	if err := m.finishLogin(fileSet, name, func(n string) error { return m.captureLive(provider, n) }); err != nil {
+		m.setNotice(provider, name, err.Error(), true)
+		m.showMessage(StatusError, "Capture failed", "%v", err)
 		return m, nil
 	}
-	logLoginEvent(provider, name)
 	m.selectedProfileName = name
 	delete(m.limits, limitsKey(provider, name))
 	m.setNotice(provider, name, "Logged in and captured "+name, false)
@@ -1727,14 +1738,15 @@ func (m Model) handleRefresh() (tea.Model, tea.Cmd) {
 // or the last limits fetch was refused as unauthorized — the two reasons r
 // does more than re-fetch limits.
 func (m Model) tokenInTrouble(provider, name string) bool {
-	if h := m.healthFor(provider, name); h != nil && !h.TokenExpiresAt.IsZero() && time.Now().After(h.TokenExpiresAt) {
-		return true
+	key := limitsKey(provider, name)
+	if m.refreshRefused[key] {
+		return false // one refusal is enough; a person decides what is next
 	}
-	if e, ok := m.limits[limitsKey(provider, name)]; ok && e.err != nil {
-		msg := strings.ToLower(e.err.Error())
-		return strings.Contains(msg, "unauthorized") || strings.Contains(msg, "expired")
+	var lastErr error
+	if e, ok := m.limits[key]; ok {
+		lastErr = e.err
 	}
-	return false
+	return refresh.NeedsRefresh(m.healthFor(provider, name), lastErr)
 }
 
 // refreshableProvider reports whether caam can refresh the provider's

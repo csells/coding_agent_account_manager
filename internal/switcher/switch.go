@@ -8,6 +8,7 @@ package switcher
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,6 +16,8 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/refresh"
 )
 
 // Options describes one switch.
@@ -29,10 +32,29 @@ type Options struct {
 	BackupCurrent bool
 	// Config carries the safety settings (auto-backup mode and limit).
 	Config *config.SPMConfig
-	// DB, when set, receives the activate/deactivate events the switch
-	// makes; Source says what chose the profile (rotation, project, user).
+	// DB, when set and Config.Analytics is on, receives the
+	// activate/deactivate events the switch makes; Source says what chose
+	// the profile (rotation, project, user).
 	DB     *caamdb.DB
 	Source string
+	// Refresher, with HealthOf, refreshes the incoming Account's token before
+	// it is installed — only when refresh.NeedsRefresh says so (expired), and
+	// only for providers the refresher supports. Both optional.
+	Refresher Refresher
+	HealthOf  func(tool, profile string) *health.ProfileHealth
+}
+
+// Refresher refreshes one Account's token in the vault.
+type Refresher interface {
+	Refresh(ctx context.Context, tool, profile string) error
+}
+
+// RefresherFunc adapts a function to Refresher.
+type RefresherFunc func(ctx context.Context, tool, profile string) error
+
+// Refresh calls f.
+func (f RefresherFunc) Refresh(ctx context.Context, tool, profile string) error {
+	return f(ctx, tool, profile)
 }
 
 // Result reports what a switch did.
@@ -50,6 +72,11 @@ type Result struct {
 	AutoBackup string
 	// AutoBackupWarning is set when an auto-backup was wanted and failed.
 	AutoBackupWarning string
+	// Refreshed is true when the incoming Account's token was refreshed
+	// before it was installed; RefreshWarning says why a wanted refresh did
+	// not happen.
+	Refreshed      bool
+	RefreshWarning string
 }
 
 // Switch makes opts.Profile the Active Account for fileSet's tool.
@@ -62,6 +89,21 @@ func Switch(ctx context.Context, vault *authfile.Vault, fileSet authfile.AuthFil
 	}
 	res := &Result{}
 	res.PreviousProfile, _ = vault.ActiveProfile(fileSet)
+
+	// Refresh the incoming token first, when the one gate says it has
+	// expired; a refresh spends the refresh token, so never otherwise.
+	if opts.Refresher != nil && opts.HealthOf != nil {
+		if refresh.NeedsRefresh(opts.HealthOf(fileSet.Tool, opts.Profile), nil) {
+			switch err := opts.Refresher.Refresh(ctx, fileSet.Tool, opts.Profile); {
+			case err == nil:
+				res.Refreshed = true
+			case errors.Is(err, refresh.ErrUnsupported):
+				res.RefreshWarning = fmt.Sprintf("token not refreshed: %v", err)
+			default:
+				res.RefreshWarning = fmt.Sprintf("token refresh failed: %v", err)
+			}
+		}
+	}
 
 	// A live credential caam cannot match to a vault profile is somebody's
 	// session; installing over it would lose it. File it first ("smart"
@@ -114,7 +156,9 @@ func Switch(ctx context.Context, vault *authfile.Vault, fileSet authfile.AuthFil
 		return nil, fmt.Errorf("activate failed: %w", err)
 	}
 
-	LogSwitch(opts.DB, fileSet.Tool, res.PreviousProfile, opts.Profile, map[string]any{"previous_profile": res.PreviousProfile, "selection_source": opts.Source})
+	if opts.Config.Analytics.Enabled {
+		LogSwitch(opts.DB, fileSet.Tool, res.PreviousProfile, opts.Profile, map[string]any{"previous_profile": res.PreviousProfile, "selection_source": opts.Source})
+	}
 	return res, nil
 }
 
