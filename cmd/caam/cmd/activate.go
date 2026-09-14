@@ -17,6 +17,7 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/refresh"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/rotation"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/stealth"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 	"github.com/spf13/cobra"
 )
 
@@ -395,11 +396,10 @@ func switchProfile(ctx context.Context, tool, profileName string, opts switchOpt
 	return performSwitch(ctx, fileSet, profileName, previousProfile, "", spmCfg, db, opts)
 }
 
-// performSwitch is the switch itself, shared by `caam activate` and the
-// monitor dashboard once the profile name is settled: refresh the incoming
-// token if it is about to expire, auto-backup unsaved live state, re-capture
-// the outgoing profile, wait out the stealth delay, restore, and reload the
-// codex daemon on request.
+// performSwitch is `caam activate`'s switch: the shared core
+// (internal/switcher: refresh gate, auto-backup, re-capture-or-abort,
+// restore, activity log) wrapped in what only the interactive command
+// does — printing, the stealth delay, and the Codex daemon reload.
 func performSwitch(ctx context.Context, fileSet authfile.AuthFileSet, profileName, previousProfile, source string, spmCfg *config.SPMConfig, db *caamdb.DB, opts switchOptions) (*switchResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -411,123 +411,45 @@ func performSwitch(ctx context.Context, fileSet authfile.AuthFileSet, profileNam
 	// Step 1: Refresh if needed
 	res.Refreshed = refreshIfNeeded(ctx, tool, profileName, quiet)
 
-	// Smart auto-backup before switch (based on safety config)
-	backupMode := strings.TrimSpace(spmCfg.Safety.AutoBackupBeforeSwitch)
-	if backupMode == "" {
-		backupMode = "smart" // Default
-	}
-	if opts.BackupCurrent {
-		backupMode = "always"
-	}
-
-	if backupMode != "never" {
-		shouldBackup := false
-		currentProfile, _ := vault.ActiveProfile(fileSet)
-
-		switch backupMode {
-		case "always":
-			// Always backup if there are auth files and we're switching to a different profile
-			shouldBackup = currentProfile != profileName
-		case "smart":
-			// Backup only if current state doesn't match any vault profile (would be lost)
-			shouldBackup = currentProfile == "" && authfile.HasAuthFiles(fileSet)
-		}
-
-		if shouldBackup {
-			backupName, err := vault.BackupCurrent(fileSet)
-			if err != nil {
-				if !quiet {
-					fmt.Printf("Warning: could not auto-backup current state: %v\n", err)
-				}
-			} else if backupName != "" {
-				res.AutoBackup = backupName
-				if !quiet {
-					fmt.Printf("Auto-backed up current state to %s\n", backupName)
-				}
-
-				// Rotate old backups if limit is set
-				if spmCfg.Safety.MaxAutoBackups > 0 {
-					if err := vault.RotateAutoBackups(tool, spmCfg.Safety.MaxAutoBackups); err != nil {
-						if !quiet {
-							fmt.Printf("Warning: could not rotate old backups: %v\n", err)
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// Re-capture the OUTGOING profile's (possibly rotated) tokens back into
-	// its own vault dir BEFORE the live credential is overwritten. Codex,
-	// Claude and Antigravity all rotate OAuth tokens in place while a profile
-	// is active — Codex and Claude with a rotating refresh-token family —
-	// so without this the vault copy of the outgoing profile goes stale, and
-	// a later restore replays an already-consumed refresh token, trips the
-	// provider's reuse detection and revokes the whole family (README, issue
-	// #19). The vault must never be left holding a stale chain, so a failed
-	// re-capture aborts the switch with the live credential untouched;
-	// --force proceeds regardless.
-	if outgoing, _ := vault.ActiveProfile(fileSet); outgoing != "" && outgoing != profileName {
-		if err := vault.ResnapshotOutgoing(fileSet, outgoing, profileName); err != nil {
-			if !opts.Force {
-				return nil, fmt.Errorf("could not re-capture the outgoing profile %s before switching: %w (the vault would be left with a stale copy of its credential; fix the cause, or re-run with --force to switch anyway)", outgoing, err)
-			}
-			res.RecaptureWarning = fmt.Sprintf("could not re-snapshot outgoing profile %s: %v (proceeding due to --force)", outgoing, err)
-			if !quiet {
-				fmt.Printf("Warning: %s\n", res.RecaptureWarning)
-			}
-		} else {
-			res.Recaptured = true
-			if !quiet {
-				fmt.Printf("Re-captured outgoing profile %s (token rotation safety)\n", outgoing)
-			}
-		}
-	}
-
 	// Stealth: optional delay before the actual switch happens.
 	// Skip stealth delay in quiet mode as it's for interactive use
 	if spmCfg.Stealth.SwitchDelay.Enabled && !quiet {
-		delay, err := stealth.ComputeDelay(spmCfg.Stealth.SwitchDelay.MinSeconds, spmCfg.Stealth.SwitchDelay.MaxSeconds, nil)
-		if err != nil {
-			fmt.Printf("Warning: invalid stealth.switch_delay config: %v\n", err)
-		} else if delay > 0 {
-			fmt.Printf("Stealth mode: waiting %d seconds before switch...\n", int(delay.Round(time.Second).Seconds()))
-
-			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, os.Interrupt)
-
-			skip := make(chan struct{})
-			stop := make(chan struct{})
-			go func() {
-				select {
-				case <-sigCh:
-					close(skip)
-				case <-stop:
-				case <-ctx.Done():
-				}
-			}()
-
-			skipped, waitErr := stealth.Wait(ctx, delay, stealth.WaitOptions{
-				Output:        os.Stdout,
-				Skip:          skip,
-				ShowCountdown: spmCfg.Stealth.SwitchDelay.ShowCountdown,
-			})
-
-			close(stop)
-			signal.Stop(sigCh)
-
-			if waitErr != nil {
-				return nil, fmt.Errorf("stealth delay: %w", waitErr)
-			}
-			if skipped {
-				fmt.Println("Skipping delay...")
-			}
+		if err := stealthDelay(ctx, spmCfg); err != nil {
+			return nil, err
 		}
 	}
 
-	// Restore from vault
-	if err := vault.Restore(fileSet, profileName); err != nil {
-		return nil, fmt.Errorf("activate failed: %w", err)
+	var logDB *caamdb.DB
+	if spmCfg.Analytics.Enabled {
+		logDB = db
+	}
+	core, err := switcher.Switch(ctx, vault, fileSet, switcher.Options{
+		Profile:       profileName,
+		Force:         opts.Force,
+		BackupCurrent: opts.BackupCurrent,
+		Config:        spmCfg,
+		DB:            logDB,
+		Source:        source,
+	})
+	if err != nil {
+		return nil, err
+	}
+	res.AutoBackup = core.AutoBackup
+	res.Recaptured = core.Recaptured
+	res.RecaptureWarning = core.RecaptureWarning
+	if !quiet {
+		if core.AutoBackupWarning != "" {
+			fmt.Printf("Warning: %s\n", core.AutoBackupWarning)
+		}
+		if core.AutoBackup != "" {
+			fmt.Printf("Auto-backed up current state to %s\n", core.AutoBackup)
+		}
+		if core.RecaptureWarning != "" {
+			fmt.Printf("Warning: %s\n", core.RecaptureWarning)
+		}
+		if core.Recaptured {
+			fmt.Printf("Re-captured outgoing profile %s (token rotation safety)\n", core.PreviousProfile)
+		}
 	}
 
 	// Codex daemon check: swapping auth.json on disk does not affect a running
@@ -536,56 +458,53 @@ func performSwitch(ctx context.Context, fileSet authfile.AuthFileSet, profileNam
 	// silent no-op for daemon-backed sessions. See issue #21.
 	res.CodexDaemon = checkCodexDaemon(tool, opts.ReloadDaemon)
 
-	if spmCfg.Analytics.Enabled && db != nil {
-		logProfileSwitch(db, tool, previousProfile, profileName, map[string]any{
-			"previous_profile": previousProfile,
-			"selection_source": source,
-		})
-	}
-
 	return res, nil
 }
 
-// logProfileSwitch records analytics events for a profile switch. When moving
-// away from a different, non-system outgoing profile it emits a duration-bearing
-// `deactivate` event for that outgoing profile (duration = now - its last
-// activation) so usage analytics accrue active time, then emits the `activate`
-// event for the incoming profile at the same instant. Without the deactivate
-// event, `caam usage` shows zero active hours for ordinary switches (issue #31).
-//
-// System profiles (_original, _backup_*, _auto_backup_*) are skipped as the
-// outgoing profile so they don't pollute user-facing usage stats.
-func logProfileSwitch(db *caamdb.DB, tool, outgoing, incoming string, details map[string]any) {
-	if db == nil {
-		return
+// stealthDelay waits the configured random delay, letting ctrl-c skip it.
+func stealthDelay(ctx context.Context, spmCfg *config.SPMConfig) error {
+	delay, err := stealth.ComputeDelay(spmCfg.Stealth.SwitchDelay.MinSeconds, spmCfg.Stealth.SwitchDelay.MaxSeconds, nil)
+	if err != nil {
+		fmt.Printf("Warning: invalid stealth.switch_delay config: %v\n", err)
+		return nil
 	}
+	if delay <= 0 {
+		return nil
+	}
+	fmt.Printf("Stealth mode: waiting %d seconds before switch...\n", int(delay.Round(time.Second).Seconds()))
 
-	now := time.Now()
-
-	if outgoing != "" && outgoing != incoming && !authfile.IsSystemProfile(outgoing) {
-		if last, err := db.LastActivation(tool, outgoing); err == nil && !last.IsZero() {
-			if d := now.Sub(last); d > 0 {
-				_ = db.LogEvent(caamdb.Event{
-					Type:        caamdb.EventDeactivate,
-					Provider:    tool,
-					ProfileName: outgoing,
-					Timestamp:   now,
-					Duration:    d,
-					Details: map[string]any{
-						"switched_to": incoming,
-					},
-				})
-			}
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	skip := make(chan struct{})
+	stop := make(chan struct{})
+	go func() {
+		select {
+		case <-sigCh:
+			close(skip)
+		case <-stop:
+		case <-ctx.Done():
 		}
-	}
-
-	_ = db.LogEvent(caamdb.Event{
-		Type:        caamdb.EventActivate,
-		Provider:    tool,
-		ProfileName: incoming,
-		Timestamp:   now,
-		Details:     details,
+	}()
+	skipped, waitErr := stealth.Wait(ctx, delay, stealth.WaitOptions{
+		Output:        os.Stdout,
+		Skip:          skip,
+		ShowCountdown: spmCfg.Stealth.SwitchDelay.ShowCountdown,
 	})
+	close(stop)
+	signal.Stop(sigCh)
+	if waitErr != nil {
+		return fmt.Errorf("stealth delay: %w", waitErr)
+	}
+	if skipped {
+		fmt.Println("Skipping delay...")
+	}
+	return nil
+}
+
+// logProfileSwitch records a switch in the activity log; see
+// switcher.LogSwitch.
+func logProfileSwitch(db *caamdb.DB, tool, outgoing, incoming string, details map[string]any) {
+	switcher.LogSwitch(db, tool, outgoing, incoming, details)
 }
 
 func resolveActivateProfile(tool string, spmCfg *config.SPMConfig) (profileName string, source string, err error) {
