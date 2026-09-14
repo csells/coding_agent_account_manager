@@ -355,12 +355,45 @@ func (m Model) stripWindow(kind stripKind, items []stripItem, inner int) (offset
 	return offset, count
 }
 
+// stripInputs is everything the strip's scroll offset follows: the
+// selection, the screen size (the strip's kind and width), each
+// provider's account count and active account (a slot's text) and the
+// limits generation (a summary's text).
+type stripInputs struct {
+	activeProvider, width, height, limitsGen int
+	providers                                string
+}
+
+func (m Model) stripInputs() stripInputs {
+	var b strings.Builder
+	for _, id := range m.providers {
+		b.WriteString(id)
+		b.WriteByte(' ')
+		b.WriteString(strconv.Itoa(len(m.profiles[id])))
+		for _, p := range m.profiles[id] {
+			if p.IsActive {
+				b.WriteByte(' ')
+				b.WriteString(p.Name)
+			}
+		}
+		b.WriteByte('\n')
+	}
+	return stripInputs{activeProvider: m.activeProvider, width: m.width, height: m.height, limitsGen: m.limitsGen, providers: b.String()}
+}
+
 // settleStrip records the scroll offset the strip will draw with, so it
 // persists across frames and moves only when the selection leaves it.
+// The strip is measured again only when something it is drawn from has
+// changed since the last settle.
 func (m *Model) settleStrip() {
 	if m.width <= 0 {
 		return
 	}
+	in := m.stripInputs()
+	if in == m.stripSettled {
+		return
+	}
+	m.stripSettled = in
 	m.stripOffset, _ = m.stripWindow(m.stripKind(), m.stripItems(), paneGeom(m.width).inner)
 }
 

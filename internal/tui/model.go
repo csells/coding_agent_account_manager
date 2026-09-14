@@ -226,6 +226,12 @@ type Model struct {
 	// stripOffset is the first provider slot the strip shows. It moves
 	// only when the selection leaves the visible window (settleStrip).
 	stripOffset int
+	// stripSettled is what the strip looked like when stripOffset was
+	// last settled; settleStrip does nothing while it is unchanged.
+	stripSettled stripInputs
+	// limitsGen counts changes to limits, so a settled strip knows when
+	// the summaries it was measured with have changed.
+	limitsGen int
 }
 
 // computeHealthMap builds the health verdict for every listed profile. With
@@ -1031,7 +1037,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delete(m.refreshRefused, limitsKey(msg.provider, msg.profile))
 		m.showRefreshSuccess(msg.profile, time.Time{}) // TODO: pass actual expiry time
 		// The new token changes what the limits API will say: fetch again.
-		delete(m.limits, limitsKey(msg.provider, msg.profile))
+		m.forgetLimits(msg.provider, msg.profile)
 		ctx := refreshContext{
 			provider:        msg.provider,
 			selectedProfile: msg.profile,
@@ -1673,7 +1679,7 @@ func (m Model) captureNamed(name string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.selectedProfileName = name
-	delete(m.limits, limitsKey(provider, name))
+	m.forgetLimits(provider, name)
 	m.setNotice(provider, name, "Logged in and captured "+name, false)
 	m.showMessage(StatusSuccess, "Logged in", "Logged in to %s as %s; its credential is in the vault.", providerLabel(provider), name)
 	return m, m.refreshProfiles(refreshContext{provider: provider, selectedProfile: name})

@@ -104,6 +104,7 @@ func (m *Model) limitsFetchFor(provider, profile string) tea.Cmd {
 	}
 	e.loading = true
 	m.limits[key] = e
+	m.limitsGen++
 
 	fetch := m.hooks.Limits
 	return func() tea.Msg {
@@ -148,15 +149,22 @@ func (m *Model) limitsPrefetchCmd() tea.Cmd {
 func (m *Model) limitsRefresh() {
 	provider := m.currentProvider()
 	for _, p := range m.profiles[provider] {
-		delete(m.limits, limitsKey(provider, p.Name))
+		m.forgetLimits(provider, p.Name)
 	}
 	for _, id := range m.providers {
 		for _, p := range m.profiles[id] {
 			if p.IsActive {
-				delete(m.limits, limitsKey(id, p.Name))
+				m.forgetLimits(id, p.Name)
 			}
 		}
 	}
+}
+
+// forgetLimits drops one profile's cached limits so the next prefetch
+// asks again.
+func (m *Model) forgetLimits(provider, profile string) {
+	delete(m.limits, limitsKey(provider, profile))
+	m.limitsGen++
 }
 
 // applyLimitsLoaded stores a fetch result. A failed fetch keeps the
@@ -178,6 +186,7 @@ func (m *Model) applyLimitsLoaded(msg limitsLoadedMsg) {
 		entry.stale = true
 	}
 	m.limits[key] = entry
+	m.limitsGen++
 }
 
 // limitsInfoFor builds the detail card's Limits section for a profile.
