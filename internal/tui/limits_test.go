@@ -487,7 +487,7 @@ func TestVerticalLayout_ProvidersAboveAccountsWithWindowColumns(t *testing.T) {
 	if iProviders < 0 || iAccounts < 0 || iProviders > iAccounts {
 		t.Fatalf("providers strip must sit above the accounts pane:\n%s", view)
 	}
-	for _, want := range []string{"▶ Claude (2)", "● a@example.com", "5h 82%", "wk 50%", "Fable 10%",
+	for _, want := range []string{"▸ Claude (2)", "● a@example.com", "5h 82%", "wk 50%", "Fable 10%",
 		"NAME", "STATUS", "5-HOUR", "WEEKLY", "WEEKLY FABLE", "LAST USED",
 		"82% left · ", "50% left · ", "10% left", "enter", "switch to this account"} {
 		if !strings.Contains(view, want) {
@@ -559,7 +559,7 @@ func TestVerticalLayout_MediumDropsLastUsedAndShortensCells(t *testing.T) {
 	if !strings.Contains(view, "82% · ") || strings.Contains(view, "82% left") {
 		t.Errorf("medium tier should show short window cells:\n%s", view)
 	}
-	if !strings.Contains(view, "▶ Claude 2") {
+	if !strings.Contains(view, "▸ Claude 2") {
 		t.Errorf("medium tier should show one-line provider chips:\n%s", view)
 	}
 	for _, line := range strings.Split(m.View(), "\n") {
@@ -572,7 +572,7 @@ func TestVerticalLayout_MediumDropsLastUsedAndShortensCells(t *testing.T) {
 func TestVerticalLayout_NarrowShowsTightestWindowAndTabRow(t *testing.T) {
 	m := modelWithLimits(t, 80, 24)
 	view := stripANSI(m.View())
-	for _, want := range []string{"TIGHTEST", "Fable 10%", "▶ Claude 2", "├─ 5-hour", "82% left", "├─ Weekly"} {
+	for _, want := range []string{"TIGHTEST", "Fable 10%", "▸ Claude 2", "├─ 5-hour", "82% left", "├─ Weekly"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("narrow view lacks %q:\n%s", want, view)
 		}
@@ -648,5 +648,30 @@ func TestVerticalLayout_PrefetchCoversTableAndStrip(t *testing.T) {
 	}
 	if rec.calls["codex/d@example.com"] != 0 {
 		t.Errorf("idle account of another provider was fetched: %v", rec.calls)
+	}
+}
+
+// TestVerticalLayout_NeverFillsTheLastColumn: a line that reaches the
+// terminal's last column puts Terminal.app into its pending-wrap state and
+// desynchronises Bubble Tea's row accounting — the provider strip's rows
+// then render interleaved with the row beneath. Every line stays at least
+// one column short, at every tier, with the selection anywhere.
+func TestVerticalLayout_NeverFillsTheLastColumn(t *testing.T) {
+	for _, size := range [][2]int{{170, 40}, {150, 40}, {120, 30}, {100, 24}, {80, 24}} {
+		m := modelWithLimits(t, size[0], size[1])
+		m.profiles["kimi"] = nil
+		m.syncProfilesPanel()
+		for step := 0; step < len(m.providers); step++ {
+			for i, line := range strings.Split(m.View(), "\n") {
+				// Trailing padding is tolerated (the status bar has always
+				// spanned the width); visible content must stop short.
+				content := strings.TrimRight(stripANSI(line), " ")
+				if w := lipgloss.Width(content); w >= size[0] {
+					t.Fatalf("%dx%d, provider %d, line %d fills the terminal width (%d): %q", size[0], size[1], step, i, w, content)
+				}
+			}
+			updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+			m = updated.(Model)
+		}
 	}
 }

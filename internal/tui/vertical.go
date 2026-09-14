@@ -43,6 +43,13 @@ const (
 	tierWide
 )
 
+// paneWidth is the width a full-width pane's style is given: the border
+// adds two columns, and the last terminal column stays empty (see
+// verticalPanels).
+func paneWidth(termWidth int) int {
+	return termWidth - 3
+}
+
 func (m Model) widthTier() widthTier {
 	switch {
 	case m.width >= wideCols:
@@ -56,7 +63,13 @@ func (m Model) widthTier() widthTier {
 // verticalPanels renders the provider strip and the accounts pane, sized
 // to exactly contentHeight lines.
 func (m Model) verticalPanels(contentHeight int) string {
-	inner := m.width - 4 // pane border (2) and padding (2)
+	// Pane border (2) and padding (2), and one column of slack: a line
+	// that reaches the terminal's last column puts the terminal into its
+	// pending-wrap state, after which the renderer's row accounting is
+	// off by one and lines it skips as unchanged stay where they were —
+	// rows of the strip interleaved with the row below them, as seen in
+	// Terminal.app. Nothing rendered here may fill the last column.
+	inner := m.width - 5
 	if inner < 20 {
 		inner = 20
 	}
@@ -173,13 +186,13 @@ func (m Model) renderProviderStrip(inner int) string {
 	var body string
 	switch m.widthTier() {
 	case tierWide:
-		body = lipgloss.JoinVertical(lipgloss.Left, ps.Title.Render("Providers"), m.renderProviderCards(inner))
+		body = lipgloss.JoinVertical(lipgloss.Left, ps.Title.Render(fmt.Sprintf("Providers (%d)", len(m.providers))), m.renderProviderCards(inner))
 	case tierMedium:
 		body = m.renderProviderChips(inner)
 	default:
 		body = m.renderProviderTabRow(inner)
 	}
-	return ps.Border.Width(m.width - 2).Render(body)
+	return ps.Border.Width(paneWidth(m.width)).Render(body)
 }
 
 // renderProviderCards lays out three-line cards, wrapping into rows.
@@ -221,9 +234,12 @@ func (m Model) renderProviderCards(inner int) string {
 		if c.selected {
 			style = ps.SelectedItem
 		}
+		// U+25B8, not U+25B6: the latter has an emoji presentation and some
+		// terminals draw it two cells wide, which on a line padded to the
+		// pane's width overflows it.
 		marker := "  "
 		if c.selected {
-			marker = "▶ "
+			marker = "▸ "
 		}
 		l1 := paint(style, fmt.Sprintf("%s%s (%d)", marker, c.label, c.count))
 		var l2, l3 string
@@ -293,7 +309,7 @@ func (m Model) renderProviderChips(inner int) string {
 		}
 		if c.selected {
 			style = ps.SelectedItem
-			text = "▶ " + text
+			text = "▸ " + text
 		}
 		var chip string
 		if c.summary != "" && c.count > 0 {
@@ -377,7 +393,7 @@ func (m Model) renderProviderTabRow(inner int) string {
 		c := cards[i]
 		switch {
 		case c.selected:
-			parts = append(parts, ps.SelectedItem.Render(" ▶ "+labels[i]+" "))
+			parts = append(parts, ps.SelectedItem.Render(" ▸ "+labels[i]+" "))
 		case c.count == 0:
 			parts = append(parts, m.styles.StatusText.Render(" "+labels[i]+" "))
 		default:
@@ -437,7 +453,7 @@ func (m Model) renderAccountsPane(inner, height int) string {
 	bodyHeight := height - 2 - 1 // border, title
 	if len(profiles) == 0 {
 		lines = append(lines, ps.Empty.Render(emptyProfilesMessage(provider)))
-		return ps.Border.Width(m.width - 2).Height(height - 2).Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+		return ps.Border.Width(paneWidth(m.width)).Height(height - 2).Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 	}
 
 	tableRows := bodyHeight - 1 // header
@@ -514,7 +530,7 @@ func (m Model) renderAccountsPane(inner, height int) string {
 		lines = append(lines, "")
 	}
 
-	return ps.Border.Width(m.width - 2).Height(height - 2).Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	return ps.Border.Width(paneWidth(m.width)).Height(height - 2).Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
 // accountColumns builds the table's columns for the tier and fits them to

@@ -2689,10 +2689,11 @@ func (m Model) mainView() string {
 	// Header
 	headerLines := []string{m.styles.Header.Render("caam - Coding Agent Account Manager")}
 	if projectLine := m.projectContextLine(); projectLine != "" {
-		if m.width > 0 {
+		if m.width > 1 {
 			// A long project path must not widen the whole frame past the
-			// terminal: JoinVertical pads every line to the widest one.
-			projectLine = truncateWithEllipsis(projectLine, m.width)
+			// terminal (JoinVertical pads every line to the widest one), and
+			// visible text stops short of the last column (see verticalPanels).
+			projectLine = truncateWithEllipsis(projectLine, m.width-1)
 		}
 		headerLines = append(headerLines, m.styles.StatusText.Render(projectLine))
 	}
