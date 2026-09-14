@@ -624,6 +624,7 @@ func TestStatus_LoggedInUnprofiled_CrossReferencesSavedProfiles(t *testing.T) {
 	oldStdout := os.Stdout
 	os.Stdout = w
 	statusCmd.SetOut(w)
+	t.Cleanup(func() { statusCmd.SetOut(nil) })
 	if err := statusCmd.Flags().Set("json", "true"); err != nil {
 		t.Fatalf("set json flag: %v", err)
 	}

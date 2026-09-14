@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -435,6 +436,9 @@ func performSwitch(ctx context.Context, fileSet authfile.AuthFileSet, profileNam
 		Source:        source,
 	}))
 	if err != nil {
+		if errors.Is(err, switcher.ErrRecaptureFailed) {
+			return nil, fmt.Errorf("%w; re-run with --force to switch anyway", err)
+		}
 		return nil, err
 	}
 	res := &switchResult{Result: core}

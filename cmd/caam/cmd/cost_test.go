@@ -215,8 +215,8 @@ func TestCostRatesCommand_SetRate(t *testing.T) {
 // =============================================================================
 
 func TestCostTokensSubcommand(t *testing.T) {
-	if costTokensCmd.Use != "tokens [provider]" {
-		t.Errorf("Expected Use 'tokens [provider]', got %q", costTokensCmd.Use)
+	if costTokensCmd.Use != "tokens [agent]" {
+		t.Errorf("Expected Use 'tokens [agent]', got %q", costTokensCmd.Use)
 	}
 
 	if costTokensCmd.Short == "" {

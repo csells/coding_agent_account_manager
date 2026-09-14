@@ -316,7 +316,7 @@ func TestRunLimitsRank_TableRendersEveryProfile(t *testing.T) {
 	}
 
 	got := out.String()
-	for _, want := range []string{"earliest-reset-headroom", "spend-me", "reserve", "Selected: codex/spend-me"} {
+	for _, want := range []string{"earliest-reset-headroom", "spend-me", "reserve", "Selected: Codex spend-me"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("table output missing %q; got:\n%s", want, got)
 		}

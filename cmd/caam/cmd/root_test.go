@@ -18,7 +18,9 @@ import (
 
 // Test helpers
 
-// captureOutput captures stdout and stderr from a command execution.
+// captureOutput captures stdout and stderr from a command execution. The
+// commands are package globals, so the writers are put back when the test
+// ends; a writer left behind would swallow the next test's output.
 func captureOutput(t *testing.T, cmd *cobra.Command, args []string) (stdout, stderr string, err error) {
 	t.Helper()
 
@@ -26,6 +28,11 @@ func captureOutput(t *testing.T, cmd *cobra.Command, args []string) (stdout, std
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&errBuf)
 	cmd.SetArgs(args)
+	t.Cleanup(func() {
+		cmd.SetOut(nil)
+		cmd.SetErr(nil)
+		cmd.SetArgs(nil)
+	})
 
 	err = cmd.Execute()
 	return outBuf.String(), errBuf.String(), err

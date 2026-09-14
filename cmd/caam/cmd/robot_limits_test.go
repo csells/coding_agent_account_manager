@@ -107,7 +107,9 @@ func TestRobotLimits_ReturnsLimits(t *testing.T) {
 	if alpha.ResetsAt != resets.Add(72*time.Hour).Format(time.RFC3339) {
 		t.Errorf("alpha resets_at = %q, want the tightest window's reset", alpha.ResetsAt)
 	}
-	if alpha.LastUsed != used.Format(time.RFC3339) {
+	// The database hands the instant back in UTC; the contract is the instant,
+	// not the zone it is spelled in.
+	if lastUsed, err := time.Parse(time.RFC3339, alpha.LastUsed); err != nil || !lastUsed.Equal(used) {
 		t.Errorf("alpha last_used = %q, want %s", alpha.LastUsed, used.Format(time.RFC3339))
 	}
 	if alpha.Error != "" || alpha.AvailScore == 0 {

@@ -23,6 +23,10 @@ func runRunEForJSON(t *testing.T, cmd *cobra.Command, run func(*cobra.Command, [
 		cmd.SilenceUsage = false
 		cmd.SilenceErrors = false
 		_ = cmd.Flags().Set("json", "false")
+		// The command is a package global: put its writers back, or every
+		// later test that prints through it writes into this dead builder.
+		cmd.SetOut(nil)
+		cmd.SetErr(nil)
 	})
 
 	if err := cmd.Flags().Set("json", "true"); err != nil {

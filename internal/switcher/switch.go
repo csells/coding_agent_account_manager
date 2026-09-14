@@ -25,6 +25,11 @@ import (
 // to switch to, and the caller falls back (to a login, or to saying so).
 var ErrNoOtherAccount = errors.New("no other account to switch to")
 
+// ErrRecaptureFailed marks a switch refused because the outgoing Account's
+// live credential could not be re-captured into its vault copy; callers
+// with a force option can name it in their hint.
+var ErrRecaptureFailed = errors.New("outgoing account not re-captured")
+
 // Options describes one switch.
 type Options struct {
 	// Profile is the Account to make Active.
@@ -147,7 +152,7 @@ func Switch(ctx context.Context, vault *authfile.Vault, fileSet authfile.AuthFil
 	if outgoing := res.PreviousProfile; outgoing != "" && outgoing != opts.Profile {
 		if err := vault.ResnapshotOutgoing(fileSet, outgoing, opts.Profile); err != nil {
 			if !opts.Force {
-				return nil, fmt.Errorf("could not re-capture the outgoing profile %s before switching: %w (the vault would be left with a stale copy of its credential; fix the cause, or force the switch)", outgoing, err)
+				return nil, fmt.Errorf("could not re-capture the outgoing profile %s before switching: %w (the vault would be left with a stale copy of its credential; fix the cause, or force the switch) [%w]", outgoing, err, ErrRecaptureFailed)
 			}
 			res.RecaptureWarning = fmt.Sprintf("could not re-capture outgoing profile %s: %v (proceeding: forced)", outgoing, err)
 		} else {
