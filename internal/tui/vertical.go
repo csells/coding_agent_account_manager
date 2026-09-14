@@ -16,8 +16,10 @@ import (
 // The main screen is split top to bottom: a strip of providers across the
 // top, steered with ←/→, and the selected provider's accounts below,
 // steered with ↑/↓ — one row per account with each rate-limit window as a
-// column, and a short detail strip for the selected row. The strip's
-// height is fixed by its content; the accounts pane takes the rest.
+// column, with the selected account expanded in place — a tree of detail
+// lines hanging off its row — so ↓ walks the accounts and reads each one.
+// The strip's height is fixed by its content; the accounts pane takes the
+// rest and scrolls by account.
 //
 // Three width tiers:
 //   - wide (>= wideCols): provider cards three lines tall (name, active
@@ -26,14 +28,11 @@ import (
 //     columns keep the percentage and a short reset; no LAST USED.
 //   - narrow: a single row of provider tabs scrolled around the selected
 //     one; the table shows STATUS and the TIGHTEST window only, and the
-//     detail strip lists the other windows.
+//     expansion lists every window.
 const (
-	wideCols   = 150
-	mediumCols = 100
-	// minRowsForDetailStrip is the content height below which the detail
-	// strip under the table is dropped (the `i` card still opens).
-	minRowsForDetailStrip = 14
-	providerCardWidth     = 30
+	wideCols          = 150
+	mediumCols        = 100
+	providerCardWidth = 30
 )
 
 type widthTier int
@@ -441,11 +440,7 @@ func (m Model) renderAccountsPane(inner, height int) string {
 		return ps.Border.Width(m.width - 2).Height(height - 2).Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 	}
 
-	showDetail := height >= minRowsForDetailStrip
 	tableRows := bodyHeight - 1 // header
-	if showDetail {
-		tableRows -= 3 // separator + two lines
-	}
 	if tableRows < 1 {
 		tableRows = 1
 	}
@@ -459,14 +454,12 @@ func (m Model) renderAccountsPane(inner, height int) string {
 	}
 	lines = append(lines, ps.Header.Render(padRight(strings.Join(headerCells, " "), inner)))
 
-	// Rows, scrolled so the selection stays visible.
+	// One block per account: its row, and — for the selected one — the
+	// tree of detail lines expanded beneath it. The list scrolls by
+	// block so the selected account and its expansion stay in view.
 	sel := m.profilesPanel.GetSelected()
-	startRow := 0
-	if sel >= tableRows {
-		startRow = sel - tableRows + 1
-	}
-	endRow := min(len(profiles), startRow+tableRows)
-	for i := startRow; i < endRow; i++ {
+	blocks := make([][]string, len(profiles))
+	for i := range profiles {
 		var rowStyle lipgloss.Style
 		switch {
 		case i == sel:
@@ -489,16 +482,36 @@ func (m Model) renderAccountsPane(inner, height int) string {
 			cells[j] = cellStyle.Inherit(rowStyle).Render(padRight(truncateWithEllipsis(cell, c.width), c.width))
 		}
 		row := strings.Join(cells, rowStyle.Render(" "))
-		row = padStyled(row, inner, rowStyle)
-		lines = append(lines, row)
-	}
-	for i := endRow - startRow; i < tableRows; i++ {
-		lines = append(lines, "")
+		blocks[i] = []string{padStyled(row, inner, rowStyle)}
+		if i == sel {
+			blocks[i] = append(blocks[i], m.expandedLines(provider, &profiles[i], inner, tier, now)...)
+		}
 	}
 
-	if showDetail {
-		lines = append(lines, m.styles.StatusText.Render(strings.Repeat("─", inner)))
-		lines = append(lines, m.detailStripLines(provider, inner, tier, now)...)
+	// Scroll: start at the first block that lets the selected block end
+	// within tableRows, preferring to show blocks above it.
+	startBlock := 0
+	if sel >= 0 && sel < len(blocks) {
+		used := len(blocks[sel])
+		for startBlock = sel; startBlock > 0; startBlock-- {
+			if used+len(blocks[startBlock-1]) > tableRows {
+				break
+			}
+			used += len(blocks[startBlock-1])
+		}
+	}
+	shown := 0
+	for i := startBlock; i < len(blocks) && shown < tableRows; i++ {
+		for _, line := range blocks[i] {
+			if shown >= tableRows {
+				break
+			}
+			lines = append(lines, line)
+			shown++
+		}
+	}
+	for ; shown < tableRows; shown++ {
+		lines = append(lines, "")
 	}
 
 	return ps.Border.Width(m.width - 2).Height(height - 2).Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
@@ -675,70 +688,102 @@ func (m Model) tightestCell(provider, profile string, now time.Time) (string, li
 	return text, m.percentStyle(left)
 }
 
-// detailStripLines are the two lines under the table for the selected
-// account: what the row cannot say (auth, plan, token, path, actions), or
-// the outcome of the last action on it.
-func (m Model) detailStripLines(provider string, inner int, tier widthTier, now time.Time) []string {
+// expandedLines is the tree of detail lines under the selected account:
+// what its row does not say — the outcome of the last action on it, its
+// windows (narrow tier, where the row shows one), auth and token, where
+// it lives, and what the keys do. Each line hangs off the row with a
+// tree glyph; the last uses └.
+func (m Model) expandedLines(provider string, info *ProfileInfo, inner int, tier widthTier, now time.Time) []string {
 	muted := m.styles.StatusText
-	info := m.selectedProfileInfo()
-	if info == nil {
-		return []string{"", ""}
-	}
 	key := func(k, what string) string { return m.styles.StatusKey.Render(k) + muted.Render(" "+what) }
 	sep := muted.Render(" · ")
+	var items []string
 
-	var line1 string
 	if m.notice != "" && m.noticeKey == limitsKey(provider, info.Name) {
 		style := m.styles.StatusSuccess
 		if m.noticeErr {
 			style = m.styles.StatusError
 		}
-		line1 = style.Render(truncateWithEllipsis(m.notice, inner))
-	} else if tier == tierNarrow {
-		// The table showed one window; list them all here.
-		var parts []string
-		if e, ok := m.limits[limitsKey(provider, info.Name)]; ok {
-			for _, c := range usage.WindowsOf(e.info) {
+		items = append(items, style.Render(m.notice))
+	}
+	if info.NoCredential {
+		items = append(items, m.styles.StatusError.Render(fmt.Sprintf("no credential captured — log in as this account, then: caam backup %s %s", provider, info.Name)))
+	}
+
+	// Windows: the narrow tier's row shows only the tightest one, so list
+	// them all here; wider tiers already have them as columns, and only
+	// note when the figures are stale or missing.
+	if e, ok := m.limits[limitsKey(provider, info.Name)]; ok && m.hooks.Limits != nil {
+		cells := usage.WindowsOf(e.info)
+		switch {
+		case tier == tierNarrow && len(cells) > 0:
+			for _, c := range cells {
 				left := usage.PercentLeft(c.Window)
-				part := muted.Render(shortWindowLabel(c.Label)) + " " + m.percentStyle(left).Render(fmt.Sprintf("%d%%", left))
+				line := muted.Render(padRight(c.Label, 14)) + m.percentStyle(left).Render(fmt.Sprintf("%3d%% left", left))
 				if !c.Window.ResetsAt.IsZero() {
-					part += muted.Render(" · " + usage.LocalReset(c.Window.ResetsAt, now))
+					line += muted.Render(", resets " + usage.LocalReset(c.Window.ResetsAt, now))
 				}
-				parts = append(parts, part)
+				items = append(items, line)
 			}
+		case len(cells) == 0 && e.err != nil:
+			items = append(items, m.styles.StatusWarning.Render("limits: "+shortLimitsError(e.err.Error())))
+		case len(cells) == 0 && e.loading:
+			items = append(items, muted.Render("limits: fetching…"))
 		}
-		line1 = strings.Join(parts, "   ")
-	} else {
-		parts := []string{lipgloss.NewStyle().Bold(true).Foreground(m.theme.Palette.Accent).Render(info.Name), muted.Render(info.AuthMode)}
-		if h := m.healthFor(provider, info.Name); h != nil {
-			if h.PlanType != "" {
-				parts = append(parts, muted.Render(h.PlanType))
-			}
-			parts = append(parts, ps(m).StatusStyle(info.HealthStatus).Render(formatStatusLabel(info.HealthStatus)))
-			if !h.TokenExpiresAt.IsZero() {
-				parts = append(parts, muted.Render("token "+strings.TrimSuffix(health.FormatTimeRemaining(h.TokenExpiresAt), " left")))
-			}
-		}
-		if info.NoCredential {
-			parts = append(parts, m.styles.StatusError.Render("no credential captured"))
-		}
-		line1 = strings.Join(parts, sep)
-		if path := m.vaultPathFor(provider, info.Name); path != "" && lipgloss.Width(line1)+3+len(path) <= inner {
-			line1 += sep + muted.Render(path)
+		if e.stale && e.err != nil {
+			items = append(items, m.styles.StatusWarning.Render(fmt.Sprintf("limits are last known as of %s: %s", e.at.Format("15:04:05"), shortLimitsError(e.err.Error()))))
 		}
 	}
 
-	var line2 string
-	switch {
-	case tier == tierNarrow:
-		auth := muted.Render(info.AuthMode) + sep + ps(m).StatusStyle(info.HealthStatus).Render(formatStatusLabel(info.HealthStatus))
-		line2 = auth + "   " + key("i", "card")
-	case tier == tierMedium:
-		line2 = strings.Join([]string{key("enter", "switch"), key("b", "re-capture"), key("l", "login"), key("e", "edit"), key("d", "delete"), key("i", "card")}, "  ")
-	default:
-		line2 = strings.Join([]string{key("enter", "switch to this account"), key("b", "re-capture"), key("l", "login/refresh"), key("e", "edit"), key("o", "browser"), key("d", "delete"), key("i", "full card")}, "   ")
+	// Auth, plan, health, token.
+	auth := []string{muted.Render(info.AuthMode)}
+	if h := m.healthFor(provider, info.Name); h != nil {
+		if h.PlanType != "" {
+			auth = append(auth, muted.Render(h.PlanType))
+		}
+		auth = append(auth, ps(m).StatusStyle(info.HealthStatus).Render(formatStatusLabel(info.HealthStatus)))
+		switch ttl := time.Until(h.TokenExpiresAt); {
+		case h.TokenExpiresAt.IsZero():
+		case ttl > 0:
+			auth = append(auth, muted.Render("token "+strings.TrimSuffix(health.FormatTimeRemaining(h.TokenExpiresAt), " left")))
+		case h.CredentialRenewable():
+			auth = append(auth, muted.Render("token renews on next use"))
+		default:
+			auth = append(auth, m.styles.StatusError.Render("token expired"))
+		}
+	} else {
+		auth = append(auth, ps(m).StatusStyle(info.HealthStatus).Render(formatStatusLabel(info.HealthStatus)))
 	}
-	return []string{truncateStyledWidth(line1, inner), truncateStyledWidth(line2, inner)}
+	items = append(items, strings.Join(auth, sep))
+
+	// Where it lives, and when it was last used (the wide tier's column
+	// already says; the others get it here).
+	if path := m.vaultPathFor(provider, info.Name); path != "" {
+		items = append(items, muted.Render(path))
+	}
+	if tier != tierWide {
+		items = append(items, muted.Render("last used "+formatRelativeTime(info.LastUsed)))
+	}
+
+	// Actions.
+	switch tier {
+	case tierNarrow:
+		items = append(items, strings.Join([]string{key("enter", "switch"), key("b", "re-capture"), key("l", "login"), key("i", "card")}, "  "))
+	case tierMedium:
+		items = append(items, strings.Join([]string{key("enter", "switch"), key("b", "re-capture"), key("l", "login"), key("e", "edit"), key("d", "delete"), key("i", "card")}, "  "))
+	default:
+		items = append(items, strings.Join([]string{key("enter", "switch to this account"), key("b", "re-capture"), key("l", "login/refresh"), key("e", "edit"), key("o", "browser"), key("d", "delete"), key("i", "full card")}, "   "))
+	}
+
+	lines := make([]string, len(items))
+	for i, item := range items {
+		glyph := "├─ "
+		if i == len(items)-1 {
+			glyph = "└─ "
+		}
+		lines[i] = truncateStyledWidth("  "+muted.Render(glyph)+item, inner)
+	}
+	return lines
 }
 
 func ps(m Model) ProfilesPanelStyles { return m.profilesPanel.styles }

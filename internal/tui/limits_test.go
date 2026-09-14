@@ -499,6 +499,57 @@ func TestVerticalLayout_ProvidersAboveAccountsWithWindowColumns(t *testing.T) {
 	}
 }
 
+func TestVerticalLayout_SelectedAccountExpandsInPlace(t *testing.T) {
+	m := modelWithLimits(t, 170, 40)
+	m.profiles["claude"] = append(m.profiles["claude"], Profile{Name: "c@example.com", Provider: "claude"})
+	m.syncProfilesPanel()
+	m.applyLimitsLoaded(limitsLoadedMsg{provider: "claude", profile: "c@example.com", info: sampleLimits()})
+
+	// The first account is selected: its tree hangs between it and the
+	// second row; the others are single rows.
+	view := stripANSI(m.View())
+	iA, iTree, iB, iC := strings.Index(view, "a@example.com"), strings.Index(view, "├─"), strings.Index(view, "  b@example.com"), strings.Index(view, "  c@example.com")
+	if !(iA < iTree && iTree < iB && iB < iC) {
+		t.Fatalf("expansion must sit under the selected row:\n%s", view)
+	}
+	if strings.Count(view, "└─") != 1 {
+		t.Fatalf("exactly one expansion should be open:\n%s", view)
+	}
+	for _, want := range []string{"├─ oauth", "└─", "switch to this account", "~/vault/claude/a@example.com"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("expansion lacks %q:\n%s", want, view)
+		}
+	}
+
+	// ↓ moves the expansion to the next account.
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	view = stripANSI(m.View())
+	iA, iB, iTree = strings.Index(view, "  a@example.com"), strings.Index(view, "b@example.com"), strings.Index(view, "├─")
+	if !(iA < iB && iB < iTree) || !strings.Contains(view, "~/vault/claude/b@example.com") {
+		t.Fatalf("expansion did not follow the selection:\n%s", view)
+	}
+}
+
+func TestVerticalLayout_ScrollsByAccountKeepingTheExpansionVisible(t *testing.T) {
+	m := modelWithLimits(t, 170, 22) // few rows: header (2) + strip (7) + pane
+	for _, n := range []string{"c", "d", "e", "f", "g", "h"} {
+		m.profiles["claude"] = append(m.profiles["claude"], Profile{Name: n + "@example.com", Provider: "claude"})
+	}
+	m.syncProfilesPanel()
+	for i := 0; i < 7; i++ {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = updated.(Model)
+	}
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "h@example.com") || !strings.Contains(view, "└─") {
+		t.Fatalf("last account and its expansion must be in view:\n%s", view)
+	}
+	if lipgloss.Height(m.View()) > 22 {
+		t.Fatalf("view taller than the terminal: %d", lipgloss.Height(m.View()))
+	}
+}
+
 func TestVerticalLayout_MediumDropsLastUsedAndShortensCells(t *testing.T) {
 	m := modelWithLimits(t, 120, 30)
 	view := stripANSI(m.View())
@@ -521,7 +572,7 @@ func TestVerticalLayout_MediumDropsLastUsedAndShortensCells(t *testing.T) {
 func TestVerticalLayout_NarrowShowsTightestWindowAndTabRow(t *testing.T) {
 	m := modelWithLimits(t, 80, 24)
 	view := stripANSI(m.View())
-	for _, want := range []string{"TIGHTEST", "Fable 10%", "▶ Claude 2"} {
+	for _, want := range []string{"TIGHTEST", "Fable 10%", "▶ Claude 2", "├─ 5-hour", "82% left", "├─ Weekly"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("narrow view lacks %q:\n%s", want, view)
 		}
