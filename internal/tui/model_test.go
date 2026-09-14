@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/profile"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/watcher"
 	tea "github.com/charmbracelet/bubbletea"
@@ -840,6 +841,29 @@ func TestHandleExportVault(t *testing.T) {
 	}
 	if updated.confirmDialog == nil {
 		t.Error("expected confirmDialog to be set")
+	}
+}
+
+// tui.show_key_hints (and CAAM_TUI_KEY_HINTS) is documented as switching
+// the status bar's key hints off; the bar honours it.
+func TestStatusBar_HonoursShowKeyHints(t *testing.T) {
+	hints := func(cfg *config.SPMConfig) string {
+		m := NewWithProvidersAndConfig(DefaultProviders(), cfg)
+		m.width, m.height = 120, 40
+		m.profiles = map[string][]Profile{"claude": {{Name: "a@example.com", Provider: "claude", IsActive: true}}}
+		m.syncProfilesPanel()
+		return ansi.Strip(m.renderStatusBar())
+	}
+
+	on := config.DefaultSPMConfig()
+	if bar := hints(on); !strings.Contains(bar, ":switch]") || !strings.Contains(bar, ":provider]") {
+		t.Fatalf("by default the status bar carries key hints:\n%s", bar)
+	}
+
+	off := config.DefaultSPMConfig()
+	off.TUI.ShowKeyHints = false
+	if bar := hints(off); strings.Contains(bar, ":switch]") || strings.Contains(bar, ":provider]") {
+		t.Fatalf("show_key_hints: false should leave the status bar without hints:\n%s", bar)
 	}
 }
 

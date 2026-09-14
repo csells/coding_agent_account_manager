@@ -186,6 +186,9 @@ type Model struct {
 	// Help renderer with Glamour markdown support and caching
 	helpRenderer *HelpRenderer
 	theme        Theme
+	// showKeyHints is tui.show_key_hints: whether the status bar carries
+	// the key hints on its right.
+	showKeyHints bool
 
 	// Toast notifications
 	toasts []Toast
@@ -360,6 +363,7 @@ func NewWithProvidersAndConfig(providers []string, cfg *config.SPMConfig) Model 
 		healthStorage:   health.NewStorage(""),
 		helpRenderer:    NewHelpRenderer(theme),
 		theme:           theme,
+		showKeyHints:    prefs.ShowKeyHints,
 		activitySpinner: NewSpinnerWithTheme(theme, ""),
 	}
 }
@@ -3173,8 +3177,11 @@ func (m Model) renderStatusBar() string {
 	// Left segment: mode indicator
 	left := m.statusModeIndicator()
 
-	// Right segment: key hints (always visible)
-	right := m.statusKeyHints()
+	// Right segment: key hints, unless tui.show_key_hints turned them off
+	right := ""
+	if m.showKeyHints {
+		right = m.statusKeyHints()
+	}
 
 	// Center segment: status message or toast
 	center := m.statusCenterMessage()
