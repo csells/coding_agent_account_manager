@@ -996,28 +996,12 @@ type statusHealth struct {
 	health.Signals
 }
 
-// statusTools is the order `caam status` reports every managed tool in: the
-// three original providers first, as they always were, then the rest in the
-// order the root help lists them. Every tool caam can swap auth for is shown,
-// so a logged-in tool is never silently missing from the active-account view;
-// a tool with no auth reads "(not logged in)".
+// statusTools is every tool `caam status` reports, in the one order caam
+// lists tools in (toolsInDisplayOrder). Every tool caam can swap auth for
+// is shown, so a logged-in tool is never silently missing from the
+// active-account view; a tool with no auth reads "(not logged in)".
 func statusTools() []string {
-	preferred := []string{"codex", "claude", "gemini", "agy", "grok", "opencode", "cursor", "kimi", "zcode"}
-	seen := make(map[string]bool, len(preferred))
-	var out []string
-	for _, tool := range preferred {
-		if _, ok := tools[tool]; ok && !seen[tool] {
-			out = append(out, tool)
-			seen[tool] = true
-		}
-	}
-	for _, tool := range supportedTools() {
-		if !seen[tool] {
-			out = append(out, tool)
-			seen[tool] = true
-		}
-	}
-	return out
+	return toolsInDisplayOrder(supportedTools())
 }
 
 // statusCmd shows which profile is currently active.
