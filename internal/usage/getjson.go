@@ -6,8 +6,65 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
+
+// errorDetail is the " (why)" suffix for a status error: the first
+// non-empty string found in the JSON error body at any of the given dotted
+// paths ("message", "error.message"), trimmed and cut to 160 characters.
+// Empty when the body is not JSON or carries none of them. Error bodies
+// carry no credential.
+func errorDetail(body []byte, paths ...string) string {
+	if msg := errorField(body, paths...); msg != "" {
+		return " (" + msg + ")"
+	}
+	return ""
+}
+
+// errorField is the first non-empty string at any of the dotted paths in a
+// JSON body, trimmed and cut to 160 characters.
+func errorField(body []byte, paths ...string) string {
+	for _, path := range paths {
+		raw := body
+		for _, key := range strings.Split(path, ".") {
+			var object map[string]json.RawMessage
+			if json.Unmarshal(raw, &object) != nil {
+				raw = nil
+				break
+			}
+			raw = object[key]
+		}
+		var value string
+		if raw == nil || json.Unmarshal(raw, &value) != nil {
+			continue
+		}
+		if value = strings.TrimSpace(value); value == "" {
+			continue
+		}
+		if len(value) > 160 {
+			value = value[:157] + "..."
+		}
+		return value
+	}
+	return ""
+}
+
+// clamp bounds v to [lo, hi].
+func clamp(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// clamp01 bounds a fraction to [0, 1].
+func clamp01(v float64) float64 {
+	return clamp(v, 0, 1)
+}
 
 // jsonRequest is one bearer-token GET a usage fetcher makes: where, under
 // which headers, and how a refusal is worded for the row.

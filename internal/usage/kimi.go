@@ -89,13 +89,7 @@ func (d *kimiUsageDetail) window(duration time.Duration) *UsageWindow {
 	}
 	util := 0.0
 	if limit > 0 {
-		util = used / limit
-		if util < 0 {
-			util = 0
-		}
-		if util > 1 {
-			util = 1
-		}
+		util = clamp01(used / limit)
 	}
 	return &UsageWindow{
 		Utilization:    util,
@@ -219,25 +213,10 @@ func SetKimiDeviceHeaders(req *http.Request, home string) {
 	}
 }
 
-// kimiErrorDetail extracts an error message from a Kimi API error body.
+// kimiErrorDetail extracts an error message from a Kimi API error body,
+// which names it as message, msg or error.
 func kimiErrorDetail(body []byte) string {
-	var payload struct {
-		Error   string `json:"error"`
-		Message string `json:"message"`
-		Msg     string `json:"msg"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return ""
-	}
-	for _, m := range []string{payload.Message, payload.Msg, payload.Error} {
-		if m = strings.TrimSpace(m); m != "" {
-			if len(m) > 160 {
-				m = m[:157] + "..."
-			}
-			return " (" + m + ")"
-		}
-	}
-	return ""
+	return errorDetail(body, "message", "msg", "error")
 }
 
 // Fetch retrieves usage data from the Kimi Code API.

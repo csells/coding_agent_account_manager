@@ -60,13 +60,7 @@ func (w *opencodeWindow) window(now time.Time, duration time.Duration) *UsageWin
 	if w == nil {
 		return nil
 	}
-	pct := w.Percent
-	if pct < 0 {
-		pct = 0
-	}
-	if pct > 100 {
-		pct = 100
-	}
+	pct := clamp(w.Percent, 0, 100)
 	out := &UsageWindow{
 		Utilization:    pct / 100,
 		UsedPercent:    int(pct + 0.5),

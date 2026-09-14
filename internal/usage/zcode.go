@@ -119,16 +119,6 @@ func (p *zcodePlan) usedFraction() (float64, bool) {
 	return clamp01(used / total), true
 }
 
-func clamp01(v float64) float64 {
-	if v < 0 {
-		return 0
-	}
-	if v > 1 {
-		return 1
-	}
-	return v
-}
-
 // zcodeTime reads a reset time given as epoch seconds, epoch milliseconds,
 // or an RFC 3339 string.
 func zcodeTime(v any) time.Time {

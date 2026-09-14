@@ -253,31 +253,14 @@ func (f *AgyFetcher) resolveQuotaURL() string {
 }
 
 // googleErrorDetail extracts the status and message of a Google API error
-// body ({"error":{"code":..,"message":..,"status":..}}) as a short suffix.
-// Error bodies carry no credential.
+// body ({"error":{"code":..,"message":..,"status":..}}) as a short suffix:
+// " (STATUS: message)" when both are present, else whichever one is.
 func googleErrorDetail(body []byte) string {
-	var payload struct {
-		Error struct {
-			Message string `json:"message"`
-			Status  string `json:"status"`
-		} `json:"error"`
+	status, msg := errorField(body, "error.status"), errorField(body, "error.message")
+	if status != "" && msg != "" {
+		return " (" + status + ": " + msg + ")"
 	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return ""
-	}
-	msg := strings.TrimSpace(payload.Error.Message)
-	if len(msg) > 160 {
-		msg = msg[:157] + "..."
-	}
-	switch {
-	case payload.Error.Status != "" && msg != "":
-		return fmt.Sprintf(" (%s: %s)", payload.Error.Status, msg)
-	case msg != "":
-		return " (" + msg + ")"
-	case payload.Error.Status != "":
-		return " (" + payload.Error.Status + ")"
-	}
-	return ""
+	return errorDetail(body, "error.message", "error.status")
 }
 
 // agyOpaqueBucket reports a bucket Google names by an internal id rather
@@ -308,13 +291,7 @@ func applyAgyBuckets(info *UsageInfo, buckets []agyQuotaBucket) {
 		}
 		remaining := 1.0
 		if b.RemainingFraction != nil {
-			remaining = *b.RemainingFraction
-		}
-		if remaining < 0 {
-			remaining = 0
-		}
-		if remaining > 1 {
-			remaining = 1
+			remaining = clamp01(*b.RemainingFraction)
 		}
 		used := 1 - remaining
 		w := &UsageWindow{
