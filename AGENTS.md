@@ -28,6 +28,36 @@ If I tell you to do something, even if it goes against what follows below, YOU M
 
 ---
 
+## Credentials — the rules the switcher lives by
+
+A credential in the vault is a copy of a rotating session, not a password. Read
+`docs/ACCOUNT_SWITCHER.md` before touching capture, switch, login or limits code.
+The rules that cost real accounts to learn:
+
+1. **Re-capture before you replace.** Anything that replaces a provider's live
+   credential — a switch, a login — re-captures the outgoing active account into the
+   vault first, through `switchProfile` / `ResnapshotOutgoing`, and aborts if it
+   cannot. Do not add a second switch path; call the shared one.
+2. **A login is a logout first.** `codex login` revokes the session it finds, and
+   with it the refresh-token family the vault copy belongs to. Never run a
+   provider's native login while a vaulted account's live credential is on disk:
+   capture, clear (`authfile.ClearAuthFiles`), then log in. Clear only a credential
+   whose account you have just captured; an unknown one is left for the login to
+   replace.
+3. **Refreshing a token spends it.** Every refresh consumes the refresh token. Do it
+   for a reason (expired, or just refused), never on a timer or a plain keypress,
+   and never from a limits fetch — a fetch presents the access token and nothing more.
+4. **A revoked family cannot be revived.** Do not build anything that promises to;
+   the only fix is a new login, filed under the same account name.
+5. **Write the live stores only through caam's own paths.** `~/.codex/auth.json`, the
+   login keychain, `~/.kimi-code/credentials/`, `~/.zcode/v2/credentials.json` and
+   OpenCode's `opencode.db` change only through Capture, Switch and Clear.
+6. **Never log, print, commit or fixture a token.** Probes against a real endpoint
+   print status and a body snippet, redacted; tests use synthetic tokens and the
+   fake keychain under `testutil.IsolatedMain`.
+
+---
+
 ## Git Branch: ONLY Use `main`, NEVER `master`
 
 **The default branch is `main`. The `master` branch exists only for legacy URL compatibility.**

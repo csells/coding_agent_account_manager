@@ -8,6 +8,56 @@ Repository: <https://github.com/Dicklesworthstone/coding_agent_account_manager>
 
 ---
 
+## [Unreleased] — account-switcher branch
+
+The fork's account-switcher work: log in once with every account on every
+coding agent, see each account's rate-limit windows, and switch without
+logging in again. Architecture and the facts behind it:
+`docs/ACCOUNT_SWITCHER.md`.
+
+### Added
+
+- **Kimi Code, zcode and OpenCode adapters** with capture, switch, status
+  and limits; **Antigravity** identity, health, keychain bridge and
+  per-model quota.
+- **`caam monitor` dashboard**: one column per rate-limit window across every
+  account, `*` on the active one, Enter switches; failed rows keep their
+  last good numbers.
+- **Main TUI redesigned** as a provider tab strip above the selected
+  provider's accounts, one column per window, the selected account expanded
+  in place; responsive tiers by width and height.
+- **`n` logs a new account in from the dashboard** through the provider's own
+  login, then captures it under the account that signed in; a picker asks
+  which provider.
+- **`r` refreshes** the limits on screen and, when the selected account's
+  token has expired or was just refused, its token first (Codex and Gemini).
+- **LAST USED** is filled from the activity log; a dashboard login is logged.
+- `limits` reads the active profile's live credential rather than its vault
+  copy; shared window naming (`usage.WindowsOf`).
+
+### Changed
+
+- **Every switch re-captures the outgoing account first** and aborts when it
+  cannot (`--force` overrides); `caam activate`, the TUI and `monitor` share
+  one switch core.
+- **A login is a logout first**: the dashboard's `n` clears the vaulted live
+  credential before running the tool's login, because `codex login` revokes
+  the session it finds, refresh-token family and vault copy included.
+- **Antigravity limits** resolve the Code Assist project via `loadCodeAssist`
+  under the `antigravity` User-Agent before calling `retrieveUserQuota`;
+  the empty-body call was refused with "no valid license (#3501)".
+- Only providers with a captured account appear on the strip; an empty
+  vault says how to get started.
+- Profiles that hold settings but no credential are listed as
+  `No credential` and refused by `Restore` and `caam activate`.
+- Kimi's login is `kimi login` (device code), not the chat REPL.
+
+### Removed
+
+- The TUI's `b` (backup under a typed name) and `l` (token refresh labelled
+  login) keys, and the three-panel layout with its provider/profile/detail
+  panels.
+
 ## [0.1.18] - 2026-08-31
 
 ### Security — release verification moved to minisign (resolves #77)

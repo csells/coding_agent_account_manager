@@ -319,7 +319,7 @@ and a second sync writes nothing. Pass `--no-sync-config` to skip it.
 | **Gemini CLI** (legacy) | OAuth: `~/.gemini/settings.json` (+ `oauth_creds.json`) • API key: `~/.gemini/.env` | `gemini` interactive |
 | **Grok Build** (xAI) | OAuth/OIDC: `~/.grok/auth.json` (+ `~/.grok/config.toml`); respects `GROK_HOME` | `grok login` (browser OIDC) |
 | **OpenCode** | Login tables of `~/.local/share/opencode/opencode.db` (exported/restored, never swapped); older installs: `auth.json` | inside OpenCode |
-| **Kimi Code** (Moonshot AI) | OAuth: `~/.kimi-code/credentials/kimi-code.json`; respects `KIMI_CODE_HOME` | `/login` inside `kimi` (device flow) |
+| **Kimi Code** (Moonshot AI) | OAuth: `~/.kimi-code/credentials/kimi-code.json`; respects `KIMI_CODE_HOME` | `kimi login` (device flow) |
 | **zcode** (Z.ai) | Sealed record: `~/.zcode/v2/credentials.json` (AES-GCM under a per-user secret); respects `ZCODE_DATA_BASE_DIR` | `zcode login` (Z.AI OAuth) |
 
 ### Claude Code (Claude Max)
@@ -355,6 +355,8 @@ and a second sync writes nothing. Pass `--no-sync-config` to skip it.
 
 **Notes:** Respects `CODEX_HOME`. CAAM enforces file-based auth storage by writing `cli_auth_credentials_store = "file"` to `~/.codex/config.toml` inside the profile.
 
+> **`codex login` is a logout first.** Before it logs the new account in, the Codex CLI revokes the session it finds in `auth.json` — the refresh-token family, so a vault copy of that account dies with it (`token_revoked`), and nothing but a new login brings it back. Capture the signed-in account, **clear** the live credential, then log in: that is what the dashboard's `n` does and what `caam add` has always done. Do not run `codex login` by hand while a captured account is signed in.
+
 > **Running a `codex app-server` daemon?** Codex can run as a long-lived daemon (`codex app-server`, also `codex mcp-server`) that caches `auth.json` in memory at startup. Swapping the auth file on disk does **not** change the account that daemon serves until it is restarted. After `caam activate/switch/next codex`, CAAM detects a running daemon and prints a warning. Pass `--reload-daemon` to have CAAM `SIGTERM` the daemon (it respawns with the new auth on next use) — it never kills a daemon silently.
 
 ### Gemini CLI (Google One AI Premium)
@@ -383,7 +385,7 @@ and a second sync writes nothing. Pass `--no-sync-config` to skip it.
 **Auth Files:**
 - `~/.kimi-code/credentials/kimi-code.json` — plain OAuth token (`access_token`, `refresh_token`, `expires_at`); respects `KIMI_CODE_HOME`
 
-**Login Command:** start `kimi` and type `/login` (device flow). After `/logout` the CLI leaves the file behind with empty tokens; caam treats that as logged out, never as a profile.
+**Login Command:** `kimi login` (device-code flow; plain `kimi` opens the chat and does not log in). After `/logout` the CLI leaves the file behind with empty tokens; caam treats that as logged out, never as a profile.
 
 **Identity:** `caam backup kimi` asks Kimi's `/me` once and records the account in the profile's `meta.json`. Profile detection hashes the token's subject (or the refresh token), so the CLI's in-place refresh does not lose the active profile.
 
@@ -787,14 +789,14 @@ Piped or run with `--once`, `caam monitor` prints the plain table it always
 did; `--format brief|json|alerts` are unchanged.
 
 The main TUI (`caam` with no arguments) is split top to bottom. A strip of
-providers runs across the top as a tab strip: every provider has a slot,
-in a fixed order, and ←/→ (or tab) move the selection along it. The slots
+providers runs across the top as a tab strip: every provider with a
+captured account has a slot, in a fixed order, and ←/→ (or tab) move the
+selection along it. The slots
 sit in one row that scrolls sideways; when providers are off either edge
 the strip says how many (`‹ 2`, `3 ›`), and the row scrolls only when the
-selection would leave it, so nothing shifts under the cursor. A provider
-with accounts shows its count, active account and tightest windows
-(`5h 53% · wk 44% · Fable 0%`); one without shows the `caam backup`
-command that would capture one. The selected provider's accounts fill the
+selection would leave it, so nothing shifts under the cursor. Each slot shows
+the provider's account count, active account and tightest windows
+(`5h 53% · wk 44% · Fable 0%`). The selected provider's accounts fill the
 pane below, one row each, with every rate-limit window the provider
 reports as a column (`53% left · 6:10 PM`) and the active account marked
 `●`. ↑/↓ move between them, and the selected account expands in place,
@@ -803,7 +805,7 @@ and token, its vault path, and what the keys do. Move on and it folds up
 again, so a provider with many accounts is one list to scroll through:
 
 ```
-╭─ Providers (9) ──────────────────────────────────────────────────────────╮
+╭─ Providers (8) ──────────────────────────────────────────────────────────╮
 │ ▸ Claude (2)          Codex (1)             Antigravity (1)               │
 │ ● chris@gascity.com   ● ops+chris-claude-1… ● chris@gascity.com     5 › │
 │ 5h 53% · wk 44% · …   wk 30%                auth expired (re-login)      │
@@ -853,7 +855,8 @@ refused by `caam activate` too: installing it would change nothing while
 reporting success.
 
 The layout follows the terminal. At 150 columns and up the provider
-slots are three-line cards and every window column shows with LAST USED;
+slots are three-line cards and every window column shows with LAST USED
+(the activity log's last switch to, away from, or login of the account);
 from 100 columns the slots are one-line chips and the window cells
 shorten; below that the slots are plain tabs and the table keeps only
 STATUS and the TIGHTEST window, with every window listed in the
