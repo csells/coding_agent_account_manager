@@ -206,8 +206,8 @@ func TestNewAccount_FailedLoginIsReported(t *testing.T) {
 	m := modelWithTwoClaudeProfiles(h.hooks(t))
 	updated, _ := m.Update(newAccountLoginDoneMsg{provider: "codex", err: errors.New("exit status 1")})
 	m = updated.(Model)
-	if !strings.Contains(m.statusMsg, "did not complete") || len(h.captured) != 0 {
-		t.Fatalf("a failed login must not capture: status=%q captured=%v", m.statusMsg, h.captured)
+	if m.state != stateMessage || !strings.Contains(ansi.Strip(m.View()), "Login did not complete") || len(h.captured) != 0 {
+		t.Fatalf("a failed login must not capture, and must say so in a dialog: state=%v status=%q captured=%v", m.state, m.statusMsg, h.captured)
 	}
 }
 
@@ -225,12 +225,14 @@ func TestNewAccount_ErrorLeavesWithTheTab(t *testing.T) {
 	}
 
 	m, _ = pickProvider(t, m, "cursor")
-	if !strings.Contains(m.statusMsg, "Cannot log in to Cursor") {
-		t.Fatalf("status = %q, want the Cursor login failure", m.statusMsg)
+	if m.state != stateMessage || !strings.Contains(m.statusMsg, "not installed") {
+		t.Fatalf("state=%v status=%q, want the Cursor login failure in a dialog", m.state, m.statusMsg)
 	}
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // dismiss it
+	m = updated.(Model)
 
 	// opencode sits just left of cursor on the strip.
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
 	m = updated.(Model)
 	if m.currentProvider() != "opencode" {
 		t.Fatalf("provider = %q, want opencode", m.currentProvider())
@@ -298,5 +300,80 @@ func TestNewAccount_LeavesAnUnknownLiveCredentialAlone(t *testing.T) {
 	}
 	if _, err := os.Stat(authPath); err != nil {
 		t.Fatalf("an unvaulted live credential must survive until the login replaces it: %v", err)
+	}
+}
+
+// Outcomes are reported in a dialog in the middle of the screen, not only
+// on the status bar; enter dismisses it and the list is back.
+func TestOutcomes_OpenADialogInTheMiddle(t *testing.T) {
+	h := &newAccountHooks{}
+	m := modelWithTwoClaudeProfiles(h.hooks(t))
+	m.width, m.height = 170, 40
+
+	updated, _ := m.Update(activateResultMsg{provider: "claude", profile: "b@example.com"})
+	m = updated.(Model)
+	if m.state != stateMessage || m.messageDialog == nil {
+		t.Fatalf("a switch outcome should open the message dialog, state=%v", m.state)
+	}
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"Switched", "Claude now uses b@example.com", "enter"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("dialog lacks %q:\n%s", want, view)
+		}
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.state != stateList || m.messageDialog != nil {
+		t.Fatalf("enter should dismiss the dialog, state=%v", m.state)
+	}
+
+	updated, _ = m.Update(activateResultMsg{provider: "claude", profile: "b@example.com", err: errors.New("outgoing profile could not be re-captured")})
+	m = updated.(Model)
+	if m.state != stateMessage || !strings.Contains(ansi.Strip(m.View()), "re-captured") {
+		t.Fatalf("a failed switch should open an error dialog with the reason:\n%s", ansi.Strip(m.View()))
+	}
+}
+
+// r on an account whose session the provider has ended offers the login
+// right there, and yes starts it the way n does.
+func TestRefresh_OffersTheLoginWhenTheSessionIsDead(t *testing.T) {
+	h := &newAccountHooks{}
+	m := modelWithTwoClaudeProfiles(h.hooks(t))
+	m.width, m.height = 170, 40
+	// Kimi renews its own tokens: a refused token means a new login.
+	m.profiles["kimi"] = []Profile{{Name: "k@example.com", Provider: "kimi", IsActive: true}}
+	m.syncProfilesPanel()
+	for m.currentProvider() != "kimi" {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+		m = updated.(Model)
+	}
+	m.applyLimitsLoaded(limitsLoadedMsg{provider: "kimi", profile: "k@example.com", err: errors.New("unauthorized: status 401")})
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	m = updated.(Model)
+	if m.state != stateReloginConfirm || m.confirmDialog == nil {
+		t.Fatalf("r should offer a login, state=%v status=%q", m.state, m.statusMsg)
+	}
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "Log in again?") || !strings.Contains(view, "k@example.com") {
+		t.Fatalf("the offer should name the account:\n%s", view)
+	}
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = updated.(Model)
+	if cmd == nil || m.state != stateList || !strings.Contains(m.statusMsg, "Complete the kimi login") {
+		t.Fatalf("yes should start the kimi login: cmd=%v state=%v status=%q", cmd, m.state, m.statusMsg)
+	}
+
+	// A Codex refresh that comes back "invalidated" makes the same offer.
+	m.profiles["codex"] = []Profile{{Name: "c@example.com", Provider: "codex", IsActive: true}}
+	m.syncProfilesPanel()
+	updated, _ = m.Update(refreshResultMsg{provider: "codex", profile: "c@example.com", err: errors.New("codex refresh error 401: refresh_token_invalidated")})
+	m = updated.(Model)
+	if m.state != stateReloginConfirm {
+		t.Fatalf("an invalidated refresh should offer a login, state=%v", m.state)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = updated.(Model)
+	if m.state != stateList || m.pendingRelogin != "" {
+		t.Fatalf("esc should decline without starting anything, state=%v", m.state)
 	}
 }

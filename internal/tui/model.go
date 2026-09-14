@@ -58,6 +58,8 @@ const (
 	stateSyncEdit
 	stateCommandPalette
 	stateProviderPicker
+	stateMessage
+	stateReloginConfirm
 )
 
 const (
@@ -157,6 +159,10 @@ type Model struct {
 	// differ from the selected one when the login came from the picker.
 	backupProvider string
 	providerPicker *ProviderPickerDialog
+	// messageDialog reports an outcome in the middle of the screen.
+	messageDialog *MessageDialog
+	// pendingRelogin is the provider a confirmed re-login starts for.
+	pendingRelogin string
 	confirmDialog  *ConfirmDialog
 	pendingProfile string // Profile name pending overwrite confirmation
 	editDialog     *MultiFieldDialog
@@ -981,8 +987,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setNotice(msg.provider, msg.profile, "Activate failed: "+msg.err.Error(), true)
 			return m, m.addToast(m.statusMsg, StatusError)
 		}
-		m.showActivateSuccess(msg.provider, msg.profile)
 		m.setNotice(msg.provider, msg.profile, fmt.Sprintf("Switched %s to %s", msg.provider, msg.profile), false)
+		m.showActivateSuccess(msg.provider, msg.profile)
 		// Refresh profiles to update active state
 		ctx := refreshContext{
 			provider:        msg.provider,
@@ -992,6 +998,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case refreshResultMsg:
 		if msg.err != nil {
+			if sessionEnded(msg.err) {
+				return m.offerRelogin(msg.provider, msg.profile, "the provider has ended its session and a refresh cannot revive it")
+			}
 			m.showError(msg.err, "Refresh")
 			return m, nil
 		}
@@ -1097,6 +1106,10 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleCommandPaletteKeys(msg)
 	case stateProviderPicker:
 		return m.handleProviderPickerKeys(msg)
+	case stateMessage:
+		return m.handleMessageKeys(msg)
+	case stateReloginConfirm:
+		return m.handleReloginConfirmKeys(msg)
 	}
 
 	// The detail card overlay: ↑/↓ keep working underneath it; anything
@@ -1653,26 +1666,22 @@ func (m Model) executeBackup(profileName string) (tea.Model, tea.Cmd) {
 func (m Model) handleRefresh() (tea.Model, tea.Cmd) {
 	provider := m.currentProvider()
 	info := m.selectedProfileInfo()
-	if info != nil && m.tokenNeedsRefresh(provider, info.Name) {
-		m.statusMsg = fmt.Sprintf("Refreshing %s's token, then its limits…", info.Name)
-		return m, m.doRefreshProfile(provider, info.Name)
+	if info != nil && m.tokenInTrouble(provider, info.Name) {
+		if refreshableProvider(provider) {
+			m.statusMsg = fmt.Sprintf("Refreshing %s's token, then its limits…", info.Name)
+			return m, m.doRefreshProfile(provider, info.Name)
+		}
+		return m.offerRelogin(provider, info.Name, providerLabel(provider)+" renews its own tokens, so caam cannot refresh this one")
 	}
 	m.limitsRefresh()
 	m.statusMsg = "Refreshing limits…"
 	return m, m.limitsPrefetchCmd()
 }
 
-// tokenNeedsRefresh reports whether r should refresh the account's token
-// before re-fetching its limits: only for providers caam can refresh
-// (Codex and Gemini; the others renew their own tokens or cannot be
-// refreshed from outside), and only when the token is past its expiry or
-// the last limits fetch was refused as unauthorized.
-func (m Model) tokenNeedsRefresh(provider, name string) bool {
-	switch provider {
-	case "codex", "gemini":
-	default:
-		return false
-	}
+// tokenInTrouble reports whether the account's token is past its expiry
+// or the last limits fetch was refused as unauthorized — the two reasons r
+// does more than re-fetch limits.
+func (m Model) tokenInTrouble(provider, name string) bool {
 	if h := m.healthFor(provider, name); h != nil && !h.TokenExpiresAt.IsZero() && time.Now().After(h.TokenExpiresAt) {
 		return true
 	}
@@ -1681,6 +1690,82 @@ func (m Model) tokenNeedsRefresh(provider, name string) bool {
 		return strings.Contains(msg, "unauthorized") || strings.Contains(msg, "expired")
 	}
 	return false
+}
+
+// refreshableProvider reports whether caam can refresh the provider's
+// token from outside: Codex and Gemini. The others renew their own.
+func refreshableProvider(provider string) bool {
+	return provider == "codex" || provider == "gemini"
+}
+
+// tokenNeedsRefresh reports whether r should refresh the account's token
+// before re-fetching its limits: a token in trouble, on a provider caam
+// can refresh.
+func (m Model) tokenNeedsRefresh(provider, name string) bool {
+	return refreshableProvider(provider) && m.tokenInTrouble(provider, name)
+}
+
+// sessionEnded reports whether a refresh failed because the provider has
+// invalidated the session — the case nothing but a new login fixes.
+func sessionEnded(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, sign := range []string{"invalidated", "revoked", "session has ended", "log in again", "refresh token reused", "401"} {
+		if strings.Contains(msg, sign) {
+			return true
+		}
+	}
+	return false
+}
+
+// offerRelogin asks, in the middle of the screen, whether to log the
+// account in again — the only fix when its session is gone — and starts
+// the provider's login on yes, the same way n does.
+func (m Model) offerRelogin(provider, name, why string) (tea.Model, tea.Cmd) {
+	m.setNotice(provider, name, "Needs a new login: "+why, true)
+	m.pendingRelogin = provider
+	m.confirmDialog = NewConfirmDialog(
+		"Log in again?",
+		fmt.Sprintf("%s needs a new login: %s.\n\nStart the %s login now? The signed-in account is captured first, and the new session is filed under the account that signs in.", name, why, providerLabel(provider)),
+	)
+	m.confirmDialog.SetStyles(m.styles)
+	m.confirmDialog.SetWidth(m.dialogWidth(64))
+	m.confirmDialog.yesLabel, m.confirmDialog.noLabel = "Log in", "Not now"
+	m.state = stateReloginConfirm
+	m.statusMsg = ""
+	return m, nil
+}
+
+// handleReloginConfirmKeys starts the login on yes.
+func (m Model) handleReloginConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.confirmDialog == nil {
+		m.state = stateList
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.confirmDialog, cmd = m.confirmDialog.Update(msg)
+	switch m.confirmDialog.Result() {
+	case DialogResultSubmit:
+		confirmed := m.confirmDialog.Confirmed()
+		provider := m.pendingRelogin
+		m.confirmDialog = nil
+		m.pendingRelogin = ""
+		m.state = stateList
+		if confirmed {
+			return m.startNewAccountLogin(provider)
+		}
+		m.statusMsg = "Login not started"
+		return m, nil
+	case DialogResultCancel:
+		m.confirmDialog = nil
+		m.pendingRelogin = ""
+		m.state = stateList
+		m.statusMsg = "Login not started"
+		return m, nil
+	}
+	return m, cmd
 }
 
 // doRefreshProfile returns a tea.Cmd that performs the token refresh.
@@ -2569,6 +2654,16 @@ func (m Model) View() string {
 	case stateProviderPicker:
 		if m.providerPicker != nil {
 			return m.dialogOverlayView(m.providerPicker.View())
+		}
+		return m.mainView()
+	case stateMessage:
+		if m.messageDialog != nil {
+			return m.dialogOverlayView(m.messageDialog.View())
+		}
+		return m.mainView()
+	case stateReloginConfirm:
+		if m.confirmDialog != nil {
+			return m.dialogOverlayView(m.confirmDialog.View())
 		}
 		return m.mainView()
 	case stateConfirmOverwrite:
@@ -3590,34 +3685,62 @@ func (m *Model) showError(err error, context string) {
 		msg = "Profile is currently locked by another process"
 	}
 
-	if context != "" {
-		m.statusMsg = fmt.Sprintf("%s: %s", context, msg)
-	} else {
-		m.statusMsg = msg
+	if context == "" {
+		context = "Error"
 	}
+	m.showMessage(StatusError, context, "%s", msg)
+}
+
+// showMessage reports an outcome: in a dialog in the middle of the screen
+// when the list is showing, else on the status bar (a dialog already open
+// keeps the screen). The status bar carries it either way.
+func (m *Model) showMessage(severity StatusSeverity, title, format string, args ...interface{}) {
+	text := fmt.Sprintf(format, args...)
+	m.statusMsg = text
+	if m.state != stateList {
+		return
+	}
+	m.messageDialog = NewMessageDialog(title, text, severity)
+	m.messageDialog.SetStyles(m.styles)
+	m.messageDialog.SetWidth(m.dialogWidth(64))
+	m.state = stateMessage
+}
+
+// handleMessageKeys closes the message dialog.
+func (m Model) handleMessageKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.messageDialog == nil {
+		m.state = stateList
+		return m, nil
+	}
+	m.messageDialog.Update(msg)
+	if m.messageDialog.Result() != DialogResultNone {
+		m.messageDialog = nil
+		m.state = stateList
+	}
+	return m, nil
 }
 
 // showSuccess sets the status message with a success notification.
 func (m *Model) showSuccess(format string, args ...interface{}) {
-	m.statusMsg = fmt.Sprintf(format, args...)
+	m.showMessage(StatusSuccess, "Done", format, args...)
 }
 
 // showActivateSuccess shows a success message for profile activation.
 func (m *Model) showActivateSuccess(provider, profile string) {
-	m.showSuccess("Activated %s for %s", profile, provider)
+	m.showMessage(StatusSuccess, "Switched", "%s now uses %s.", providerLabel(provider), profile)
 }
 
 // showDeleteSuccess shows a success message for profile deletion.
 func (m *Model) showDeleteSuccess(profile string) {
-	m.showSuccess("Deleted %s", profile)
+	m.showMessage(StatusSuccess, "Deleted", "%s is gone from the vault.", profile)
 }
 
 // showRefreshSuccess shows a success message for token refresh.
 func (m *Model) showRefreshSuccess(profile string, expiresAt time.Time) {
 	if expiresAt.IsZero() {
-		m.showSuccess("Refreshed %s", profile)
+		m.showMessage(StatusSuccess, "Refreshed", "%s has a fresh token; fetching its limits.", profile)
 	} else {
-		m.showSuccess("Refreshed %s - new token valid until %s", profile, expiresAt.Format("Jan 2 15:04"))
+		m.showMessage(StatusSuccess, "Refreshed", "%s has a fresh token, valid until %s.", profile, expiresAt.Format("Jan 2 15:04"))
 	}
 }
 

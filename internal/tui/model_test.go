@@ -541,14 +541,17 @@ func TestShowActivateSuccess(t *testing.T) {
 	m := New()
 	m.showActivateSuccess("claude", "work@example.com")
 
-	if !strings.Contains(m.statusMsg, "Activated") {
-		t.Errorf("expected 'Activated' in status, got %q", m.statusMsg)
+	if !strings.Contains(m.statusMsg, "now uses") {
+		t.Errorf("expected the switch outcome in status, got %q", m.statusMsg)
 	}
 	if !strings.Contains(m.statusMsg, "work@example.com") {
 		t.Errorf("expected profile name in status, got %q", m.statusMsg)
 	}
-	if !strings.Contains(m.statusMsg, "claude") {
+	if !strings.Contains(m.statusMsg, "Claude") {
 		t.Errorf("expected provider name in status, got %q", m.statusMsg)
+	}
+	if m.state != stateMessage {
+		t.Errorf("a switch outcome should open the message dialog, state=%v", m.state)
 	}
 }
 
@@ -558,8 +561,8 @@ func TestShowRefreshSuccess(t *testing.T) {
 
 	// Test with zero expiry time
 	m.showRefreshSuccess("test@example.com", time.Time{})
-	if !strings.Contains(m.statusMsg, "Refreshed") {
-		t.Errorf("expected 'Refreshed' in status, got %q", m.statusMsg)
+	if !strings.Contains(m.statusMsg, "fresh token") {
+		t.Errorf("expected the refresh outcome in status, got %q", m.statusMsg)
 	}
 	if !strings.Contains(m.statusMsg, "test@example.com") {
 		t.Errorf("expected profile name in status, got %q", m.statusMsg)

@@ -194,8 +194,17 @@ the selected agent's Accounts below.
 - **Keys**: ←/→ agent, ↑/↓ Account, Enter switch (confirm), `n` new Login
   (picker of every agent, install status shown), `r` refresh (limits; the
   token first only when it has expired or the provider just refused it, and
-  only for Codex and Gemini), `i` full card, `/` search, `e` edit, `o`
-  browser, `d` delete, `?` help. Upstream's `b` (backup under a typed name)
+  only for Codex and Gemini; when a refresh cannot help — session ended, or
+  an agent that renews its own tokens — `r` offers the Login instead and
+  yes runs the `n` flow for that agent), `i` full card, `/` search, `e`
+  edit, `o` browser, `d` delete, `?` help.
+- **Outcomes are dialogs.** Everything that answers an action — switched,
+  logged in, refused, failed, deleted, refreshed — opens a message dialog
+  in the middle of the screen (`MessageDialog`, via `showMessage`), one key
+  to dismiss. The status bar carries progress ("Refreshing limits…",
+  "Login finished; reading who signed in…") and nothing the user must not
+  miss. The expansion under the Account keeps the last outcome as its first
+  line for context after the dialog is gone. Upstream's `b` (backup under a typed name)
   and `l` (token refresh labelled "login") were removed: Enter and `n`
   re-capture on the way through, and one `r` is easier to hold than two
   refreshes. The name dialog survives only as the `n` fallback when a login

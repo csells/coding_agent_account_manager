@@ -217,7 +217,7 @@ func (m Model) startNewAccountLogin(provider string) (tea.Model, tea.Cmd) {
 	}
 	cmd, hint, err := m.hooks.Login(provider)
 	if err != nil {
-		m.statusMsg = fmt.Sprintf("Cannot log in to %s: %v", providerLabel(provider), err)
+		m.showMessage(StatusError, "Cannot log in", "%s: %v", providerLabel(provider), err)
 		return m, nil
 	}
 
@@ -234,13 +234,13 @@ func (m Model) startNewAccountLogin(provider string) (tea.Model, tea.Cmd) {
 		if active, _ := vault.ActiveProfile(fileSet); active != "" {
 			if err := m.captureLive(provider, active); err != nil {
 				m.setNotice(provider, active, fmt.Sprintf("Not starting a login: the active account %s could not be re-captured first (%v)", active, err), true)
-				m.statusMsg = "Login not started: re-capture of the active account failed"
-				return m, m.addToast(m.statusMsg, StatusError)
+				m.showMessage(StatusError, "Login not started", "The signed-in account %s could not be re-captured first: %v. Its newest tokens would be lost, so the login was not run.", active, err)
+				return m, nil
 			}
 			if err := authfile.ClearAuthFiles(fileSet); err != nil {
 				m.setNotice(provider, active, fmt.Sprintf("Not starting a login: %s is in the vault but its live credential could not be cleared (%v); the login would revoke it", active, err), true)
-				m.statusMsg = "Login not started: could not clear the live credential"
-				return m, m.addToast(m.statusMsg, StatusError)
+				m.showMessage(StatusError, "Login not started", "%s is in the vault, but its live credential could not be cleared (%v). The login would have revoked it, so it was not run.", active, err)
+				return m, nil
 			}
 		}
 	}
@@ -254,8 +254,8 @@ func (m Model) startNewAccountLogin(provider string) (tea.Model, tea.Cmd) {
 // newAccountLoggedIn follows the native login: read who is logged in now.
 func (m Model) newAccountLoggedIn(msg newAccountLoginDoneMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.statusMsg = fmt.Sprintf("%s login did not complete: %v — the previous account is in the vault; select it and press enter to restore it", providerLabel(msg.provider), msg.err)
-		return m, tea.Batch(m.addToast(m.statusMsg, StatusError), m.refreshProfiles(refreshContext{provider: msg.provider}))
+		m.showMessage(StatusError, "Login did not complete", "%s: %v. The previous account is in the vault; select it and press enter to restore it.", providerLabel(msg.provider), msg.err)
+		return m, m.refreshProfiles(refreshContext{provider: msg.provider})
 	}
 	identify := m.hooks.LiveIdentity
 	provider := msg.provider
@@ -284,15 +284,15 @@ func (m Model) newAccountIdentified(msg newAccountIdentifiedMsg) (tea.Model, tea
 	}
 	if err := m.captureLive(msg.provider, msg.name); err != nil {
 		m.setNotice(msg.provider, msg.name, "Logged in as "+msg.name+", but capturing it failed: "+err.Error(), true)
-		m.statusMsg = "Capture failed: " + err.Error()
-		return m, m.addToast(m.statusMsg, StatusError)
+		m.showMessage(StatusError, "Capture failed", "Logged in as %s, but capturing it failed: %v", msg.name, err)
+		return m, nil
 	}
 	logLoginEvent(msg.provider, msg.name)
 	m.selectedProfileName = msg.name
 	delete(m.limits, limitsKey(msg.provider, msg.name))
 	m.setNotice(msg.provider, msg.name, "Logged in and captured "+msg.name, false)
-	m.statusMsg = fmt.Sprintf("Logged in to %s as %s", providerLabel(msg.provider), msg.name)
-	return m, tea.Batch(m.addToast(m.statusMsg, StatusSuccess), m.refreshProfiles(refreshContext{provider: msg.provider, selectedProfile: msg.name}))
+	m.showMessage(StatusSuccess, "Logged in", "%s now uses %s, and its credential is in the vault.", providerLabel(msg.provider), msg.name)
+	return m, m.refreshProfiles(refreshContext{provider: msg.provider, selectedProfile: msg.name})
 }
 
 // captureLive vaults the provider's live credential under name, through

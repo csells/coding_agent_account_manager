@@ -1057,3 +1057,64 @@ func (d *CommandPaletteDialog) View() string {
 		Width(d.width).
 		Render(content.String())
 }
+
+// MessageDialog reports the outcome of an action in the middle of the
+// screen: what happened, in a box the eye lands on, dismissed with one
+// key. The status bar is for progress; outcomes live here.
+type MessageDialog struct {
+	title    string
+	message  string
+	severity StatusSeverity
+	styles   Styles
+	width    int
+	result   DialogResult
+}
+
+// NewMessageDialog creates a message dialog.
+func NewMessageDialog(title, message string, severity StatusSeverity) *MessageDialog {
+	return &MessageDialog{title: title, message: message, severity: severity, styles: DefaultStyles(), width: 60}
+}
+
+// SetStyles sets the dialog styles.
+func (d *MessageDialog) SetStyles(styles Styles) { d.styles = styles }
+
+// SetWidth sets the dialog width.
+func (d *MessageDialog) SetWidth(width int) { d.width = width }
+
+// Result reports whether the dialog has been dismissed.
+func (d *MessageDialog) Result() DialogResult { return d.result }
+
+// Update dismisses the dialog on enter, esc, space, q or ctrl+c.
+func (d *MessageDialog) Update(msg tea.KeyMsg) {
+	switch {
+	case msg.Type == tea.KeyEnter, msg.Type == tea.KeyEscape, msg.Type == tea.KeySpace, msg.Type == tea.KeyCtrlC:
+		d.result = DialogResultSubmit
+	case msg.Type == tea.KeyRunes && string(msg.Runes) == "q":
+		d.result = DialogResultSubmit
+	}
+}
+
+// View renders the title in the outcome's colour, the message wrapped to
+// the box, and how to dismiss it.
+func (d *MessageDialog) View() string {
+	title := d.styles.DialogTitle
+	switch d.severity {
+	case StatusError:
+		title = d.styles.StatusError.Bold(true)
+	case StatusWarning:
+		title = d.styles.StatusWarning.Bold(true)
+	case StatusSuccess:
+		title = d.styles.StatusSuccess.Bold(true)
+	}
+	inner := d.width - 4
+	if inner < 20 {
+		inner = 20
+	}
+	var b strings.Builder
+	b.WriteString(title.Render(d.title))
+	b.WriteString("\n\n")
+	b.WriteString(lipgloss.NewStyle().Width(inner).Render(d.message))
+	b.WriteString("\n\n")
+	b.WriteString(d.styles.StatusKey.Render(" enter ") + d.styles.StatusText.Render(" ok"))
+	return d.styles.DialogFocused.Width(d.width).Render(b.String())
+}
