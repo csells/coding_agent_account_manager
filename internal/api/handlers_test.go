@@ -80,7 +80,7 @@ func TestGetProfilesWithUnknownTool(t *testing.T) {
 	h := NewHandlers(nil, nil, nil)
 
 	_, err := h.GetProfiles("unknown-tool")
-	if err == nil || !strings.Contains(err.Error(), "unknown tool") {
+	if err == nil || !strings.Contains(err.Error(), "unknown agent") {
 		t.Errorf("GetProfiles() expected unknown tool error, got %v", err)
 	}
 }
@@ -235,7 +235,7 @@ func TestDeleteProfileWithUnknownTool(t *testing.T) {
 	h := NewHandlers(nil, nil, nil)
 
 	err := h.DeleteProfile("unknown", "test")
-	if err == nil || !strings.Contains(err.Error(), "unknown tool") {
+	if err == nil || !strings.Contains(err.Error(), "unknown agent") {
 		t.Errorf("DeleteProfile() expected unknown tool error, got %v", err)
 	}
 }
@@ -262,7 +262,7 @@ func TestGetProfileWithUnknownTool(t *testing.T) {
 	h := NewHandlers(nil, nil, nil)
 
 	_, err := h.GetProfile("unknown-tool", "test")
-	if err == nil || !strings.Contains(err.Error(), "unknown tool") {
+	if err == nil || !strings.Contains(err.Error(), "unknown agent") {
 		t.Errorf("GetProfile() expected unknown tool error, got %v", err)
 	}
 }

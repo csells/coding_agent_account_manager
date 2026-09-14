@@ -188,7 +188,7 @@ func (h *Handlers) GetProfiles(tool string) (*ProfilesResponse, error) {
 	if tool != "" {
 		getFileSet, ok := tools[tool]
 		if !ok {
-			return nil, fmt.Errorf("unknown tool: %s", tool)
+			return nil, fmt.Errorf("unknown agent: %s", tool)
 		}
 		if h.vault == nil {
 			return nil, fmt.Errorf("vault not available")
@@ -250,7 +250,7 @@ func (h *Handlers) GetProfiles(tool string) (*ProfilesResponse, error) {
 // GetProfile returns a single profile.
 func (h *Handlers) GetProfile(tool, name string) (*ProfileInfo, error) {
 	if _, ok := tools[tool]; !ok {
-		return nil, fmt.Errorf("unknown tool: %s", tool)
+		return nil, fmt.Errorf("unknown agent: %s", tool)
 	}
 	if h.vault == nil {
 		return nil, fmt.Errorf("vault not available")
@@ -287,7 +287,7 @@ func (h *Handlers) GetProfile(tool, name string) (*ProfileInfo, error) {
 // DeleteProfile deletes a profile.
 func (h *Handlers) DeleteProfile(tool, name string) error {
 	if _, ok := tools[tool]; !ok {
-		return fmt.Errorf("unknown tool: %s", tool)
+		return fmt.Errorf("unknown agent: %s", tool)
 	}
 	if name == "" {
 		return fmt.Errorf("profile is required")
@@ -387,7 +387,7 @@ func (h *Handlers) GetCoordinators() (*CoordinatorsResponse, error) {
 func (h *Handlers) Activate(req ActivateRequest) (*ActivateResponse, error) {
 	getFileSet, ok := tools[req.Tool]
 	if !ok {
-		return nil, fmt.Errorf("unknown tool: %s", req.Tool)
+		return nil, fmt.Errorf("unknown agent: %s", req.Tool)
 	}
 	if req.Profile == "" {
 		return nil, fmt.Errorf("profile is required")
@@ -443,7 +443,7 @@ func (h *Handlers) Activate(req ActivateRequest) (*ActivateResponse, error) {
 func (h *Handlers) Backup(req BackupRequest) (*BackupResponse, error) {
 	getFileSet, ok := tools[req.Tool]
 	if !ok {
-		return nil, fmt.Errorf("unknown tool: %s", req.Tool)
+		return nil, fmt.Errorf("unknown agent: %s", req.Tool)
 	}
 	if req.Profile == "" {
 		return nil, fmt.Errorf("profile is required")
