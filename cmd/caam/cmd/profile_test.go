@@ -511,7 +511,7 @@ func TestLoginCommand_ClaudeUnsupported(t *testing.T) {
 		t.Fatal("expected an error for `login claude`, got nil")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "not supported for the claude provider") {
+	if !strings.Contains(msg, "not supported for the claude agent") {
 		t.Errorf("expected claude-specific message, got: %q", msg)
 	}
 	if !strings.Contains(msg, "/login") {
@@ -520,7 +520,7 @@ func TestLoginCommand_ClaudeUnsupported(t *testing.T) {
 
 	// Case-insensitive: the provider arg is lowercased before the check.
 	if err := loginCmd.RunE(loginCmd, []string{"Claude", "home"}); err == nil ||
-		!strings.Contains(err.Error(), "not supported for the claude provider") {
+		!strings.Contains(err.Error(), "not supported for the claude agent") {
 		t.Errorf("expected claude guard to fire for %q, got: %v", "Claude", err)
 	}
 
@@ -540,7 +540,7 @@ func TestLoginCommand_ClaudeUnsupported(t *testing.T) {
 	profileStore = profile.NewStore(t.TempDir())
 
 	if err := loginCmd.RunE(loginCmd, []string{"codex", "work"}); err != nil &&
-		strings.Contains(err.Error(), "not supported for the claude provider") {
+		strings.Contains(err.Error(), "not supported for the claude agent") {
 		t.Errorf("codex login must not trigger the claude guard, got: %q", err.Error())
 	}
 }
