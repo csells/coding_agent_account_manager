@@ -263,7 +263,7 @@ func TestEnterRefusesACredentialLessProfileUpFront(t *testing.T) {
 	m = updated.(Model)
 	m.syncDetailPanel()
 	v := flatCard(m.detailPanel.View())
-	for _, want := range []string{"none captured", "caam backup claude b@example.com", "no captured credential"} {
+	for _, want := range []string{"none captured", "press n and log in as this account", "no captured credential"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("detail card lacks %q:\n%s", want, v)
 		}

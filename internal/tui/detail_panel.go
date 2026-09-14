@@ -285,7 +285,7 @@ func (p *DetailPanel) View() string {
 	// A profile that cannot be switched to says so before Enter is pressed.
 	if prof.NoCredential {
 		authRows = append(authRows, p.renderRow("Credential", p.styles.StatusBad.Render(
-			fmt.Sprintf("none captured; log in, then: caam backup %s %s", prof.Provider, prof.Name))))
+			"none captured; press n and log in as this account")))
 	}
 
 	sections = append(sections, lipgloss.JoinVertical(lipgloss.Left,
