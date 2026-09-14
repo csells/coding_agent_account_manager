@@ -5,11 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
-	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/refresh"
 	"github.com/spf13/cobra"
@@ -310,16 +308,8 @@ func loadExpiryInfo(tool, profile string) (*health.ExpiryInfo, error) {
 	vaultPath := vault.ProfilePath(tool, profile)
 
 	switch tool {
-	case "claude":
-		return health.ParseClaudeExpiry(vaultPath)
-	case "codex":
-		return health.ParseCodexExpiry(filepath.Join(vaultPath, "auth.json"))
-	case "gemini":
-		// Migrate legacy vault filename before reading.
-		_ = authfile.MigrateGeminiVaultDir(vaultPath)
-		return health.ParseGeminiExpiry(vaultPath)
-	case "kimi":
-		return health.ParseKimiExpiry(filepath.Join(vaultPath, "kimi-code.json"))
+	case "claude", "codex", "gemini", "kimi":
+		return vaultExpiry(tool, vaultPath)
 	case "opencode", "cursor", "grok":
 		// No token expiry parsing for opencode/cursor/grok yet
 		return nil, nil

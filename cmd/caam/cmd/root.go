@@ -280,6 +280,17 @@ func getProfileHealth(tool, profileName string) *health.ProfileHealth {
 	return ph
 }
 
+// vaultExpiry reads the expiry of the vault copy of a profile's credential
+// through health.ParseVaultExpiry, migrating a legacy Gemini vault filename
+// first.
+func vaultExpiry(tool, vaultPath string) (*health.ExpiryInfo, error) {
+	if tool == "gemini" {
+		// Migrate legacy vault filename before reading.
+		_ = authfile.MigrateGeminiVaultDir(vaultPath)
+	}
+	return health.ParseVaultExpiry(tool, vaultPath)
+}
+
 func buildProfileHealth(tool, profileName string) *health.ProfileHealth {
 	// Start with stored health data (for error counts, penalties, and fallback expiry)
 	ph := &health.ProfileHealth{}
@@ -294,32 +305,7 @@ func buildProfileHealth(tool, profileName string) *health.ProfileHealth {
 	vaultPath := vault.ProfilePath(tool, profileName)
 
 	// Try to parse expiry based on tool type
-	var expInfo *health.ExpiryInfo
-	var err error
-
-	switch tool {
-	case "claude":
-		expInfo, err = health.ParseClaudeExpiry(vaultPath)
-	case "codex":
-		// Codex auth is in auth.json at vaultPath
-		authPath := filepath.Join(vaultPath, "auth.json")
-		expInfo, err = health.ParseCodexExpiry(authPath)
-	case "gemini":
-		// Migrate legacy vault filename before reading.
-		_ = authfile.MigrateGeminiVaultDir(vaultPath)
-		expInfo, err = health.ParseGeminiExpiry(vaultPath)
-	case "agy":
-		expInfo, err = health.ParseAgyExpiry(vaultPath)
-	case "kimi":
-		expInfo, err = health.ParseKimiExpiry(filepath.Join(vaultPath, "kimi-code.json"))
-	case "zcode":
-		expInfo, err = health.ParseZcodeExpiry(filepath.Join(vaultPath, "credentials.json"))
-	case "grok":
-		// Grok's auth.json is keyed by a dynamic "<issuer>::<client-id>" key,
-		// which the Codex parser cannot read; without its own case every Grok
-		// profile scored as unknown-expiry and stuck at warning (issue #101).
-		expInfo, err = health.ParseGrokExpiry(filepath.Join(vaultPath, "auth.json"))
-	}
+	expInfo, err := vaultExpiry(tool, vaultPath)
 
 	// Prefer the profile's own live credential over the vault snapshot.
 	// Vault copies are frozen at backup/activate time while tools refresh
