@@ -42,7 +42,7 @@ func nativeLoginCommand(provider string) (*exec.Cmd, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	path, err := exec.LookPath(login.Bin)
+	path, err := lookPath(login.Bin)
 	if err != nil {
 		return nil, "", fmt.Errorf("%s is not installed (not on PATH)", login.Bin)
 	}

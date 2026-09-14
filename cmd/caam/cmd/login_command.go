@@ -1,6 +1,32 @@
 package cmd
 
-import "fmt"
+import (
+	"fmt"
+	"os/exec"
+	"sync"
+)
+
+// lookPathCache remembers exec.LookPath per binary for the life of the
+// process: the dashboard's n dialog asks for every provider's binary each
+// time it opens, synchronously in Update, and PATH does not change under a
+// running caam.
+var lookPathCache sync.Map // binary name -> lookPathResult
+
+type lookPathResult struct {
+	path string
+	err  error
+}
+
+// lookPath is exec.LookPath, memoized per binary for the process lifetime.
+func lookPath(bin string) (string, error) {
+	if v, ok := lookPathCache.Load(bin); ok {
+		r := v.(lookPathResult)
+		return r.path, r.err
+	}
+	path, err := exec.LookPath(bin)
+	lookPathCache.Store(bin, lookPathResult{path: path, err: err})
+	return path, err
+}
 
 // loginCommand is a provider's own login: the binary a user would run, its
 // arguments, and the hint that tells them what the command will want.
