@@ -252,21 +252,6 @@ func TestDeleteProfileConfirm(t *testing.T) {
 	}
 }
 
-func TestHandleLoginProfile(t *testing.T) {
-	m := New()
-	m.profiles = map[string][]Profile{
-		"claude": {{Name: "test@example.com", Provider: "claude"}},
-	}
-
-	result, _ := m.handleLoginProfile()
-	updated := result.(Model)
-
-	// Should have status message
-	if updated.statusMsg == "" {
-		t.Error("expected non-empty status message")
-	}
-}
-
 func TestHandleOpenInBrowser(t *testing.T) {
 	m := New()
 
@@ -279,29 +264,12 @@ func TestHandleOpenInBrowser(t *testing.T) {
 	}
 }
 
-func TestHandleBackupProfile(t *testing.T) {
-	m := New()
-
-	result, _ := m.handleBackupProfile()
-	updated := result.(Model)
-
-	// Should either show status message (no auth files) or show backup dialog (auth files exist)
-	if updated.statusMsg == "" && updated.backupDialog == nil {
-		t.Error("expected either status message or backup dialog")
-	}
-
-	// If dialog is shown, state should be stateBackupDialog
-	if updated.backupDialog != nil && updated.state != stateBackupDialog {
-		t.Errorf("expected stateBackupDialog when dialog is shown, got %v", updated.state)
-	}
-}
-
 func TestKeyMapBindings(t *testing.T) {
 	km := defaultKeyMap()
 
 	// Verify all bindings exist
-	if len(km.Login.Keys()) == 0 {
-		t.Error("expected Login binding to have keys")
+	if len(km.Refresh.Keys()) == 0 {
+		t.Error("expected Refresh binding to have keys")
 	}
 	if len(km.Open.Keys()) == 0 {
 		t.Error("expected Open binding to have keys")

@@ -191,7 +191,7 @@ func TestNewAccount_WithoutAnIdentityAsksForAName(t *testing.T) {
 	h := &newAccountHooks{identity: ""}
 	m := modelWithTwoClaudeProfiles(h.hooks(t))
 	m.width, m.height = 170, 40
-	// handleBackupProfile needs live auth files to exist for the provider;
+	// openBackupNameDialog needs live auth files to exist for the provider;
 	// the isolated test HOME has none, so it reports that instead of a
 	// dialog — the message still tells the user what happened.
 	updated, _ := m.Update(newAccountIdentifiedMsg{provider: "claude", name: ""})
@@ -237,39 +237,6 @@ func TestNewAccount_ErrorLeavesWithTheTab(t *testing.T) {
 	}
 	if m.statusMsg != "" {
 		t.Fatalf("status = %q after moving to another tab, want it cleared", m.statusMsg)
-	}
-}
-
-// b re-captures the selected account from the live credential — but only
-// when it is the signed-in one, since the live credential is nobody else's.
-func TestRecapture_TakesTheSignedInAccountOnly(t *testing.T) {
-	h := &newAccountHooks{}
-	m := modelWithTwoClaudeProfiles(h.hooks(t))
-	m.width, m.height = 170, 40
-
-	// a@example.com is active and selected.
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
-	m = updated.(Model)
-	if len(h.captured) != 1 || h.captured[0] != "claude/a@example.com" {
-		t.Fatalf("b should re-capture the signed-in account, captured %v", h.captured)
-	}
-	if m.state != stateList || !strings.Contains(m.notice, "Re-captured a@example.com") {
-		t.Fatalf("state=%v notice=%q, want a re-capture notice with no dialog", m.state, m.notice)
-	}
-
-	// b@example.com is not signed in: nothing live belongs to it.
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m = updated.(Model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
-	m = updated.(Model)
-	if len(h.captured) != 1 {
-		t.Fatalf("b on an inactive account must not capture, captured %v", h.captured)
-	}
-	if !m.noticeErr || !strings.Contains(m.notice, "a@example.com is signed in, not b@example.com") {
-		t.Fatalf("notice = %q, want the reason it was refused", m.notice)
-	}
-	if m.state != stateList {
-		t.Fatalf("no dialog should open, state=%v", m.state)
 	}
 }
 

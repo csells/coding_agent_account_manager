@@ -13,10 +13,8 @@ type keyMap struct {
 
 	// Actions
 	Enter      key.Binding
-	Backup     key.Binding
 	Delete     key.Binding
 	Edit       key.Binding
-	Login      key.Binding
 	Open       key.Binding
 	Search     key.Binding
 	Project    key.Binding
@@ -65,10 +63,6 @@ func defaultKeyMap() keyMap {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "activate profile"),
 		),
-		Backup: key.NewBinding(
-			key.WithKeys("b"),
-			key.WithHelp("b", "re-capture the signed-in account"),
-		),
 		Delete: key.NewBinding(
 			key.WithKeys("d"),
 			key.WithHelp("d", "delete profile"),
@@ -76,10 +70,6 @@ func defaultKeyMap() keyMap {
 		Edit: key.NewBinding(
 			key.WithKeys("e"),
 			key.WithHelp("e", "edit profile"),
-		),
-		Login: key.NewBinding(
-			key.WithKeys("l"),
-			key.WithHelp("l", "login/refresh"),
 		),
 		Open: key.NewBinding(
 			key.WithKeys("o"),
@@ -119,7 +109,7 @@ func defaultKeyMap() keyMap {
 		),
 		Refresh: key.NewBinding(
 			key.WithKeys("r"),
-			key.WithHelp("r", "refresh limits"),
+			key.WithHelp("r", "refresh limits (and an expired token)"),
 		),
 		NewAccount: key.NewBinding(
 			key.WithKeys("n"),
@@ -153,8 +143,8 @@ func (k keyMap) ShortHelp() []key.Binding {
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Left, k.Right},
-		{k.Enter, k.Backup, k.Delete, k.Edit},
-		{k.Login, k.Open, k.Search, k.Project, k.Usage},
+		{k.Enter, k.Delete, k.Edit},
+		{k.Open, k.Search, k.Project, k.Usage},
 		{k.Detail, k.Refresh, k.NewAccount},
 		{k.Sync, k.Export, k.Import},
 		{k.Help, k.Quit},

@@ -465,3 +465,49 @@ func TestSelectionColourDiffersFromZebraStripe(t *testing.T) {
 		}
 	}
 }
+
+// r re-fetches the limits; it spends a refresh token only when there is a
+// reason to — an expired token or a provider that just refused it — and
+// only for the providers caam can refresh from outside.
+func TestRefreshKey_RefreshesTheTokenOnlyWhenItIsNeeded(t *testing.T) {
+	rec := &limitsRecorder{info: sampleLimits()}
+	m := modelWithTwoClaudeProfiles(Hooks{Limits: rec.fetch})
+	m.applyLimitsLoaded(limitsLoadedMsg{provider: "claude", profile: "a@example.com", info: sampleLimits()})
+
+	// A fresh Claude account: limits only.
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	m = updated.(Model)
+	if cmd == nil || !strings.Contains(m.statusMsg, "Refreshing limits") {
+		t.Fatalf("r should re-fetch limits: status=%q", m.statusMsg)
+	}
+	if e, cached := m.limits[limitsKey("claude", "a@example.com")]; cached && !e.loading {
+		t.Fatal("r should drop the cached limits so they are fetched again")
+	}
+
+	// Claude tokens are renewed by Claude Code itself: a refusal never
+	// makes r spend a refresh token.
+	m.applyLimitsLoaded(limitsLoadedMsg{provider: "claude", profile: "a@example.com", err: errors.New("unauthorized: status 401")})
+	if m.tokenNeedsRefresh("claude", "a@example.com") {
+		t.Fatal("claude tokens are not caam's to refresh")
+	}
+
+	// A Codex account the API refused: the token goes first.
+	m.profiles["codex"] = []Profile{{Name: "c@example.com", Provider: "codex", IsActive: true}}
+	m.syncProfilesPanel()
+	for m.currentProvider() != "codex" {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+		m = updated.(Model)
+	}
+	if m.tokenNeedsRefresh("codex", "c@example.com") {
+		t.Fatal("nothing is wrong with the token yet")
+	}
+	m.applyLimitsLoaded(limitsLoadedMsg{provider: "codex", profile: "c@example.com", err: errors.New("unauthorized: status 401")})
+	if !m.tokenNeedsRefresh("codex", "c@example.com") {
+		t.Fatal("a refused Codex token should be refreshed")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	m = updated.(Model)
+	if !strings.Contains(m.statusMsg, "token, then its limits") {
+		t.Fatalf("r should refresh the token first: status=%q", m.statusMsg)
+	}
+}

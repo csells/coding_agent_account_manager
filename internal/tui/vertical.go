@@ -47,15 +47,15 @@ const (
 )
 
 var (
-	tierWide   = layoutTier{longCells: true, allWindowColumns: true, showLastUsed: true, actions: []string{"enter", "b", "l", "e", "o", "d", "i", "r"}}
-	tierMedium = layoutTier{allWindowColumns: true, actions: []string{"enter", "b", "l", "e", "d", "i", "r"}}
-	tierNarrow = layoutTier{actions: []string{"enter", "b", "l", "i"}}
+	tierWide   = layoutTier{longCells: true, allWindowColumns: true, showLastUsed: true, actions: []string{"enter", "r", "e", "o", "d", "i"}}
+	tierMedium = layoutTier{allWindowColumns: true, actions: []string{"enter", "r", "e", "d", "i"}}
+	tierNarrow = layoutTier{actions: []string{"enter", "r", "i"}}
 )
 
 // actionLegend spells the expansion's key legend, in the tier's order.
 var actionLegend = map[string]string{
-	"enter": "switch to this account", "b": "re-capture", "l": "login/refresh",
-	"e": "edit", "o": "browser", "d": "delete", "i": "full card", "r": "refresh limits",
+	"enter": "switch to this account", "r": "refresh",
+	"e": "edit", "o": "browser", "d": "delete", "i": "full card",
 }
 
 func (m Model) tier() layoutTier {

@@ -297,10 +297,8 @@ func TestDefaultKeyMap(t *testing.T) {
 
 	t.Run("Action keys initialized", func(t *testing.T) {
 		assertKeyBinding(t, km.Enter, "Enter")
-		assertKeyBinding(t, km.Backup, "Backup")
 		assertKeyBinding(t, km.Delete, "Delete")
 		assertKeyBinding(t, km.Edit, "Edit")
-		assertKeyBinding(t, km.Login, "Login")
 		assertKeyBinding(t, km.Open, "Open")
 		assertKeyBinding(t, km.Search, "Search")
 		assertKeyBinding(t, km.Project, "Project")
@@ -363,14 +361,14 @@ func TestKeyMapFullHelp(t *testing.T) {
 		t.Errorf("Navigation group should have 4 bindings, got %d", len(fullHelp[0]))
 	}
 
-	// Group 2: Primary actions (Enter, Backup, Delete, Edit)
-	if len(fullHelp[1]) != 4 {
-		t.Errorf("Primary actions group should have 4 bindings, got %d", len(fullHelp[1]))
+	// Group 2: Primary actions (Enter, Delete, Edit)
+	if len(fullHelp[1]) != 3 {
+		t.Errorf("Primary actions group should have 3 bindings, got %d", len(fullHelp[1]))
 	}
 
-	// Group 3: Secondary actions (Login, Open, Search, Project, Usage)
-	if len(fullHelp[2]) != 5 {
-		t.Errorf("Secondary actions group should have 5 bindings, got %d", len(fullHelp[2]))
+	// Group 3: Secondary actions (Open, Search, Project, Usage)
+	if len(fullHelp[2]) != 4 {
+		t.Errorf("Secondary actions group should have 4 bindings, got %d", len(fullHelp[2]))
 	}
 
 	// Group 4: Account view (Detail card, Refresh limits, New account)
@@ -403,10 +401,8 @@ func TestKeyBindingsHaveKeys(t *testing.T) {
 		{"Right", km.Right},
 		{"Tab", km.Tab},
 		{"Enter", km.Enter},
-		{"Backup", km.Backup},
 		{"Delete", km.Delete},
 		{"Edit", km.Edit},
-		{"Login", km.Login},
 		{"Open", km.Open},
 		{"Search", km.Search},
 		{"Project", km.Project},
@@ -444,10 +440,8 @@ func TestKeyBindingsHaveHelp(t *testing.T) {
 		{"Right", km.Right, "next provider"},
 		{"Tab", km.Tab, "cycle providers"},
 		{"Enter", km.Enter, "activate profile"},
-		{"Backup", km.Backup, "re-capture the signed-in account"},
 		{"Delete", km.Delete, "delete profile"},
 		{"Edit", km.Edit, "edit profile"},
-		{"Login", km.Login, "login/refresh"},
 		{"Open", km.Open, "open in browser"},
 		{"Search", km.Search, "search profiles"},
 		{"Project", km.Project, "set project association"},

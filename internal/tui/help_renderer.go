@@ -107,7 +107,7 @@ func GetContextualHints(state viewState) []ContextualHint {
 		return append([]ContextualHint{
 			{"↑↓", "Navigate"},
 			{"Enter", "Activate"},
-			{"b", "Backup"},
+			{"n", "New login"},
 			{"/", "Search"},
 			{"u", "Usage"},
 		}, base...)
@@ -219,7 +219,8 @@ func MainHelpMarkdown() string {
 | Key | Action |
 |-----|--------|
 | Enter | Activate selected profile (instant switch!) |
-| l | Login/refresh OAuth token |
+| r | Refresh limits, and an expired token first |
+| n | Log in to a new account |
 | e | Edit profile settings |
 | o | Open account page in browser |
 | d | Delete profile (with confirmation) |
@@ -228,7 +229,6 @@ func MainHelpMarkdown() string {
 ### Vault & Data
 | Key | Action |
 |-----|--------|
-| b | Backup current auth to a new profile |
 | u | Toggle usage stats panel (1/2/3/4 for time ranges) |
 | S | Toggle sync panel |
 | E | Export vault to encrypted bundle |

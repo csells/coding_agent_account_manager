@@ -814,7 +814,7 @@ again, so a provider with many accounts is one list to scroll through:
 │ ● csells@sellsbro…   🟢 6h left 88% left · 8:50 PM 78% · Wed    64% · Wed │
 │   ├─ oauth · max · Healthy · token 5h47m                                  │
 │   ├─ ~/vault/claude/csells@sellsbrothers.com                              │
-│   └─ enter switch   b re-capture   l login   e edit   d delete   i card    │
+│   └─ enter switch   r refresh   e edit   o browser   d delete   i card       │
 ╰──────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -833,10 +833,11 @@ replace); the terminal goes to the provider's own login
 returns, the live credential is captured under the account it now belongs
 to and selected, which puts a first-time provider on the strip. A
 provider whose credential carries no identity asks for a profile name
-instead. `b` re-captures the selected account from the live credential,
-which is only ever the signed-in account's: on any other account it says
-who is signed in and does nothing. `i` opens the full card as an overlay
-and `r` refreshes the limits shown.
+instead. `r` refreshes what is on screen: the limits are re-fetched, and
+when the selected account's token has expired or the provider just
+refused it, the token is refreshed first (Codex and Gemini; the other
+tools renew their own) and the limits follow. `i` opens the full card as
+an overlay.
 Limits are fetched for the accounts on screen — the selected provider's
 rows and every provider's active account — at most once a minute each,
 failures included, through the same credential resolution as

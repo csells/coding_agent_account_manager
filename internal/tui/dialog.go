@@ -859,10 +859,9 @@ func NewCommandPaletteDialog(title string, commands []CommandAction) *CommandPal
 func DefaultCommands() []CommandAction {
 	return []CommandAction{
 		{Name: "Activate Profile", Description: "Switch to the selected profile", Shortcut: "enter", Action: "activate"},
-		{Name: "Backup Current Auth", Description: "Create a backup of current auth", Shortcut: "b", Action: "backup"},
 		{Name: "Delete Profile", Description: "Delete the selected profile", Shortcut: "d", Action: "delete"},
 		{Name: "Edit Profile", Description: "Edit profile details", Shortcut: "e", Action: "edit"},
-		{Name: "Login/Refresh", Description: "Refresh authentication", Shortcut: "l", Action: "login"},
+		{Name: "Refresh", Description: "Re-fetch limits, and the token first when it has expired", Shortcut: "r", Action: "refresh"},
 		{Name: "Open in Browser", Description: "Open provider in browser", Shortcut: "o", Action: "open"},
 		{Name: "Set Project Association", Description: "Link profile to current project", Shortcut: "p", Action: "project"},
 		{Name: "Usage Statistics", Description: "View usage stats", Shortcut: "u", Action: "usage"},

@@ -996,12 +996,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.showRefreshSuccess(msg.profile, time.Time{}) // TODO: pass actual expiry time
-		// Refresh profiles to update any changed state
+		// The new token changes what the limits API will say: fetch again.
+		delete(m.limits, limitsKey(msg.provider, msg.profile))
 		ctx := refreshContext{
 			provider:        msg.provider,
 			selectedProfile: msg.profile,
 		}
-		return m, m.refreshProfiles(ctx)
+		return m, tea.Batch(m.refreshProfiles(ctx), m.limitsPrefetchCmd())
 
 	case errMsg:
 		m.err = msg.err
@@ -1123,8 +1124,7 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.Refresh):
-		m.limitsRefresh()
-		return m, m.limitsPrefetchCmd()
+		return m.handleRefresh()
 
 	case key.Matches(msg, m.keys.NewAccount):
 		return m.handleNewAccount()
@@ -1207,12 +1207,6 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Delete):
 		return m.handleDeleteProfile()
-
-	case key.Matches(msg, m.keys.Backup):
-		return m.handleBackupProfile()
-
-	case key.Matches(msg, m.keys.Login):
-		return m.handleLoginProfile()
 
 	case key.Matches(msg, m.keys.Open):
 		return m.handleOpenInBrowser()
@@ -1389,43 +1383,6 @@ func (m Model) handleDeleteProfile() (tea.Model, tea.Cmd) {
 	m.pendingAction = confirmDelete
 	m.statusMsg = fmt.Sprintf("Delete '%s'? (y/n)", info.Name)
 	return m, nil
-}
-
-// handleBackupProfile initiates backup of the current auth state to a named profile.
-func (m Model) handleBackupProfile() (tea.Model, tea.Cmd) {
-	provider := m.currentProvider()
-	info := m.selectedProfileInfo()
-	if provider == "" || info == nil {
-		m.statusMsg = "No account selected; press n to log in to one"
-		return m, nil
-	}
-	// b re-captures the selected account from the live credential, which
-	// is only that account's when it is the one signed in. Anything else
-	// would file another account's tokens under this name.
-	if !info.IsActive {
-		active := ""
-		for _, p := range m.profiles[provider] {
-			if p.IsActive {
-				active = p.Name
-			}
-		}
-		msg := fmt.Sprintf("%s is not the signed-in %s account, so there is nothing live to re-capture; switch to it first", info.Name, providerLabel(provider))
-		if active != "" {
-			msg = fmt.Sprintf("%s is signed in, not %s; re-capture works on the signed-in account (switch first, or press n to log in)", active, info.Name)
-		}
-		m.setNotice(provider, info.Name, msg, true)
-		m.statusMsg = "Nothing to re-capture"
-		return m, nil
-	}
-	if err := m.captureLive(provider, info.Name); err != nil {
-		m.setNotice(provider, info.Name, "Re-capture failed: "+err.Error(), true)
-		m.statusMsg = "Re-capture failed: " + err.Error()
-		return m, m.addToast(m.statusMsg, StatusError)
-	}
-	delete(m.limits, limitsKey(provider, info.Name))
-	m.setNotice(provider, info.Name, "Re-captured "+info.Name+" from the live credential", false)
-	m.statusMsg = fmt.Sprintf("Re-captured %s/%s", provider, info.Name)
-	return m, tea.Batch(m.addToast(m.statusMsg, StatusSuccess), m.refreshProfiles(refreshContext{provider: provider, selectedProfile: info.Name}))
 }
 
 // openBackupNameDialog asks for a profile name to capture provider's live
@@ -1688,19 +1645,42 @@ func (m Model) executeBackup(profileName string) (tea.Model, tea.Cmd) {
 	return m, m.refreshProfiles(refreshContext{provider: provider, selectedProfile: profileName})
 }
 
-// handleLoginProfile initiates login/refresh for the selected profile.
-func (m Model) handleLoginProfile() (tea.Model, tea.Cmd) {
-	info := m.selectedProfileInfo()
-	if info == nil {
-		m.statusMsg = "No profile selected"
-		return m, nil
-	}
+// handleRefresh (r) makes the selected account's figures fresh: the limits
+// on screen are re-fetched, and when the account's token has expired or
+// the provider just refused it, the token is refreshed first and the
+// limits follow. A refresh spends the refresh token (the families rotate),
+// so it is not done on every keypress; it waits for a reason.
+func (m Model) handleRefresh() (tea.Model, tea.Cmd) {
 	provider := m.currentProvider()
+	info := m.selectedProfileInfo()
+	if info != nil && m.tokenNeedsRefresh(provider, info.Name) {
+		m.statusMsg = fmt.Sprintf("Refreshing %s's token, then its limits…", info.Name)
+		return m, m.doRefreshProfile(provider, info.Name)
+	}
+	m.limitsRefresh()
+	m.statusMsg = "Refreshing limits…"
+	return m, m.limitsPrefetchCmd()
+}
 
-	m.statusMsg = fmt.Sprintf("Refreshing %s token...", info.Name)
-
-	// Return a command that performs the async refresh
-	return m, m.doRefreshProfile(provider, info.Name)
+// tokenNeedsRefresh reports whether r should refresh the account's token
+// before re-fetching its limits: only for providers caam can refresh
+// (Codex and Gemini; the others renew their own tokens or cannot be
+// refreshed from outside), and only when the token is past its expiry or
+// the last limits fetch was refused as unauthorized.
+func (m Model) tokenNeedsRefresh(provider, name string) bool {
+	switch provider {
+	case "codex", "gemini":
+	default:
+		return false
+	}
+	if h := m.healthFor(provider, name); h != nil && !h.TokenExpiresAt.IsZero() && time.Now().After(h.TokenExpiresAt) {
+		return true
+	}
+	if e, ok := m.limits[limitsKey(provider, name)]; ok && e.err != nil {
+		msg := strings.ToLower(e.err.Error())
+		return strings.Contains(msg, "unauthorized") || strings.Contains(msg, "expired")
+	}
+	return false
 }
 
 // doRefreshProfile returns a tea.Cmd that performs the token refresh.
@@ -2012,14 +1992,12 @@ func (m Model) handleCommandPaletteAction(action string) (tea.Model, tea.Cmd) {
 	switch action {
 	case "activate":
 		return m.handleActivateProfile()
-	case "backup":
-		return m.handleBackupProfile()
 	case "delete":
 		return m.handleDeleteProfile()
 	case "edit":
 		return m.handleEditProfile()
-	case "login":
-		return m.handleLoginProfile()
+	case "refresh":
+		return m.handleRefresh()
 	case "open":
 		return m.handleOpenInBrowser()
 	case "project":

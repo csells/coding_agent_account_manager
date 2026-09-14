@@ -388,7 +388,7 @@ func (p *DetailPanel) View() string {
 		desc string
 	}{
 		{"Enter", "Activate profile"},
-		{"l", "Login/refresh"},
+		{"r", "Refresh"},
 		{"e", "Edit profile"},
 		{"o", "Open in browser"},
 		{"d", "Delete profile"},

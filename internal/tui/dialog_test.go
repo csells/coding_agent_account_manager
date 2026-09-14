@@ -517,16 +517,15 @@ func TestCommandPaletteDialog_Filter(t *testing.T) {
 	commands := DefaultCommands()
 	d := NewCommandPaletteDialog("Test Palette", commands)
 
-	// Filter by typing "back"
-	d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-	d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
-	d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
-	d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	// Filter by typing "dele"
+	for _, r := range "dele" {
+		d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
 
-	// The filter should narrow down to backup command
+	// The filter should narrow down to the delete command
 	view := d.View()
-	if !strings.Contains(view, "Backup") {
-		t.Error("expected filter to show backup command")
+	if !strings.Contains(view, "Delete") || strings.Contains(view, "Activate") {
+		t.Errorf("expected the filter to leave only the delete command:\n%s", view)
 	}
 }
 
