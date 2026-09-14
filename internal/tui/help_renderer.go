@@ -211,7 +211,7 @@ func MainHelpMarkdown() string {
 | ↑/k | Move up |
 | ↓/j | Move down |
 | ←/h | Previous provider |
-| → | Next provider |
+| →/l | Next provider |
 | Tab | Cycle providers |
 | / | Search accounts |
 

@@ -52,8 +52,8 @@ func defaultKeyMap() keyMap {
 			key.WithHelp("←/h", "previous provider"),
 		),
 		Right: key.NewBinding(
-			key.WithKeys("right"),
-			key.WithHelp("→", "next provider"),
+			key.WithKeys("right", "l"),
+			key.WithHelp("→/l", "next provider"),
 		),
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),

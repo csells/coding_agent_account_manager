@@ -1115,15 +1115,17 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleReloginConfirmKeys(msg)
 	}
 
-	// The detail card overlay: ↑/↓ keep working underneath it; anything
-	// else closes it (and, for i/esc/q, does nothing more).
+	// The detail card overlay: ↑/↓ keep working underneath it; i, esc and
+	// q close it and do nothing more; any other key closes it and then
+	// means what it means in the list (n opens the picker, enter switches).
+	// The Cancel binding is not consulted here: it includes n.
 	if m.showDetailCard {
 		switch {
 		case msg.String() == "ctrl+c":
 			// Quit is quit; the card does not swallow it.
 		case key.Matches(msg, m.keys.Up), key.Matches(msg, m.keys.Down):
 			// fall through to the list handling below
-		case key.Matches(msg, m.keys.Detail), key.Matches(msg, m.keys.Cancel), key.Matches(msg, m.keys.Quit):
+		case key.Matches(msg, m.keys.Detail), msg.Type == tea.KeyEscape, key.Matches(msg, m.keys.Quit):
 			m.showDetailCard = false
 			return m, nil
 		default:
@@ -2108,6 +2110,14 @@ func (m Model) handleCommandPaletteAction(action string) (tea.Model, tea.Cmd) {
 	switch action {
 	case "activate":
 		return m.handleActivateProfile()
+	case "newlogin":
+		return m.handleNewAccount()
+	case "detail":
+		if m.selectedProfileInfo() != nil {
+			m.showDetailCard = true
+		}
+	case "search":
+		return m.handleEnterSearchMode()
 	case "delete":
 		return m.handleDeleteProfile()
 	case "edit":

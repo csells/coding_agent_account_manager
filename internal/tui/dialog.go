@@ -858,16 +858,19 @@ func NewCommandPaletteDialog(title string, commands []CommandAction) *CommandPal
 // DefaultCommands returns the default set of palette commands.
 func DefaultCommands() []CommandAction {
 	return []CommandAction{
-		{Name: "Activate Profile", Description: "Switch to the selected profile", Shortcut: "enter", Action: "activate"},
-		{Name: "Delete Profile", Description: "Delete the selected profile", Shortcut: "d", Action: "delete"},
-		{Name: "Edit Profile", Description: "Edit profile details", Shortcut: "e", Action: "edit"},
+		{Name: "Switch Account", Description: "Switch to the selected account", Shortcut: "enter", Action: "activate"},
+		{Name: "New Login", Description: "Log in to a new account", Shortcut: "n", Action: "newlogin"},
+		{Name: "Full Card", Description: "Show the selected account's full card", Shortcut: "i", Action: "detail"},
+		{Name: "Search", Description: "Search accounts by name", Shortcut: "/", Action: "search"},
 		{Name: "Refresh", Description: "Re-fetch limits, and the token first when it has expired", Shortcut: "r", Action: "refresh"},
+		{Name: "Delete Account", Description: "Delete the selected account from the vault", Shortcut: "d", Action: "delete"},
+		{Name: "Edit Account", Description: "Edit account details", Shortcut: "e", Action: "edit"},
 		{Name: "Open in Browser", Description: "Open provider in browser", Shortcut: "o", Action: "open"},
-		{Name: "Set Project Association", Description: "Link profile to current project", Shortcut: "p", Action: "project"},
+		{Name: "Set Project Association", Description: "Link account to current project", Shortcut: "p", Action: "project"},
 		{Name: "Usage Statistics", Description: "View usage stats", Shortcut: "u", Action: "usage"},
 		{Name: "Sync Pool", Description: "Manage sync pool", Shortcut: "S", Action: "sync"},
-		{Name: "Export Vault", Description: "Export profiles to vault", Shortcut: "E", Action: "export"},
-		{Name: "Import Bundle", Description: "Import profiles from bundle", Shortcut: "I", Action: "import"},
+		{Name: "Export Vault", Description: "Export accounts to a zip bundle (not encrypted)", Shortcut: "E", Action: "export"},
+		{Name: "Import Bundle", Description: "Import accounts from a bundle", Shortcut: "I", Action: "import"},
 		{Name: "Help", Description: "Show help screen", Shortcut: "?", Action: "help"},
 	}
 }
