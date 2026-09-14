@@ -511,12 +511,6 @@ func stealthDelay(ctx context.Context, spmCfg *config.SPMConfig) error {
 	return nil
 }
 
-// logProfileSwitch records a switch in the activity log; see
-// switcher.LogSwitch.
-func logProfileSwitch(db *caamdb.DB, tool, outgoing, incoming string, details map[string]any) {
-	switcher.LogSwitch(db, tool, outgoing, incoming, details)
-}
-
 func resolveActivateProfile(tool string, spmCfg *config.SPMConfig) (profileName string, source string, err error) {
 	// Prefer project association (if enabled).
 	if spmCfg == nil {

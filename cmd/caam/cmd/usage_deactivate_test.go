@@ -6,6 +6,7 @@ import (
 	"time"
 
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 )
 
 // TestLogProfileSwitch_EmitsDeactivateForOutgoing verifies issue #31: switching
@@ -32,7 +33,7 @@ func TestLogProfileSwitch_EmitsDeactivateForOutgoing(t *testing.T) {
 	}
 
 	// Switch from old -> new.
-	logProfileSwitch(db, "codex", "old", "new", map[string]any{"selection_source": "test"})
+	switcher.LogSwitch(db, "codex", "old", "new", map[string]any{"selection_source": "test"})
 
 	oldStats, err := db.GetStats("codex", "old")
 	if err != nil {
@@ -69,7 +70,7 @@ func TestLogProfileSwitch_SkipsSystemOutgoing(t *testing.T) {
 		t.Fatalf("seed activation: %v", err)
 	}
 
-	logProfileSwitch(db, "codex", "_original", "new", nil)
+	switcher.LogSwitch(db, "codex", "_original", "new", nil)
 
 	sysStats, err := db.GetStats("codex", "_original")
 	if err != nil {
