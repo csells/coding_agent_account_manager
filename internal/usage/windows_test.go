@@ -82,28 +82,34 @@ func TestWindowLeftText_LocalResetPhrasing(t *testing.T) {
 	}
 }
 
-// WindowLeftShort is the table cell form of the same sentence: the share
-// left and the local clock, joined by a middle dot as the dashboard's
-// wide tier spells it.
-func TestWindowLeftShort_CompactCell(t *testing.T) {
+// LeftText and ResetText are the two halves of that sentence, one per
+// table column: what is left of the window, and the local clock it resets
+// at. A window with nothing to say in a column shows "-" there.
+func TestLeftTextAndResetText_AreTheTwoTableColumns(t *testing.T) {
 	loc := time.FixedZone("PDT", -7*3600)
 	now := time.Date(2026, 9, 13, 13, 40, 0, 0, loc)
 	cases := []struct {
-		w    UsageWindow
-		want string
+		w         UsageWindow
+		left, rst string
 	}{
-		{UsageWindow{UsedPercent: 12, ResetsAt: now.Add(4*time.Hour + 30*time.Minute)}, "88% left · 6:10 PM"},
-		{UsageWindow{UsedPercent: 50, ResetsAt: time.Date(2026, 9, 15, 17, 0, 0, 0, loc)}, "50% left · Tue 5:00 PM"},
-		{UsageWindow{Utilization: 0.9}, "10% left"},
-		{UsageWindow{UsedPercent: 40, Rolled: true}, "100% left (reset)"},
+		{UsageWindow{UsedPercent: 12, ResetsAt: now.Add(4*time.Hour + 30*time.Minute)}, "88% left", "6:10 PM"},
+		{UsageWindow{UsedPercent: 50, ResetsAt: time.Date(2026, 9, 15, 17, 0, 0, 0, loc)}, "50% left", "Tue 5:00 PM"},
+		{UsageWindow{UsedPercent: 70, ResetsAt: time.Date(2026, 9, 20, 8, 45, 0, 0, loc)}, "30% left", "Sep 20 8:45 AM"},
+		{UsageWindow{Utilization: 0.9}, "10% left", "-"},
+		{UsageWindow{UsedPercent: 130, ResetsAt: now.Add(time.Hour)}, "0% left", "2:40 PM"},
+		{UsageWindow{UsedPercent: 40, Rolled: true}, "100% left (reset)", "-"},
+		{UsageWindow{UsedPercent: 40, ResetsAt: now.Add(-time.Minute)}, "60% left", "now"},
 	}
 	for _, c := range cases {
-		if got := WindowLeftShort(&c.w, now); got != c.want {
-			t.Errorf("WindowLeftShort(%+v) = %q, want %q", c.w, got, c.want)
+		if got := LeftText(&c.w); got != c.left {
+			t.Errorf("LeftText(%+v) = %q, want %q", c.w, got, c.left)
+		}
+		if got := ResetText(&c.w, now); got != c.rst {
+			t.Errorf("ResetText(%+v) = %q, want %q", c.w, got, c.rst)
 		}
 	}
-	if WindowLeftShort(nil, now) != "-" {
-		t.Errorf("nil window should render as -")
+	if LeftText(nil) != "-" || ResetText(nil, now) != "-" {
+		t.Errorf("nil window should render as - in both columns")
 	}
 }
 

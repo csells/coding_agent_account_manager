@@ -30,11 +30,12 @@ import (
 // layoutTier is what the terminal's width allows the accounts table to
 // show. One table, so a change to a tier is one edit.
 type layoutTier struct {
-	// longCells spells a window cell "53% left · 6:10 PM" rather than
-	// "53% · 6:10 PM".
+	// longCells spells a window's figure "53% left" rather than "53%".
+	// The clock it resets at is always its own RESETS column beside it.
 	longCells bool
-	// allWindowColumns gives every reported window its own column; else
-	// the table shows only the TIGHTEST one and the expansion lists them.
+	// allWindowColumns gives every reported window its own pair of
+	// columns (figure and RESETS); else the table shows only the TIGHTEST
+	// one, as the same pair, and the expansion lists them all.
 	allWindowColumns bool
 	showLastUsed     bool
 	// actions are the keys the expansion's legend explains.
@@ -503,18 +504,29 @@ type accountColumn struct {
 	width  int
 	cells  []string // one per profile, unstyled
 	styles []lipgloss.Style
-	// window is set for a rate-limit column (its usage column name).
+	// window is set for a rate-limit column (its usage column name); a
+	// window is two columns, its figure and — resets — the clock it
+	// resets at.
 	window string
+	resets bool
 	// prio is the drop order when the table is too wide: higher goes
 	// first; NAME and STATUS (prioKeep) never go.
 	prio int
 }
 
 const (
-	prioKeep    = 0
-	prioWindow  = 1 // + column rank, so later windows go first
+	prioKeep = 0
+	// prioWindow + 2×rank for a window's figure, one more for its RESETS
+	// half: later windows go first, and a window loses its clock before
+	// its figure.
+	prioWindow  = 1
 	prioLastUse = 100
 )
+
+// newColumn is an accounts-table column with a cell per profile.
+func newColumn(header string, n, prio int) accountColumn {
+	return accountColumn{header: header, cells: make([]string, n), styles: make([]lipgloss.Style, n), prio: prio}
+}
 
 // renderAccountsPane draws the selected provider's accounts in exactly
 // height lines.
@@ -582,11 +594,18 @@ func (m Model) renderAccountsPane(g paneGeometry, height int) string {
 		tableRows = 1
 	}
 	cols := m.accountColumns(provider, profiles, tier, inner, now)
-	columnsShown := make(map[string]bool, len(cols))
+	// A window counts as shown only with both its columns on screen; one
+	// that lost its RESETS half is listed in the expansion instead, so
+	// when it resets stays reachable.
+	halves := make(map[string]int, len(cols))
 	for _, c := range cols {
 		if c.window != "" {
-			columnsShown[c.window] = true
+			halves[c.window]++
 		}
+	}
+	columnsShown := make(map[string]bool, len(halves))
+	for window, n := range halves {
+		columnsShown[window] = n == 2
 	}
 	headerCells := make([]string, len(cols))
 	for i, c := range cols {
@@ -663,8 +682,8 @@ func (m Model) accountColumns(provider string, profiles []ProfileInfo, tier layo
 	ps := m.profilesPanel.styles
 	n := len(profiles)
 
-	name := accountColumn{header: "NAME", cells: make([]string, n), styles: make([]lipgloss.Style, n), prio: prioKeep}
-	status := accountColumn{header: "STATUS", cells: make([]string, n), styles: make([]lipgloss.Style, n), prio: prioKeep}
+	name := newColumn("NAME", n, prioKeep)
+	status := newColumn("STATUS", n, prioKeep)
 	for i, p := range profiles {
 		mark := "  "
 		if p.IsActive {
@@ -681,24 +700,37 @@ func (m Model) accountColumns(provider string, profiles []ProfileInfo, tier layo
 	cols := []accountColumn{name, status}
 
 	if m.hooks.Limits != nil {
+		// Every window is two columns: its figure under the window's name
+		// and the clock it resets at under RESETS beside it. The RESETS
+		// half carries the higher prio, so a pane too narrow for both drops
+		// the clock first and keeps the figure.
 		if tier.allWindowColumns {
 			for k, col := range m.windowColumnsFor(provider, profiles) {
-				wc := accountColumn{header: col, window: col, cells: make([]string, n), styles: make([]lipgloss.Style, n), prio: prioWindow + k}
+				figure := newColumn(col, n, prioWindow+2*k)
+				resets := newColumn("RESETS", n, prioWindow+2*k+1)
+				figure.window, resets.window, resets.resets = col, col, true
 				for i, p := range profiles {
-					wc.cells[i], wc.styles[i] = m.windowCell(provider, p.Name, col, tier, now)
+					figure.cells[i], resets.cells[i], figure.styles[i] = m.windowCell(provider, p.Name, col, tier, now)
+					resets.styles[i] = figure.styles[i]
 				}
-				cols = append(cols, wc)
+				cols = append(cols, figure, resets)
 			}
 		} else {
-			tight := accountColumn{header: "TIGHTEST", cells: make([]string, n), styles: make([]lipgloss.Style, n), prio: prioWindow}
+			// The narrow tier shows one window, the tightest, as the same
+			// pair; below the width that fits both, TIGHTEST stands alone
+			// and the expansion (which lists every window here) says when
+			// it resets.
+			tight := newColumn("TIGHTEST", n, prioWindow)
+			resets := newColumn("RESETS", n, prioWindow+1)
 			for i, p := range profiles {
-				tight.cells[i], tight.styles[i] = m.tightestCell(provider, p.Name, now)
+				tight.cells[i], resets.cells[i], tight.styles[i] = m.tightestCell(provider, p.Name, now)
+				resets.styles[i] = tight.styles[i]
 			}
-			cols = append(cols, tight)
+			cols = append(cols, tight, resets)
 		}
 	}
 	if tier.showLastUsed {
-		lu := accountColumn{header: "LAST USED", cells: make([]string, n), styles: make([]lipgloss.Style, n), prio: prioLastUse}
+		lu := newColumn("LAST USED", n, prioLastUse)
 		for i, p := range profiles {
 			lu.cells[i] = formatRelativeTime(p.LastUsed)
 			lu.styles[i] = ps.RowMetadata
@@ -773,43 +805,44 @@ func (m Model) windowColumnsFor(provider string, profiles []ProfileInfo) []strin
 	return cols
 }
 
-// windowCell renders one account's figure for a window column.
-func (m Model) windowCell(provider, profile, column string, tier layoutTier, now time.Time) (string, lipgloss.Style) {
+// windowCell renders one account's two cells for a window column: the
+// figure ("82% left", or "82%" in a tier without longCells, "*" when
+// stale) and the clock it resets at for the RESETS column beside it.
+func (m Model) windowCell(provider, profile, column string, tier layoutTier, now time.Time) (figure, resets string, style lipgloss.Style) {
 	e, ok := m.limits[limitsKey(provider, profile)]
 	if !ok || (e.loading && e.info == nil) {
-		return "…", m.styles.StatusText
+		return "…", "…", m.styles.StatusText
 	}
 	for _, c := range usage.WindowsOf(e.info) {
 		if c.Column != column {
 			continue
 		}
 		left := usage.PercentLeft(c.Window)
-		text := fmt.Sprintf("%d%%", left)
+		figure = fmt.Sprintf("%d%%", left)
 		if tier.longCells {
-			text += " left"
-		}
-		if !c.Window.ResetsAt.IsZero() {
-			text += " · " + usage.LocalReset(c.Window.ResetsAt, now)
+			figure += " left"
 		}
 		if e.stale {
-			text += " *"
+			figure += " *"
 		}
-		return text, m.percentStyle(left)
+		return figure, usage.ResetText(c.Window, now), m.percentStyle(left)
 	}
-	return "-", m.styles.StatusText
+	return "-", "-", m.styles.StatusText
 }
 
-// tightestCell is the narrow tier's one figure: the window closest to its cap.
-func (m Model) tightestCell(provider, profile string, now time.Time) (string, lipgloss.Style) {
+// tightestCell is the narrow tier's one window, the one closest to its
+// cap: its figure with the window's short name ("Fable 10%") and the clock
+// it resets at for the RESETS column beside it.
+func (m Model) tightestCell(provider, profile string, now time.Time) (figure, resets string, style lipgloss.Style) {
 	e, ok := m.limits[limitsKey(provider, profile)]
 	if !ok || (e.loading && e.info == nil) {
-		return "…", m.styles.StatusText
+		return "…", "…", m.styles.StatusText
 	}
 	if e.info == nil || e.info.MostConstrainedWindow() == nil {
 		if e.err != nil {
-			return shortLimitsError(e.err.Error()), m.styles.StatusWarning
+			return shortLimitsError(e.err.Error()), "-", m.styles.StatusWarning
 		}
-		return "-", m.styles.StatusText
+		return "-", "-", m.styles.StatusText
 	}
 	w := e.info.MostConstrainedWindow()
 	label := ""
@@ -819,11 +852,7 @@ func (m Model) tightestCell(provider, profile string, now time.Time) (string, li
 		}
 	}
 	left := usage.PercentLeft(w)
-	text := fmt.Sprintf("%s %d%%", label, left)
-	if !w.ResetsAt.IsZero() {
-		text += " · " + usage.LocalReset(w.ResetsAt, now)
-	}
-	return text, m.percentStyle(left)
+	return fmt.Sprintf("%s %d%%", label, left), usage.ResetText(w, now), m.percentStyle(left)
 }
 
 // expandedLines is the tree of detail lines under the selected account:

@@ -376,8 +376,8 @@ func TestVerticalLayout_ProvidersAboveAccountsWithWindowColumns(t *testing.T) {
 		t.Fatalf("providers strip must sit above the accounts pane:\n%s", view)
 	}
 	for _, want := range []string{"▸ Claude Code (2)", "● a@example.com", "5h 82%", "wk 50%", "Fable 10%", "Agents (1)",
-		"NAME", "STATUS", "5-HOUR", "WEEKLY", "WEEKLY FABLE", "LAST USED",
-		"82% left · ", "50% left · ", "10% left", "enter", "switch to this account"} {
+		"NAME", "STATUS", "5-HOUR", "RESETS", "WEEKLY", "WEEKLY FABLE", "LAST USED",
+		"82% left", "50% left", "10% left", "enter", "switch to this account"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("wide view lacks %q:\n%s", want, view)
 		}
@@ -385,6 +385,77 @@ func TestVerticalLayout_ProvidersAboveAccountsWithWindowColumns(t *testing.T) {
 	if lipgloss.Height(m.View()) > 40 {
 		t.Errorf("view taller than the terminal: %d", lipgloss.Height(m.View()))
 	}
+}
+
+// Every window is two columns: what is left under the window's name and
+// the local clock it resets at under a RESETS column beside it, with the
+// clock aligned under that header rather than appended to the figure.
+func TestVerticalLayout_WideTierShowsLeftAndResetsColumnsPerWindow(t *testing.T) {
+	m := modelWithLimits(t, 159, 42)
+	view := ansi.Strip(m.View())
+	header, row := tableLines(t, view, "a@example.com")
+
+	assertInOrder(t, header, "NAME", "STATUS", "5-HOUR", "RESETS", "WEEKLY", "RESETS", "WEEKLY FABLE", "RESETS", "LAST USED")
+	if strings.Count(header, "RESETS") != 3 {
+		t.Errorf("wide tier should head a RESETS column per window:\n%s", header)
+	}
+	info := m.limits[limitsKey("claude", "a@example.com")].info
+	now := time.Now()
+	primary := usage.LocalReset(info.PrimaryWindow.ResetsAt, now)
+	weekly := usage.LocalReset(info.SecondaryWindow.ResetsAt, now)
+	assertInOrder(t, row, "● a@example.com", "82% left", primary, "50% left", weekly, "10% left", "-")
+	if strings.Contains(row, " · ") {
+		t.Errorf("wide tier still joins the figure and the clock in one cell:\n%s", row)
+	}
+	// The clock sits under the first RESETS header, not tucked after the figure.
+	if hc, rc := columnOf(header, "RESETS"), columnOf(row, primary); hc != rc {
+		t.Errorf("5-hour reset clock at column %d, RESETS header at %d:\n%s\n%s", rc, hc, header, row)
+	}
+	for _, line := range strings.Split(m.View(), "\n") {
+		if lipgloss.Width(line) > 159 {
+			t.Fatalf("line wider than the terminal (%d): %q", lipgloss.Width(line), ansi.Strip(line))
+		}
+	}
+}
+
+// tableLines finds the accounts table's header and the row for an account.
+func tableLines(t *testing.T, view, account string) (header, row string) {
+	t.Helper()
+	for _, line := range strings.Split(view, "\n") {
+		switch {
+		case strings.Contains(line, "NAME") && strings.Contains(line, "STATUS"):
+			header = line
+		case strings.Contains(line, account) && !strings.Contains(line, "vault"):
+			row = line
+		}
+	}
+	if header == "" || row == "" {
+		t.Fatalf("no table header or row for %s:\n%s", account, view)
+	}
+	return header, row
+}
+
+// assertInOrder checks that each want appears after the previous one.
+func assertInOrder(t *testing.T, line string, wants ...string) {
+	t.Helper()
+	at := 0
+	for _, w := range wants {
+		i := strings.Index(line[at:], w)
+		if i < 0 {
+			t.Errorf("%q missing (in order) from:\n%s", w, line)
+			return
+		}
+		at += i + len(w)
+	}
+}
+
+// columnOf is the screen column a substring starts at.
+func columnOf(line, s string) int {
+	i := strings.Index(line, s)
+	if i < 0 {
+		return -1
+	}
+	return lipgloss.Width(line[:i])
 }
 
 func TestVerticalLayout_SelectedAccountExpandsInPlace(t *testing.T) {
@@ -444,8 +515,14 @@ func TestVerticalLayout_MediumDropsLastUsedAndShortensCells(t *testing.T) {
 	if strings.Contains(view, "LAST USED") {
 		t.Errorf("medium tier should drop LAST USED:\n%s", view)
 	}
-	if !strings.Contains(view, "82% · ") || strings.Contains(view, "82% left") {
-		t.Errorf("medium tier should show short window cells:\n%s", view)
+	// The figure is short ("82%", no "left") and the clock still has its own
+	// RESETS column beside every window.
+	header, row := tableLines(t, view, "a@example.com")
+	assertInOrder(t, header, "5-HOUR", "RESETS", "WEEKLY", "RESETS", "WEEKLY FABLE", "RESETS")
+	info := m.limits[limitsKey("claude", "a@example.com")].info
+	assertInOrder(t, row, "82%", usage.LocalReset(info.PrimaryWindow.ResetsAt, time.Now()), "50%")
+	if strings.Contains(view, "82% left") || strings.Contains(row, " · ") {
+		t.Errorf("medium tier should show short window figures in their own column:\n%s", row)
 	}
 	if !strings.Contains(view, "▸ Claude Code 2") {
 		t.Errorf("medium tier should show one-line provider chips:\n%s", view)
@@ -459,6 +536,10 @@ func TestVerticalLayout_MediumDropsLastUsedAndShortensCells(t *testing.T) {
 
 func TestVerticalLayout_NarrowShowsTightestWindowAndTabRow(t *testing.T) {
 	m := modelWithLimits(t, 80, 24)
+	// Give the tightest window (Fable) a reset so the RESETS column has a clock.
+	info := sampleLimits()
+	info.ModelWindows["Fable"].ResetsAt = time.Date(2030, 1, 1, 17, 0, 0, 0, time.FixedZone("PDT", -7*3600))
+	m.applyLimitsLoaded(limitsLoadedMsg{provider: "claude", profile: "a@example.com", info: info})
 	view := ansi.Strip(m.View())
 	for _, want := range []string{"TIGHTEST", "Fable 10%", "▸ Claude Code 2", "├─ 5-hour", "82% left", "├─ Weekly"} {
 		if !strings.Contains(view, want) {
@@ -468,6 +549,17 @@ func TestVerticalLayout_NarrowShowsTightestWindowAndTabRow(t *testing.T) {
 	if strings.Contains(view, "5-HOUR") {
 		t.Errorf("narrow tier should not show every window column:\n%s", view)
 	}
+	// The one window shown is still two columns: TIGHTEST and its RESETS.
+	header, row := tableLines(t, view, "a@example.com")
+	assertInOrder(t, header, "TIGHTEST", "RESETS")
+	clock := usage.LocalReset(info.ModelWindows["Fable"].ResetsAt, time.Now())
+	assertInOrder(t, row, "Fable 10%", clock)
+	if strings.Contains(row, " · ") {
+		t.Errorf("narrow tier still joins the figure and the clock:\n%s", row)
+	}
+	if hc, rc := columnOf(header, "RESETS"), columnOf(row, clock); hc != rc {
+		t.Errorf("reset clock at column %d, RESETS header at %d:\n%s\n%s", rc, hc, header, row)
+	}
 	for _, line := range strings.Split(m.View(), "\n") {
 		if lipgloss.Width(line) > 80 {
 			t.Fatalf("line wider than the terminal (%d): %q", lipgloss.Width(line), ansi.Strip(line))
@@ -475,6 +567,35 @@ func TestVerticalLayout_NarrowShowsTightestWindowAndTabRow(t *testing.T) {
 	}
 	if lipgloss.Height(m.View()) > 24 {
 		t.Errorf("view taller than the terminal: %d", lipgloss.Height(m.View()))
+	}
+}
+
+// A terminal too narrow for both halves keeps the figure and drops its
+// RESETS column; the expansion still lists the window with its reset.
+func TestVerticalLayout_VeryNarrowKeepsTightestAndDropsItsResets(t *testing.T) {
+	m := modelWithLimits(t, 40, 24)
+	info := sampleLimits()
+	info.ModelWindows["Fable"].ResetsAt = time.Date(2030, 1, 1, 17, 0, 0, 0, time.FixedZone("PDT", -7*3600))
+	m.applyLimitsLoaded(limitsLoadedMsg{provider: "claude", profile: "a@example.com", info: info})
+	view := ansi.Strip(m.View())
+
+	header, row := tableLines(t, view, "a@example.com")
+	if !strings.Contains(header, "TIGHTEST") || strings.Contains(header, "RESETS") {
+		t.Errorf("40 columns should keep TIGHTEST alone:\n%s", header)
+	}
+	clock := usage.LocalReset(info.ModelWindows["Fable"].ResetsAt, time.Now())
+	if !strings.Contains(row, "Fable 10%") || strings.Contains(row, clock) {
+		t.Errorf("the row should carry the figure without the clock:\n%s", row)
+	}
+	// The expansion lists every window in this tier, Fable with its reset
+	// (the line may be cut short by the frame at this width).
+	if !strings.Contains(view, "├─ Weekly Fable") || !strings.Contains(view, "10% left, reset") {
+		t.Errorf("the expansion should still list Fable with its reset:\n%s", view)
+	}
+	for _, line := range strings.Split(m.View(), "\n") {
+		if lipgloss.Width(line) > 40 {
+			t.Fatalf("line wider than the terminal (%d): %q", lipgloss.Width(line), ansi.Strip(line))
+		}
 	}
 }
 

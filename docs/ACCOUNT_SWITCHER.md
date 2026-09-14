@@ -136,7 +136,12 @@ per-model Windows. `usage.WindowsOf` orders them for display: duration-named
 windows first (5-hour, daily, weekly, monthly), then the primary/secondary
 picks of a per-model agent, then the remaining models by name, each once.
 Neither Anthropic nor OpenAI publishes a monthly cap; nothing is invented for
-it.
+it. On every table (`caam limits`, the dashboard's accounts pane, `caam
+monitor`) a Window is two columns: `usage.LeftText` for what is left
+(`88% left`) under the Window's name, and `usage.ResetText` for the local
+clock it resets at (`8:50 PM`) under a `RESETS` column beside it.
+`usage.WindowLeftText` joins the two into the one sentence the prose
+surfaces print (`limits <agent>` detail, `robot`, the full card).
 
 - **Credential resolution** (`cmd/caam/cmd/tui.go: fetchProfileLimits`,
   shared with `caam limits`): the Active Account's limits come from its
@@ -181,9 +186,15 @@ the selected agent's Accounts below.
   started. Three tiers by width (cards ≥150 columns, chips ≥100, tabs below)
   and by height; a short terminal turns cards into tabs so the accounts pane
   keeps its rows.
-- **Accounts pane**: one row per Account, `●` on the Active one, a column per
-  Window; columns the pane cannot fit are dropped least-important first (LAST
-  USED, then the rightmost windows) and every dropped Window is listed in the
+- **Accounts pane**: one row per Account, `●` on the Active one, two
+  columns per Window — what is left under the Window's name, the local
+  clock it resets at under `RESETS` beside it. The wide tier spells the
+  figure `82% left`, the medium tier `82%`; the narrow tier shows one
+  Window, the tightest, as the same pair (`TIGHTEST`, `RESETS`), and below
+  the width that fits both (about 50 columns) `TIGHTEST` stands alone.
+  Columns the pane cannot fit are dropped least-important first (LAST
+  USED, then the rightmost Windows, each losing its `RESETS` before its
+  figure) and every Window without both its columns is listed in the
   expansion instead, so nothing the API reported is unreachable. The selected
   Account expands in place like a tree node: the outcome of the last action
   on it, its windows without a column, auth/plan/health/token, its vault
@@ -221,8 +232,8 @@ the selected agent's Accounts below.
   refusal is also the first line of the Account's expansion, not only a
   status-bar message.
 
-`caam monitor` is the second view: the same Windows as columns across every
-agent's Accounts, `*` on the Active one, Enter switches through the same
+`caam monitor` is the second view: the same Windows as column pairs across
+every agent's Accounts, `*` on the Active one, Enter switches through the same
 path, rows whose fetch fails keep their last good numbers. Piped or with
 `--once` it prints the plain table it always did.
 

@@ -456,16 +456,23 @@ func (d *Dashboard) View() string {
 	return b.String()
 }
 
-// renderTable lays out the rows: PROFILE, one column per window, STATUS.
+// renderTable lays out the rows: PROFILE, two columns per window (what is
+// left under the window's name, the local reset clock under a RESETS
+// column beside it), STATUS.
 func (d *Dashboard) renderTable(now time.Time) string {
-	headers := append([]string{"PROFILE"}, d.columns...)
+	headers := []string{"PROFILE"}
+	for _, col := range d.columns {
+		headers = append(headers, col, "RESETS")
+	}
 	headers = append(headers, "STATUS")
 
 	cells := make([][]string, len(d.rows))
 	for i, r := range d.rows {
-		byCol := make(map[string]string)
+		left := make(map[string]string)
+		resets := make(map[string]string)
 		for _, c := range usage.WindowsOf(r.Usage) {
-			byCol[c.Column] = usage.WindowLeftText(c.Window, now)
+			left[c.Column] = usage.LeftText(c.Window)
+			resets[c.Column] = usage.ResetText(c.Window, now)
 		}
 		line := make([]string, 0, len(headers))
 		name := "  " + r.Provider + "/" + r.Name
@@ -474,11 +481,11 @@ func (d *Dashboard) renderTable(now time.Time) string {
 		}
 		line = append(line, name)
 		for _, col := range d.columns {
-			text, ok := byCol[col]
-			if !ok {
-				text = "-"
+			if _, ok := left[col]; !ok {
+				line = append(line, "-", "-")
+				continue
 			}
-			line = append(line, text)
+			line = append(line, left[col], resets[col])
 		}
 		line = append(line, rowStatus(r, now))
 		cells[i] = line

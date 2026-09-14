@@ -103,6 +103,13 @@ logging in again. Architecture and the facts behind it:
 - Profiles that hold settings but no credential are listed as
   `No credential` and refused by `Restore` and `caam activate`.
 - Kimi's login is `kimi login` (device code), not the chat REPL.
+- **What is left and when it resets are two columns per window** on every
+  table — `caam limits`, the dashboard's accounts pane and `caam monitor`:
+  the window's name heads the figure (`88% left`) and a `RESETS` column
+  beside it holds the local clock (`8:50 PM`), instead of one
+  `88% left · 8:50 PM` cell. The dashboard's narrow tier pairs `TIGHTEST`
+  with `RESETS` and keeps `TIGHTEST` alone when both cannot fit.
+  `caam limits --format json` is unchanged.
 
 ### Removed
 
