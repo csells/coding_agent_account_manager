@@ -35,7 +35,7 @@ func TestRefreshSingle_CodexUpdatesAuth(t *testing.T) {
 	original := map[string]any{
 		"access_token":  "old-access",
 		"refresh_token": "old-refresh",
-		"expires_at":    time.Now().Add(2 * time.Minute).Unix(),
+		"expires_at":    time.Now().Add(-time.Minute).Unix(),
 		"token_type":    "Bearer",
 	}
 	raw, err := json.MarshalIndent(original, "", "  ")
@@ -136,7 +136,7 @@ func TestRefreshSingle_SkipsWhenUnsupported(t *testing.T) {
 	original := map[string]any{
 		"access_token":  "old-access",
 		"refresh_token": "old-refresh",
-		"expiry":        time.Now().Add(2 * time.Minute).UTC().Format(time.RFC3339),
+		"expiry":        time.Now().Add(-time.Minute).UTC().Format(time.RFC3339),
 		"token_type":    "Bearer",
 	}
 	raw, err := json.MarshalIndent(original, "", "  ")
@@ -187,7 +187,7 @@ func TestRefreshSingle_GeminiUpdatesSettings(t *testing.T) {
 	settings := map[string]any{
 		"access_token":  "old-access",
 		"refresh_token": "ignored-refresh-token",
-		"expiry":        time.Now().Add(2 * time.Minute).UTC().Format(time.RFC3339),
+		"expiry":        time.Now().Add(-time.Minute).UTC().Format(time.RFC3339),
 		"token_type":    "Bearer",
 	}
 	settingsRaw, err := json.MarshalIndent(settings, "", "  ")
@@ -274,7 +274,7 @@ func TestRefreshSingle_ClaudeReturnsUnsupported(t *testing.T) {
 		"claudeAiOauth": map[string]any{
 			"accessToken":      "sk-ant-oat01-test-opaque-token",
 			"refreshToken":     "sk-ant-ort01-test-refresh-token",
-			"expiresAt":        time.Now().Add(2 * time.Minute).UnixMilli(),
+			"expiresAt":        time.Now().Add(-time.Minute).UnixMilli(),
 			"subscriptionType": "claude_pro_2025",
 		},
 	}
