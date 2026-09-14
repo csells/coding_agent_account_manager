@@ -840,6 +840,20 @@ func init() {
 	backupCmd.Flags().Bool("json", false, "output as JSON")
 }
 
+// identityForCapture decides what to record as a captured profile's
+// identity: what the service said, else — when the service could not say
+// (token expired, offline) — the profile's name if it is an email, since
+// that is what the login reported. A non-email name is not an identity.
+func identityForCapture(tool, profileName, resolved string, resolveErr error) string {
+	if resolveErr == nil && strings.TrimSpace(resolved) != "" {
+		return strings.TrimSpace(resolved)
+	}
+	if strings.Contains(profileName, "@") {
+		return strings.TrimSpace(profileName)
+	}
+	return ""
+}
+
 func runBackup(cmd *cobra.Command, args []string) error {
 	tool := strings.ToLower(args[0])
 	profileName := args[1]
@@ -894,13 +908,20 @@ func runBackup(cmd *cobra.Command, args []string) error {
 	// profile is still captured.
 	identityNote := ""
 	if tool == "agy" || tool == "kimi" {
-		if email, err := resolveProfileIdentity(cmd.Context(), tool); err == nil {
+		resolved, err := resolveProfileIdentity(cmd.Context(), tool)
+		email := identityForCapture(tool, profileName, resolved, err)
+		if err != nil && !jsonOutput {
+			if email != "" {
+				fmt.Fprintf(os.Stderr, "Note: could not ask the service who this account is (%v); recording the profile's name %s as its identity\n", err, email)
+			} else {
+				fmt.Fprintf(os.Stderr, "Warning: could not resolve the account for this profile: %v\n", err)
+			}
+		}
+		if email != "" {
 			if err := vault.RecordProfileIdentity(tool, profileName, email); err == nil {
 				output.Identity = email
 				identityNote = email
 			}
-		} else if !jsonOutput {
-			fmt.Fprintf(os.Stderr, "Warning: could not resolve the account for this profile: %v\n", err)
 		}
 	}
 

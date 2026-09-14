@@ -24,26 +24,28 @@ func ExtractFromAgyProfile(dir string) (*Identity, error) {
 	id := &Identity{Provider: "agy"}
 	found := false
 
-	if data, err := os.ReadFile(filepath.Join(dir, "google_accounts.json")); err == nil {
-		var accounts struct {
-			Active string `json:"active"`
+	// The account caam recorded for this profile (from Google's userinfo,
+	// or the email the login reported) wins: google_accounts.json is the
+	// Gemini CLI's file, and its active account is whoever the Gemini CLI
+	// last used, which need not be this Antigravity account.
+	if data, err := os.ReadFile(filepath.Join(dir, "meta.json")); err == nil {
+		var meta struct {
+			Identity string `json:"identity"`
 		}
-		if err := json.Unmarshal(data, &accounts); err == nil {
-			id.Email = strings.TrimSpace(accounts.Active)
-			found = found || id.Email != ""
+		if err := json.Unmarshal(data, &meta); err == nil && strings.Contains(meta.Identity, "@") {
+			id.Email = strings.TrimSpace(meta.Identity)
+			found = true
 		}
 	}
 
 	if id.Email == "" {
-		// The account `caam backup agy` resolved from Google, recorded in the
-		// vault profile's meta.json.
-		if data, err := os.ReadFile(filepath.Join(dir, "meta.json")); err == nil {
-			var meta struct {
-				Identity string `json:"identity"`
+		if data, err := os.ReadFile(filepath.Join(dir, "google_accounts.json")); err == nil {
+			var accounts struct {
+				Active string `json:"active"`
 			}
-			if err := json.Unmarshal(data, &meta); err == nil && strings.Contains(meta.Identity, "@") {
-				id.Email = strings.TrimSpace(meta.Identity)
-				found = true
+			if err := json.Unmarshal(data, &accounts); err == nil {
+				id.Email = strings.TrimSpace(accounts.Active)
+				found = found || id.Email != ""
 			}
 		}
 	}

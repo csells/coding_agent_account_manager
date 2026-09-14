@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/testutil"
 	"os"
 	"path/filepath"
@@ -154,5 +155,20 @@ func TestCaptureLiveAccount_RecordsTheIdentityForKimi(t *testing.T) {
 	id := getVaultIdentity("kimi", "k@example.com")
 	if id == nil || id.Email != "k@example.com" {
 		t.Fatalf("identity after capture = %+v, want k@example.com recorded in meta.json", id)
+	}
+}
+
+// When the service cannot say who the account is (token expired, offline)
+// but the profile is named by an email, that name is the identity: the
+// login reported it. Otherwise nothing is guessed.
+func TestIdentityForCapture_FallsBackToAnEmailName(t *testing.T) {
+	if got := identityForCapture("kimi", "k@example.com", "", errors.New("me: status 401")); got != "k@example.com" {
+		t.Fatalf("got %q, want the email the profile is named by", got)
+	}
+	if got := identityForCapture("kimi", "work", "", errors.New("me: status 401")); got != "" {
+		t.Fatalf("a non-email name is not an identity, got %q", got)
+	}
+	if got := identityForCapture("agy", "a@example.com", "resolved@example.com", nil); got != "resolved@example.com" {
+		t.Fatalf("a resolved identity wins, got %q", got)
 	}
 }

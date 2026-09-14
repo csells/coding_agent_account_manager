@@ -51,3 +51,25 @@ func TestExtractFromAgyProfile(t *testing.T) {
 		t.Errorf("Email = %q, want the recorded identity", id.Email)
 	}
 }
+
+// google_accounts.json is the Gemini CLI's file: its "active" account is
+// whoever the Gemini CLI last used, which need not be the Antigravity
+// account this profile holds. The identity caam recorded for the profile
+// in meta.json wins over it.
+func TestExtractFromAgyProfile_MetaIdentityWinsOverGeminisAccountsFile(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("google_accounts.json", `{"active":"gemini-user@example.com","old":[]}`)
+	write("meta.json", `{"identity":"agy-user@example.com"}`)
+	id, err := ExtractFromAgyProfile(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id.Email != "agy-user@example.com" {
+		t.Fatalf("Email = %q, want the profile's recorded identity, not the Gemini CLI's active account", id.Email)
+	}
+}
