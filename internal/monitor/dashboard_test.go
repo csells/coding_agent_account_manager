@@ -320,7 +320,8 @@ func TestDashboard_ErrorRowWithNoHistoryShowsTheReason(t *testing.T) {
 	d, _ := newTestDashboard([]*MonitorState{failed}, nil)
 	load(t, d)
 	view := d.View()
-	if !strings.Contains(view, "zcode/chris") || !strings.Contains(view, "no Z.ai coding plan") {
+	// The reason is the same short phrase the tui's card shows (usage.ShortError).
+	if !strings.Contains(view, "zcode/chris") || !strings.Contains(view, "no coding plan") {
 		t.Fatalf("error row missing its reason:\n%s", view)
 	}
 	if len(d.Columns()) != 0 {
