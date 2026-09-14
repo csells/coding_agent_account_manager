@@ -132,6 +132,28 @@ func captureLiveAccount(provider, name string) error {
 	return vault.Backup(get(), name)
 }
 
+// captureSignedInAccount re-captures the tool's signed-in account into the
+// vault, or files an unknown live credential as a backup — what has to
+// happen before anything runs the tool's login. Nothing signed in is fine.
+func captureSignedInAccount(tool string) error {
+	get, ok := tools[tool]
+	if !ok {
+		return fmt.Errorf("unknown provider %s", tool)
+	}
+	if vault == nil {
+		vault = authfile.NewVault(authfile.DefaultVaultPath())
+	}
+	fileSet := get()
+	if active, _ := vault.ActiveProfile(fileSet); active != "" {
+		return vault.Backup(fileSet, active)
+	}
+	if authfile.HasAuthFiles(fileSet) {
+		_, err := vault.BackupCurrent(fileSet)
+		return err
+	}
+	return nil
+}
+
 // fetchProfileLimits reads one profile's rate-limit windows: from the live
 // credential when the profile is the active one (the tool rotates it in
 // place, so the vault copy is stale for exactly that account), else from

@@ -343,23 +343,15 @@ func (w *Watcher) processChange(path string) {
 			return
 		}
 
-		// No identity available; still back up with an auto-generated name.
-		autoName := w.autoProfileName(provider)
-		w.logger.Info("identity missing; backing up with auto profile name",
+		// No identity: nothing is filed. An auto-named copy would be one
+		// more vault copy of the same rotating family, and restoring any but
+		// the newest replays a consumed token. Say so; a person can capture
+		// it under a name (the dashboard's n, or caam backup).
+		w.logger.Warn("credential with no readable identity was not captured; log in through the dashboard (n) or name it with caam backup",
 			"provider", provider,
-			"profile", autoName)
-		if err := w.vault.Backup(fileSet, autoName); err != nil {
-			w.logger.Error("failed to backup auto profile",
-				"provider", provider,
-				"profile", autoName,
-				"error", err)
-			if w.config.OnError != nil {
-				w.config.OnError(fmt.Errorf("backup %s/%s: %w", provider, autoName, err))
-			}
-			return
-		}
-		if w.config.OnDiscovery != nil {
-			w.config.OnDiscovery(provider, autoName, ident)
+			"path", path)
+		if w.config.OnError != nil {
+			w.config.OnError(fmt.Errorf("%s: credential has no readable identity; not captured (use caam backup %s <name>)", provider, provider))
 		}
 		return
 	}
@@ -422,32 +414,6 @@ func (w *Watcher) processChange(path string) {
 	if w.config.OnDiscovery != nil {
 		w.config.OnDiscovery(provider, email, ident)
 	}
-}
-
-// autoProfileName generates a unique, user-deletable profile name when identity is missing.
-func (w *Watcher) autoProfileName(provider string) string {
-	base := "auto-" + time.Now().Format("20060102-150405")
-	if w == nil || w.vault == nil {
-		return base
-	}
-	profiles, err := w.vault.List(provider)
-	if err != nil || len(profiles) == 0 {
-		return base
-	}
-	exists := make(map[string]struct{}, len(profiles))
-	for _, p := range profiles {
-		exists[p] = struct{}{}
-	}
-	if _, ok := exists[base]; !ok {
-		return base
-	}
-	for i := 2; i < 1000; i++ {
-		candidate := fmt.Sprintf("%s-%d", base, i)
-		if _, ok := exists[candidate]; !ok {
-			return candidate
-		}
-	}
-	return base
 }
 
 // extractIdentity extracts account identity from an auth file.
@@ -641,19 +607,10 @@ func WatchOnce(vault *authfile.Vault, providers []string, logger *slog.Logger) (
 				continue
 			}
 
-			// No identity available; still back up with an auto-generated name.
-			autoName := autoProfileName(vault, provider)
-			logger.Info("identity missing; backing up with auto profile name",
-				"provider", provider,
-				"profile", autoName)
-			if err := vault.Backup(fileSet, autoName); err != nil {
-				logger.Error("failed to backup auto profile",
-					"provider", provider,
-					"profile", autoName,
-					"error", err)
-				continue
-			}
-			discovered = append(discovered, fmt.Sprintf("%s/%s", provider, autoName))
+			// No identity: nothing is filed (see the watcher's handler for
+			// why an auto-named copy is a liability). Say so and move on.
+			logger.Warn("credential with no readable identity was not captured; log in through the dashboard (n) or name it with caam backup",
+				"provider", provider)
 			continue
 		}
 
@@ -701,29 +658,4 @@ func WatchOnce(vault *authfile.Vault, providers []string, logger *slog.Logger) (
 	}
 
 	return discovered, nil
-}
-
-func autoProfileName(vault *authfile.Vault, provider string) string {
-	base := "auto-" + time.Now().Format("20060102-150405")
-	if vault == nil {
-		return base
-	}
-	profiles, err := vault.List(provider)
-	if err != nil || len(profiles) == 0 {
-		return base
-	}
-	exists := make(map[string]struct{}, len(profiles))
-	for _, p := range profiles {
-		exists[p] = struct{}{}
-	}
-	if _, ok := exists[base]; !ok {
-		return base
-	}
-	for i := 2; i < 1000; i++ {
-		candidate := fmt.Sprintf("%s-%d", base, i)
-		if _, ok := exists[candidate]; !ok {
-			return candidate
-		}
-	}
-	return base
 }

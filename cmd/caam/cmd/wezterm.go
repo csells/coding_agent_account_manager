@@ -129,13 +129,16 @@ type weztermTarget struct {
 }
 
 var (
-	weztermLookupFunc              = exec.LookPath
-	weztermListPanesFunc           = weztermListPanes
-	weztermGetTextFunc             = weztermGetText
-	weztermSendTextFunc            = weztermSendText
-	weztermIsTerminal              = term.IsTerminal
-	weztermNow                     = time.Now
-	weztermDebugWriter   io.Writer = os.Stderr
+	weztermLookupFunc    = exec.LookPath
+	weztermListPanesFunc = weztermListPanes
+	weztermGetTextFunc   = weztermGetText
+	weztermSendTextFunc  = weztermSendText
+	// weztermBeforeLogin captures the tool's signed-in account before any
+	// pane is told to log in; tests replace it.
+	weztermBeforeLogin           = func(tool string) error { return captureSignedInAccount(tool) }
+	weztermIsTerminal            = term.IsTerminal
+	weztermNow                   = time.Now
+	weztermDebugWriter io.Writer = os.Stderr
 )
 
 func runWeztermLoginAll(cmd *cobra.Command, args []string) error {
@@ -215,7 +218,7 @@ func runWeztermLoginAll(cmd *cobra.Command, args []string) error {
 		if !weztermIsTerminal(int(os.Stdin.Fd())) {
 			return fmt.Errorf("non-interactive session: use --yes or --dry-run")
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Send /login to %d pane(s)? [y/N]: ", len(targets))
+		fmt.Fprintf(cmd.OutOrStdout(), "Send /login to %d pane(s)? This ends each pane's current session (the signed-in account is captured first). [y/N]: ", len(targets))
 		var resp string
 		fmt.Fscanln(os.Stdin, &resp)
 		resp = strings.TrimSpace(strings.ToLower(resp))
@@ -223,6 +226,12 @@ func runWeztermLoginAll(cmd *cobra.Command, args []string) error {
 			fmt.Fprintln(cmd.OutOrStdout(), "Cancelled")
 			return nil
 		}
+	}
+
+	// A login is a logout first: the signed-in account goes into the vault
+	// before any pane is told to log in again. No capture, no send.
+	if err := weztermBeforeLogin(tool); err != nil {
+		return fmt.Errorf("not sending /login: %w", err)
 	}
 
 	payload := "/login\n"

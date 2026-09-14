@@ -137,6 +137,12 @@ func runCoordinator(cmd *cobra.Command, args []string) error {
 
 	config.Logger = logger
 
+	// A login is a logout first: before the coordinator injects /login into a
+	// Claude Code pane, the signed-in Claude account goes into the vault.
+	config.BeforeLogin = func(ctx context.Context, paneID int) error {
+		return captureSignedInAccount("claude")
+	}
+
 	// Create coordinator
 	coord := coordinator.New(config)
 

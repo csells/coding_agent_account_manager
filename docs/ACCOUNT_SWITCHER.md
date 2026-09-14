@@ -58,12 +58,9 @@ seconds earlier. The symptom is `401 token_revoked` from
 `chatgpt.com/backend-api/wham/usage` and `refresh_token_invalidated` from the
 token endpoint; nothing brings the Account back but a new login.
 
-The rule, implemented in the dashboard's `n` flow
-(`internal/tui/newaccount.go: startNewAccountLogin`); upstream's `caam add`
-has the same outline but not the same care — it vaults the outgoing account
-under an `_auto_backup_` name instead of its own, clears with a raw file
-delete that skips the keychain item, and asks for a name instead of reading
-identity (audit finding 9):
+The rule, implemented once in `internal/switcher` (`PrepareLogin`, `Run`,
+`FinishLogin`; `Login` for the three in order) and used by the dashboard's
+`n` and by `caam add`:
 
 1. Re-capture the Active Account into the vault (newest tokens).
 2. **Clear the live credential** (`authfile.ClearAuthFiles`), so the agent's

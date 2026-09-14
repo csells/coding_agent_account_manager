@@ -3,8 +3,10 @@ package claude
 import (
 	"context"
 	"encoding/json"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/keychain"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1487,4 +1489,24 @@ func TestValidateTokenPassive_CredentialPrecedence(t *testing.T) {
 			t.Errorf("Error = %q, want invalid .credentials.json parse error", result.Error)
 		}
 	})
+}
+
+// On macOS the login keychain is shared across profiles, so an isolated
+// login would replace the signed-in account's credential with no capture:
+// it is refused while the keychain bridge is on.
+func TestLogin_RefusesOnDarwinWithTheKeychainBridge(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the login keychain is a macOS concern")
+	}
+	if !keychain.Enabled() {
+		t.Skip("keychain bridge off")
+	}
+	prof, err := profile.NewStore(t.TempDir()).Create("claude", "iso", "oauth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = New().Login(context.Background(), prof)
+	if err == nil || !strings.Contains(err.Error(), "keychain") {
+		t.Fatalf("isolated login should be refused on macOS, got %v", err)
+	}
 }

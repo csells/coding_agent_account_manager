@@ -18,6 +18,7 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/pty"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/ratelimit"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/rotation"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 	"golang.org/x/term"
 )
 
@@ -417,55 +418,20 @@ func (r *SmartRunner) handleRateLimit(ctx context.Context) {
 		r.db.SetCooldown(r.loginHandler.Provider(), r.currentProfile, time.Now(), cooldownDuration, "auto-detected via SmartRunner")
 	}
 
-	// 4. Swap auth files
+	// 4. Switch through the shared core: the outgoing profile is
+	// re-captured first (a failure refuses the switch — the vault must never
+	// be left with a stale copy of a rotating family), then the next
+	// profile's credential is installed.
 	r.setState(SwappingAuth)
-	// Re-snapshot the outgoing profile's (possibly rotated) tokens before we
-	// clobber the live auth file. Codex/ChatGPT rotate refresh tokens in place
-	// while a profile is active; skipping this leaves the vault copy stale and a
-	// later restore would replay a consumed refresh_token, bricking the account.
-	// Non-fatal.
-	if r.currentProfile != "" && r.currentProfile != nextProfile {
-		if err := r.vault.ResnapshotOutgoing(fileSet, r.currentProfile, nextProfile); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not re-snapshot outgoing profile %s: %v\n", r.currentProfile, err)
-		}
-	}
-	if err := r.vault.Restore(fileSet, nextProfile); err != nil {
+	if _, err := switcher.Switch(ctx, r.vault, fileSet, switcher.Options{Profile: nextProfile, DB: r.db, Source: "handoff"}); err != nil {
 		r.failWithManual("auth swap failed: %v", err)
 		return
 	}
 
-	// 5. Inject login command
-	r.drainLoginDone()
-	r.setState(LoggingIn)
-	if err := r.loginHandler.TriggerLogin(r.ptyController); err != nil {
-		r.failWithManual("login trigger failed: %v", err)
-		return
-	}
-
-	// 6. Wait for login completion (monitorOutput detects success/failure and signals via loginDone)
-	loginTimeout := 30 * time.Second
-	if r.handoffConfig != nil && r.handoffConfig.DebounceDelay.Duration() > 0 {
-		loginTimeout = r.handoffConfig.DebounceDelay.Duration() * 10 // 10x debounce as timeout
-		if loginTimeout < 30*time.Second {
-			loginTimeout = 30 * time.Second
-		}
-	}
-
-	select {
-	case result := <-r.loginDone:
-		if !result.success {
-			r.failWithManual("login failed: %s", result.message)
-			return
-		}
-	case <-time.After(loginTimeout):
-		r.failWithManual("login timed out after %v", loginTimeout)
-		return
-	case <-ctx.Done():
-		r.failWithManual("context cancelled during login")
-		return
-	}
-
-	// 7. Success!
+	// 5. No login: the restored credential is a session already, and a
+	// tool's login is a logout first — it would revoke what was just
+	// installed (docs/ACCOUNT_SWITCHER.md §2). The running session picks
+	// the new credential up on its next token refresh, or on restart.
 	r.setState(LoginComplete)
 	r.currentProfile = nextProfile
 	r.handoffCount++
@@ -473,7 +439,7 @@ func (r *SmartRunner) handleRateLimit(ctx context.Context) {
 	r.notifier.Notify(&notify.Alert{
 		Level:   notify.Info,
 		Title:   "Profile switched",
-		Message: fmt.Sprintf("Switched to %s. Continue working.", nextProfile),
+		Message: fmt.Sprintf("Switched to %s. The running session picks it up on its next token refresh; restart it to switch now.", nextProfile),
 	})
 
 	// Reset detector state so we don't immediately trigger again

@@ -15,6 +15,7 @@ import (
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 	codexprovider "github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider/codex"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 )
 
 // execCommand allows mocking exec.CommandContext in tests
@@ -23,21 +24,23 @@ var execCommand = exec.CommandContext
 var addCmd = &cobra.Command{
 	Use:   "add <tool> [profile-name]",
 	Short: "Add a new account with one command",
-	Long: `Add a new account by automating the login flow.
+	Long: `Add a new account by running the tool's login — the command-line
+form of the dashboard's n key. A login is a logout first, so the order
+matters:
+  1. Captures the signed-in account into the vault (its newest tokens),
+     or files an unknown live credential as a backup
+  2. Clears the live credential, so the tool's login has nothing to revoke
+  3. Runs the tool's login and waits for you to complete it
+  4. Files the new session under the account that signed in (or asks for
+     a name when the tool's credential names nobody)
 
-This command streamlines adding a new account:
-  1. Backs up current auth (if exists) to a timestamped backup
-  2. Clears existing auth files
-  3. Launches the tool's login flow
-  4. Waits for you to complete authentication
-  5. Saves the new auth as a profile
-  6. Optionally activates the new profile
+The account that just logged in is the live one; there is nothing to
+activate. --no-activate is accepted for compatibility and does nothing.
 
 Examples:
-  caam add claude              # Interactive - prompts for profile name
-  caam add claude work-2       # Pre-specify profile name
+  caam add claude              # Filed under the account that signs in
+  caam add claude work-2       # Name to use if the credential names nobody
   caam add codex --device-code # Device code flow (headless)
-  caam add codex --no-activate # Don't activate after adding
   caam add gemini --timeout 5m # Custom timeout for login flow`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: runAdd,
@@ -103,76 +106,39 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Step 1: Backup current auth if exists
-	if hasExistingAuth {
-		backupName := fmt.Sprintf("_auto_backup_%s", time.Now().Format("20060102_150405"))
-		fmt.Printf("Backing up current auth to %s/%s...\n", tool, backupName)
-		if err := vault.Backup(fileSet, backupName); err != nil {
-			return fmt.Errorf("backup current auth: %w", err)
-		}
-		fmt.Printf("  Backed up to %s/%s\n", tool, backupName)
-	}
-
-	// Step 2: Clear auth files
-	fmt.Printf("Clearing %s auth files...\n", tool)
-	for _, spec := range fileSet.Files {
-		if _, err := os.Stat(spec.Path); err == nil {
-			if err := os.Remove(spec.Path); err != nil {
-				return fmt.Errorf("remove %s: %w", spec.Path, err)
-			}
-		}
-	}
-
-	// Step 3: Launch login flow
-	fmt.Printf("\nLaunching %s login...\n", tool)
-	fmt.Println("Complete the authentication in the terminal/browser.")
-	fmt.Println("Press Ctrl+C when done or if you want to cancel.")
-	fmt.Println()
-
-	// Create context with timeout
+	// The shared login sequence (internal/switcher.Login, the same as the
+	// dashboard's n): vault the signed-in account with its newest tokens,
+	// clear its live credential so the tool's login has nothing to
+	// revoke, run the login, file the new session under the account that
+	// signed in.
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-
-	// Handle signals
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	done := make(chan error, 1)
-
-	go func() {
-		done <- runToolLogin(ctx, tool, deviceCode)
-	}()
-
-	select {
-	case err := <-done:
-		signal.Stop(sigChan)
-		if err != nil && ctx.Err() != context.Canceled {
-			// Login process exited - check if auth files appeared
-			if !authfile.HasAuthFiles(fileSet) {
-				fmt.Println("\nLogin process exited but no auth files were created.")
-				fmt.Println("The login may have failed. Try again with: caam add " + tool)
-				return fmt.Errorf("login did not create auth files")
-			}
-		}
-	case <-sigChan:
-		signal.Stop(sigChan)
-		cancel()
-		fmt.Println("\n\nLogin interrupted.")
-	case <-ctx.Done():
-		signal.Stop(sigChan)
-		fmt.Printf("\nTimeout after %v waiting for login to complete.\n", timeout)
-		return fmt.Errorf("login timed out; retry with 'caam add %s' or use --timeout to increase wait time", tool)
+	res, err := switcher.Login(ctx, vault, fileSet, switcher.LoginOptions{
+		Run: func(ctx context.Context) error {
+			fmt.Printf("\nLaunching %s login...\n", tool)
+			fmt.Println("Complete the authentication in the terminal/browser.")
+			fmt.Println("Press Ctrl+C when done or if you want to cancel.")
+			fmt.Println()
+			return runToolLoginInterruptible(ctx, tool, deviceCode, timeout)
+		},
+		Identity: func(ctx context.Context) string { return liveAccountIdentity(ctx, tool) },
+		Name:     profileName,
+	})
+	if err != nil {
+		return err
 	}
-
-	// Step 4: Check if auth files appeared
+	if res.Previous != "" {
+		fmt.Printf("Captured the signed-in account as %s/%s before the login.\n", tool, res.Previous)
+	}
 	if !authfile.HasAuthFiles(fileSet) {
 		fmt.Println("\nNo auth files detected after login.")
 		return fmt.Errorf("login did not create auth files")
 	}
-
 	fmt.Println("\nLogin successful!")
 
-	// Step 5: Prompt for profile name if not provided
-	if profileName == "" {
+	// The tool's credential names nobody: ask.
+	profileName = res.Account
+	if res.NeedsName {
 		fmt.Print("Profile name: ")
 		reader := bufio.NewReader(os.Stdin)
 		input, _ := reader.ReadString('\n')
@@ -180,39 +146,24 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		if profileName == "" {
 			profileName = "new-account"
 		}
-	}
-
-	// Validate profile name
-	if strings.HasPrefix(profileName, "_") {
-		return fmt.Errorf("profile names starting with '_' are reserved for system use")
-	}
-
-	// Check again if profile exists (in case user entered same name interactively)
-	profiles, _ := vault.List(tool)
-	for _, p := range profiles {
-		if p == profileName {
-			// Generate unique name
-			profileName = fmt.Sprintf("%s_%s", profileName, time.Now().Format("150405"))
-			fmt.Printf("Profile name already exists, using: %s\n", profileName)
-			break
+		if strings.HasPrefix(profileName, "_") {
+			return fmt.Errorf("profile names starting with '_' are reserved for system use")
 		}
-	}
-
-	// Step 6: Save as new profile
-	fmt.Printf("Saving as %s/%s...\n", tool, profileName)
-	if err := vault.Backup(fileSet, profileName); err != nil {
-		return fmt.Errorf("save profile: %w", err)
+		profiles, _ := vault.List(tool)
+		for _, p := range profiles {
+			if p == profileName {
+				profileName = fmt.Sprintf("%s_%s", profileName, time.Now().Format("150405"))
+				fmt.Printf("Profile name already exists, using: %s\n", profileName)
+				break
+			}
+		}
+		if err := vault.Backup(fileSet, profileName); err != nil {
+			return fmt.Errorf("save profile: %w", err)
+		}
 	}
 	fmt.Printf("  Saved %s/%s\n", tool, profileName)
-
-	// Step 7: Optionally activate
-	if !noActivate {
-		fmt.Printf("Activating %s/%s...\n", tool, profileName)
-		if err := vault.Restore(fileSet, profileName); err != nil {
-			return fmt.Errorf("activate profile: %w", err)
-		}
-		fmt.Printf("  Activated %s/%s\n", tool, profileName)
-	}
+	// The account that just logged in is the live one; nothing to activate.
+	_ = noActivate
 
 	fmt.Println()
 	fmt.Println("Done! Your new account has been added.")
@@ -224,6 +175,26 @@ func runAdd(cmd *cobra.Command, args []string) error {
 }
 
 // runToolLogin launches the tool's login command.
+// runToolLoginInterruptible runs the tool's login, stopping on ctrl-c or
+// the timeout.
+func runToolLoginInterruptible(ctx context.Context, tool string, deviceCode bool, timeout time.Duration) error {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
+	done := make(chan error, 1)
+	go func() { done <- runToolLogin(ctx, tool, deviceCode) }()
+	select {
+	case err := <-done:
+		return err
+	case <-sigChan:
+		fmt.Println("\n\nLogin interrupted.")
+		return fmt.Errorf("login interrupted")
+	case <-ctx.Done():
+		fmt.Printf("\nTimeout after %v waiting for login to complete.\n", timeout)
+		return fmt.Errorf("login timed out; retry with 'caam add %s' or use --timeout to increase wait time", tool)
+	}
+}
+
 func runToolLogin(ctx context.Context, tool string, deviceCode bool) error {
 	var cmd *exec.Cmd
 

@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -1092,5 +1093,35 @@ func TestCompactionReminderPromptNewline(t *testing.T) {
 	// Verify newline was appended
 	if !strings.HasSuffix(sent[0], "\n") {
 		t.Errorf("expected prompt to end with newline, got %q", sent[0])
+	}
+}
+
+// A login is a logout first: when the signed-in account cannot be captured
+// before /login is injected, nothing is injected.
+func TestRateLimit_LoginNotInjectedWhenCaptureFails(t *testing.T) {
+	client := &fakePaneClient{panes: []Pane{{PaneID: 1, Title: "claude-code"}}}
+	cfg := DefaultConfig()
+	cfg.LoginCooldown = 10 * time.Millisecond
+	cfg.BeforeLogin = func(ctx context.Context, paneID int) error {
+		return errors.New("vault is read-only")
+	}
+	coord := New(cfg)
+	coord.paneClient = client
+	client.output = "You've hit your limit on Claude usage today. This resets 2pm"
+	coord.pollPanes(context.Background())
+	if sent := client.sentText(); len(sent) != 0 {
+		t.Fatalf("nothing should be injected when the capture fails, got %v", sent)
+	}
+
+	// With the capture succeeding, /login goes out as before.
+	captured := 0
+	client2 := &fakePaneClient{panes: []Pane{{PaneID: 1, Title: "claude-code"}}}
+	cfg.BeforeLogin = func(ctx context.Context, paneID int) error { captured++; return nil }
+	coord2 := New(cfg)
+	coord2.paneClient = client2
+	client2.output = "You've hit your limit on Claude usage today. This resets 2pm"
+	coord2.pollPanes(context.Background())
+	if sent := client2.sentText(); captured != 1 || len(sent) != 1 || sent[0] != "/login\n" {
+		t.Fatalf("capture then inject expected: captured=%d sent=%v", captured, sent)
 	}
 }

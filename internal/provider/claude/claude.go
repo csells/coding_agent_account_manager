@@ -38,6 +38,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/browser"
@@ -382,6 +383,9 @@ func (p *Provider) Env(ctx context.Context, prof *profile.Profile) (map[string]s
 
 // Login initiates the authentication flow.
 func (p *Provider) Login(ctx context.Context, prof *profile.Profile) error {
+	if err := refuseSharedKeychainLogin(); err != nil {
+		return err
+	}
 	switch provider.AuthMode(prof.AuthMode) {
 	case provider.AuthModeAPIKey:
 		return p.loginWithAPIKey(ctx, prof)
@@ -1244,3 +1248,15 @@ var timeNow = time.Now
 
 // Ensure Provider implements the interface.
 var _ provider.Provider = (*Provider)(nil)
+
+// refuseSharedKeychainLogin refuses an isolated login on macOS while the
+// keychain bridge is on: Claude Code keeps its OAuth blob in the login keychain,
+// which is per OS user, not per HOME, so a login run for an isolated
+// profile would replace the live account's credential with no capture and
+// no clear — the sequence that revokes a rotating family.
+func refuseSharedKeychainLogin() error {
+	if runtime.GOOS == "darwin" && keychain.Enabled() {
+		return fmt.Errorf("isolated login is not available for Claude Code on macOS: the login keychain is shared across profiles, so this login would replace the signed-in account's credential; log in through the dashboard (n) or caam add instead, or set CAAM_KEYCHAIN=0")
+	}
+	return nil
+}

@@ -235,7 +235,7 @@ func TestWatcher_UpdateExisting(t *testing.T) {
 	assert.Equal(t, "claude/existing@example.com", discovered[0])
 }
 
-func TestWatchOnce_AutoProfileOnIdentityError(t *testing.T) {
+func TestWatchOnce_NeverFilesAnAutoNamedProfile(t *testing.T) {
 	tmpDir := t.TempDir()
 	vaultDir := filepath.Join(tmpDir, "vault")
 	homeDir := filepath.Join(tmpDir, "home")
@@ -256,18 +256,19 @@ func TestWatchOnce_AutoProfileOnIdentityError(t *testing.T) {
 	credsPath := filepath.Join(homeDir, ".claude", ".credentials.json")
 	require.NoError(t, os.WriteFile(credsPath, []byte("{invalid"), 0600))
 
+	// A credential with no readable identity is not filed under an
+	// auto-generated name: that would be one more vault copy of the same
+	// rotating family. Nothing is discovered and nothing is vaulted.
 	discovered, err := WatchOnce(vault, []string{"claude"}, nil)
 	require.NoError(t, err)
-	require.Len(t, discovered, 1)
-	assert.True(t, strings.HasPrefix(discovered[0], "claude/auto-"))
+	require.Len(t, discovered, 0)
 
 	profiles, err := vault.List("claude")
 	require.NoError(t, err)
-	require.Len(t, profiles, 1)
-	assert.True(t, strings.HasPrefix(profiles[0], "auto-"))
+	require.Len(t, profiles, 0)
 }
 
-func TestWatcher_AutoProfileOnIdentityError(t *testing.T) {
+func TestWatcher_NeverFilesAnAutoNamedProfile(t *testing.T) {
 	tmpDir := t.TempDir()
 	vaultDir := filepath.Join(tmpDir, "vault")
 	homeDir := filepath.Join(tmpDir, "home")
@@ -310,24 +311,15 @@ func TestWatcher_AutoProfileOnIdentityError(t *testing.T) {
 	credsPath := filepath.Join(homeDir, ".claude", ".credentials.json")
 	require.NoError(t, os.WriteFile(credsPath, []byte("{invalid"), 0600))
 
-	// Poll instead of a fixed sleep: under heavy machine load the fsnotify
-	// event + debounce interval can take well over 500ms to fire.
-	deadline := time.Now().Add(4 * time.Second)
-	for {
-		mu.Lock()
-		n := len(discoveries)
-		mu.Unlock()
-		if n >= 1 || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	// Give the fsnotify event and the debounce time to fire; a credential
+	// with no readable identity is never filed under an auto name.
+	time.Sleep(600 * time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()
-
-	require.Len(t, discoveries, 1)
-	assert.True(t, strings.HasPrefix(discoveries[0], "claude/auto-"))
+	require.Len(t, discoveries, 0, "nothing should be discovered without an identity")
+	profiles, _ := vault.List("claude")
+	require.Len(t, profiles, 0, "nothing should be vaulted under an auto name")
 }
 
 // E2E Tests for realistic auth-file change sequences
@@ -384,6 +376,7 @@ func TestE2E_RapidFileChanges(t *testing.T) {
 				"refreshToken":     "refresh-token",
 				"expiresAt":        time.Now().Add(time.Hour).UnixMilli(),
 				"subscriptionType": "claude_pro_2025",
+				"email":            "rapid@example.com", // an identity: the watcher files only what it can name
 			},
 		}
 		data, _ := json.Marshal(creds)
@@ -480,7 +473,7 @@ func TestE2E_RepeatDetection(t *testing.T) {
 
 // TestE2E_ClaudeCurrentFormatAutoProfile verifies that Claude's current
 // auth format (without email/accountId) generates auto-named profiles.
-func TestE2E_ClaudeCurrentFormatAutoProfile(t *testing.T) {
+func TestE2E_ClaudeCurrentFormatIsNotAutoFiled(t *testing.T) {
 	tmpDir := t.TempDir()
 	vaultDir := filepath.Join(tmpDir, "vault")
 	homeDir := filepath.Join(tmpDir, "home")
@@ -504,17 +497,14 @@ func TestE2E_ClaudeCurrentFormatAutoProfile(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(credsPath, fixtureData, 0600))
 
+	// Claude's current format carries no email or account id: nothing is
+	// filed under an auto name (the dashboard's n captures it under the
+	// identity the login reports).
 	discovered, err := WatchOnce(vault, []string{"claude"}, nil)
 	require.NoError(t, err)
-
-	require.Len(t, discovered, 1)
-	assert.True(t, strings.HasPrefix(discovered[0], "claude/auto-"),
-		"Claude current format should generate auto-profile, got: %s", discovered[0])
-
+	require.Len(t, discovered, 0)
 	profiles, _ := vault.List("claude")
-	require.Len(t, profiles, 1)
-	assert.True(t, strings.HasPrefix(profiles[0], "auto-"),
-		"profile name should be auto-generated")
+	require.Len(t, profiles, 0)
 }
 
 // TestE2E_AccountSwitchDetection verifies that switching to different
@@ -648,6 +638,7 @@ func TestE2E_PartialWriteRecovery(t *testing.T) {
 			"refreshToken":     "valid-refresh",
 			"expiresAt":        time.Now().Add(time.Hour).UnixMilli(),
 			"subscriptionType": "claude_pro_2025",
+			"email":            "valid@example.com",
 		},
 	}
 	validData, _ := json.Marshal(validCreds)

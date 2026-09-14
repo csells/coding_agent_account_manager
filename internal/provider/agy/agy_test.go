@@ -4,8 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/keychain"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/profile"
@@ -520,3 +523,22 @@ func TestProviderInterface(t *testing.T) {
 // suppress unused-const warning if fakeCreds/fakeSettings drift; reference them.
 var _ = fakeCreds
 var _ = fakeSettings
+
+// Same as Claude Code: agy's token is a shared login-keychain item on
+// macOS, so an isolated login is refused while the bridge is on.
+func TestLogin_RefusesOnDarwinWithTheKeychainBridge(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the login keychain is a macOS concern")
+	}
+	if !keychain.Enabled() {
+		t.Skip("keychain bridge off")
+	}
+	prof, err := profile.NewStore(t.TempDir()).Create("agy", "iso", "oauth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = New().Login(context.Background(), prof)
+	if err == nil || !strings.Contains(err.Error(), "keychain") {
+		t.Fatalf("isolated login should be refused on macOS, got %v", err)
+	}
+}

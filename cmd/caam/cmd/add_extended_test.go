@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
@@ -22,7 +23,7 @@ func TestAddHelperProcess(t *testing.T) {
 	}
 
 	// This code runs inside the "mocked" process (e.g., 'claude login')
-	
+
 	// Read where we should write the auth file
 	authPath := os.Getenv("MOCK_AUTH_PATH")
 	if authPath == "" {
@@ -77,7 +78,7 @@ func TestAddExtended(t *testing.T) {
 
 	// Defines paths
 	fakeAuthPath := filepath.Join(homeDir, "claude_auth.json")
-	
+
 	// Pre-create "old" auth file to test backup logic
 	oldAuthContent := `{"sessionKey": "old-session-key"}`
 	require.NoError(t, os.WriteFile(fakeAuthPath, []byte(oldAuthContent), 0600))
@@ -116,7 +117,7 @@ func TestAddExtended(t *testing.T) {
 		cs := []string{"-test.run=TestAddHelperProcess", "--", name}
 		cs = append(cs, args...)
 		cmd := exec.CommandContext(ctx, os.Args[0], cs...)
-		cmd.Env = append(os.Environ(), 
+		cmd.Env = append(os.Environ(),
 			"GO_WANT_HELPER_PROCESS=1",
 			"MOCK_AUTH_PATH="+fakeAuthPath,
 		)
@@ -126,13 +127,13 @@ func TestAddExtended(t *testing.T) {
 
 	// 2. Execute Command
 	h.StartStep("Execute", "Run add command for claude")
-	
+
 	// We need to provide "claude" and "new-profile" as args
 	// We also set --force to skip confirmation prompts
 	// And --no-activate to simplify assertion
 	addCmd.Flags().Set("force", "true")
 	addCmd.Flags().Set("no-activate", "true")
-	
+
 	err := runAdd(addCmd, []string{"claude", "test-profile"})
 	require.NoError(t, err)
 	h.EndStep("Execute")
@@ -145,31 +146,36 @@ func TestAddExtended(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, profiles, "test-profile")
 
-	// Verify backup was created (since we had existing auth)
-	// It should start with _auto_backup_
+	// The live credential matched no vault profile: it was filed as a
+	// backup (the switcher's BackupCurrent naming) before the login ran,
+	// never lost, never left for the login to revoke.
 	foundBackup := false
 	for _, p := range profiles {
-		if len(p) > 12 && p[:12] == "_auto_backup" {
+		if strings.HasPrefix(p, "_backup_") {
 			foundBackup = true
-			break
+			data, _ := os.ReadFile(filepath.Join(vault.ProfilePath("claude", p), "claude_auth.json"))
+			assert.Contains(t, string(data), "old-session-key")
 		}
 	}
-	assert.True(t, foundBackup, "Should have created an auto backup")
+	assert.True(t, foundBackup, "the signed-in credential should be filed before the login")
+	assert.NotContains(t, strings.Join(profiles, ","), "_auto_backup_")
 
 	// Verify content of the new profile
 	profilePath := vault.ProfilePath("claude", "test-profile")
-	
+
 	// The vault structure mirrors the file structure relative to HOME if configured that way,
 	// or it flattens it. Let's check how Backup works.
 	// authfile.Backup copies files into the profile dir.
 	// Since our fakeAuthPath is just "claude_auth.json", it should be at the root of profile dir.
 	// However, `authfile` usually preserves structure relative to common base?
 	// Let's check `vault.List` again.
-	
+
 	// Just check if the file exists inside the profile dir
 	foundFile := false
 	err = filepath.Walk(profilePath, func(path string, info os.FileInfo, err error) error {
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		if !info.IsDir() && info.Name() == "claude_auth.json" {
 			foundFile = true
 			content, _ := os.ReadFile(path)

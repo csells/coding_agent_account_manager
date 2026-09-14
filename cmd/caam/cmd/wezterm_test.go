@@ -326,3 +326,38 @@ func TestWeztermOAuthReportRedactsLogs(t *testing.T) {
 		t.Fatalf("expected logs to redact urls, got: %s", logs)
 	}
 }
+
+// A login is a logout first: login-all captures the signed-in account
+// before any pane is told to log in, and sends nothing when it cannot.
+func TestRunWeztermLoginAll_CapturesBeforeSending(t *testing.T) {
+	savedLookup, savedList, savedGet, savedSend, savedIsTerminal, savedBefore := weztermLookupFunc, weztermListPanesFunc, weztermGetTextFunc, weztermSendTextFunc, weztermIsTerminal, weztermBeforeLogin
+	defer func() {
+		weztermLookupFunc, weztermListPanesFunc, weztermGetTextFunc, weztermSendTextFunc, weztermIsTerminal, weztermBeforeLogin = savedLookup, savedList, savedGet, savedSend, savedIsTerminal, savedBefore
+	}()
+	weztermLookupFunc = func(string) (string, error) { return "wezterm", nil }
+	weztermListPanesFunc = func() ([]weztermPane, error) { return []weztermPane{{ID: 1, Title: "one"}}, nil }
+	weztermGetTextFunc = func(int) (string, error) { return "You've hit your limit · resets soon", nil }
+	sent := 0
+	weztermSendTextFunc = func(int, string) error { sent++; return nil }
+	weztermIsTerminal = func(int) bool { return false }
+	weztermBeforeLogin = func(tool string) error { return errors.New("vault is read-only") }
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.Flags().Bool("all", false, "")
+	cmd.Flags().Bool("yes", true, "")
+	cmd.Flags().Bool("force", false, "")
+	cmd.Flags().Bool("dry-run", false, "")
+	cmd.Flags().Bool("subscription", false, "")
+	cmd.Flags().String("match", "", "")
+	if err := runWeztermLoginAll(cmd, []string{"claude"}); err == nil || sent != 0 {
+		t.Fatalf("a failed capture must refuse before sending: err=%v sent=%d", err, sent)
+	}
+
+	captured := 0
+	weztermBeforeLogin = func(tool string) error { captured++; return nil }
+	if err := runWeztermLoginAll(cmd, []string{"claude"}); err != nil || captured != 1 || sent != 1 {
+		t.Fatalf("capture then send expected: err=%v captured=%d sent=%d", err, captured, sent)
+	}
+}

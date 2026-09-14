@@ -34,22 +34,16 @@ func TestMockCLI_Handoff(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	fmt.Println("Error: rate limit exceeded")
 
-	// 2. Wait for login command. The SmartRunner handoff path is exercised with
-	// the gemini provider (claude is intentionally bypassed by SmartRunner.Run
-	// because Claude Code manages its own terminal), so the injected login
-	// command is gemini's "/auth" and success must match a gemini completion
-	// pattern.
-	reader := bufio.NewReader(os.Stdin)
-	line, _ := reader.ReadString('\n')
-
-	if strings.TrimSpace(line) == "/auth" {
-		fmt.Println("Logging in...")
-		time.Sleep(100 * time.Millisecond)
-		fmt.Println("successfully authenticated")
-	} else {
-		fmt.Printf("Unknown command: %s", line)
-		os.Exit(1)
-	}
+	// 2. The handoff switches the credential under this session and does
+	// not inject a login (a login is a logout first and would revoke the
+	// credential just installed). Anything sent to stdin is a bug.
+	go func() {
+		reader := bufio.NewReader(os.Stdin)
+		if line, err := reader.ReadString('\n'); err == nil {
+			fmt.Printf("Unexpected input: %s", line)
+			os.Exit(1)
+		}
+	}()
 
 	// Keep running a bit
 	time.Sleep(500 * time.Millisecond)
@@ -181,10 +175,8 @@ func TestSmartRunner_E2E(t *testing.T) {
 	// 2. Detect "rate limit exceeded"
 	// 3. Trigger handoff
 	// 4. Select "backup"
-	// 5. Swap auth (mocked vault works on temp dir)
-	// 6. Inject "/login"
-	// 7. Detect "successfully logged in"
-	// 8. Notify user
+	// 5. Swap auth through the shared core (mocked vault works on temp dir)
+	// 6. Notify user — no login is injected
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

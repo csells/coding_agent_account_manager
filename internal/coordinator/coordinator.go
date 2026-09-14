@@ -95,6 +95,11 @@ type Config struct {
 	// CompactionReminderRegex allows a custom regex pattern for compaction detection.
 	// If nil, uses the default Patterns.CompactingBanner.
 	CompactionReminderRegex *regexp.Regexp
+
+	// BeforeLogin runs before /login is injected into a pane. It captures
+	// the signed-in account into the vault (a login is a logout first); an
+	// error means the login is not injected.
+	BeforeLogin func(ctx context.Context, paneID int) error
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -437,6 +442,17 @@ func (c *Coordinator) handleIdleState(ctx context.Context, tracker *PaneTracker,
 			return
 		}
 
+		// A login is a logout first: the signed-in account must be in the
+		// vault before /login replaces it. No capture, no injection.
+		if c.config.BeforeLogin != nil {
+			if err := c.config.BeforeLogin(ctx, tracker.PaneID); err != nil {
+				c.logger.Error("login not injected: the signed-in account could not be captured first",
+					"pane_id", tracker.PaneID,
+					"error", err,
+					"action", "inject_refused")
+				return
+			}
+		}
 		// Auto-inject /login command
 		if err := c.paneClient.SendText(ctx, tracker.PaneID, "/login\n", true); err != nil {
 			c.logger.Error("injection failed",
