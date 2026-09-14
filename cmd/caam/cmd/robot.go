@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -643,7 +645,7 @@ func runRobotNext(cmd *cobra.Command, args []string) error {
 	if _, ok := tools[provider]; !ok {
 		return robotError(cmd, "next", "INVALID_PROVIDER",
 			fmt.Sprintf("unknown provider: %s", provider),
-			"valid providers: codex, claude, gemini",
+			"valid providers: "+supportedToolsList(),
 			nil)
 	}
 
@@ -686,6 +688,14 @@ func runRobotNext(cmd *cobra.Command, args []string) error {
 
 	var scored []scoredProfile
 	now := time.Now()
+
+	// When the activity log last saw each account in use, for the LRU bonus.
+	var lastUsed map[string]time.Time
+	if db != nil {
+		if used, err := db.LastUsed(); err == nil {
+			lastUsed = used[provider]
+		}
+	}
 
 	for _, profileName := range profiles {
 		pInfo := buildProfileInfo(provider, profileName, "", db, false)
@@ -748,12 +758,22 @@ func runRobotNext(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// LRU bonus (strategy-dependent)
+		// LRU bonus (strategy-dependent): the account the activity log saw
+		// used longest ago scores highest; one never used scores highest of
+		// all. Under "smart" the bonus is a tie-break beside health.
 		if strategy == "lru" || strategy == "smart" {
-			// Could check last used time here
-			// For now, just slightly favor non-active profiles
-			if !pInfo.Active {
-				sp.score += 5
+			weight := 5.0
+			if strategy == "lru" {
+				weight = 50.0
+			}
+			if ts, ok := lastUsed[profileName]; ok {
+				age := now.Sub(ts)
+				share := min(1.0, age.Hours()/(7*24))
+				sp.score += weight * share
+				sp.reasons = append(sp.reasons, fmt.Sprintf("last used %s", formatLastUsed(ts, now)))
+			} else {
+				sp.score += weight
+				sp.reasons = append(sp.reasons, "last used never")
 			}
 		}
 
@@ -1372,10 +1392,16 @@ type RobotLimitsData struct {
 	Profiles []RobotProfileLimits `json:"profiles"`
 }
 
-// RobotProfileLimits contains rate limits for a profile.
+// RobotProfileLimits contains rate limits for a profile, read live from the
+// provider as the dashboard reads them. LeftPercent and ResetsAt describe
+// the tightest window — the one a controller must plan around; the
+// used-side primary/secondary figures stay for callers that read them.
 type RobotProfileLimits struct {
 	Name           string `json:"name"`
 	AvailScore     int    `json:"availability_score"`
+	LeftPercent    int    `json:"left_percent"`
+	ResetsAt       string `json:"resets_at,omitempty"`
+	LastUsed       string `json:"last_used,omitempty"`
 	PrimaryPct     int    `json:"primary_percent,omitempty"`
 	SecondaryPct   int    `json:"secondary_percent,omitempty"`
 	ResetsIn       string `json:"resets_in,omitempty"`
@@ -1385,6 +1411,10 @@ type RobotProfileLimits struct {
 	Recommendation string `json:"recommendation,omitempty"`
 }
 
+// robotFetchLimits reads one account's limits; it is the dashboard's
+// fetchProfileLimits, held in a variable so tests can stand in a fake.
+var robotFetchLimits = fetchProfileLimits
+
 func runRobotLimits(cmd *cobra.Command, args []string) error {
 	start := time.Now()
 	provider := strings.ToLower(args[0])
@@ -1392,11 +1422,10 @@ func runRobotLimits(cmd *cobra.Command, args []string) error {
 	if _, ok := tools[provider]; !ok {
 		return robotError(cmd, "limits", "INVALID_PROVIDER",
 			fmt.Sprintf("unknown provider: %s", provider),
-			"valid providers: codex, claude, gemini",
+			"valid providers: "+supportedToolsList(),
 			nil)
 	}
 
-	// For now, use health data as a proxy. Full implementation would call usage APIs.
 	profiles, err := vault.List(provider)
 	if err != nil {
 		return robotError(cmd, "limits", "VAULT_ERROR",
@@ -1417,6 +1446,12 @@ func runRobotLimits(cmd *cobra.Command, args []string) error {
 		Profiles: make([]RobotProfileLimits, 0, len(profiles)),
 	}
 
+	// Each account's limits are read live, as the dashboard reads them; the
+	// activity log says when each was last used.
+	used := lastUsedByProfile()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
 	for _, profileName := range profiles {
 		if strings.HasPrefix(profileName, "_") {
 			continue
@@ -1425,24 +1460,47 @@ func runRobotLimits(cmd *cobra.Command, args []string) error {
 		limits := RobotProfileLimits{
 			Name: profileName,
 		}
+		if ts, ok := used[provider][profileName]; ok {
+			limits.LastUsed = ts.Format(time.RFC3339)
+		}
 
-		// Get health info for estimates
-		ph, _ := getProfileHealthWithIdentity(provider, profileName)
-		status := health.CalculateStatus(ph)
+		info, err := robotFetchLimits(ctx, provider, profileName)
+		if err != nil {
+			limits.Error = err.Error()
+			limits.Recommendation = "limits unavailable"
+			data.Profiles = append(data.Profiles, limits)
+			continue
+		}
 
-		switch status {
-		case health.StatusHealthy:
-			limits.AvailScore = 100
+		limits.AvailScore = info.AvailabilityScore()
+		if w := info.MostConstrainedWindow(); w != nil {
+			limits.LeftPercent = usage.PercentLeft(w)
+			if !w.ResetsAt.IsZero() {
+				limits.ResetsAt = w.ResetsAt.UTC().Format(time.RFC3339)
+			}
+		}
+		if info.PrimaryWindow != nil {
+			limits.PrimaryPct = info.PrimaryWindow.UsedPercent
+		}
+		if info.SecondaryWindow != nil {
+			limits.SecondaryPct = info.SecondaryWindow.UsedPercent
+		}
+		if ttl := info.TimeUntilReset(); ttl > 0 {
+			limits.ResetsIn = robotFormatDuration(ttl)
+		}
+		if info.BurnRate != nil && info.BurnRate.TokensPerHour > 0 {
+			limits.BurnRate = formatBurnRate(info.BurnRate.TokensPerHour)
+		}
+		if ttl := info.TimeToDepletion(); ttl > 0 {
+			limits.DepletesIn = robotFormatDuration(ttl)
+		}
+		switch {
+		case limits.LeftPercent >= 50:
 			limits.Recommendation = "ready to use"
-		case health.StatusWarning:
-			limits.AvailScore = 50
+		case limits.LeftPercent >= 20:
 			limits.Recommendation = "use with caution"
-		case health.StatusCritical:
-			limits.AvailScore = 10
-			limits.Recommendation = "avoid - issues detected"
 		default:
-			limits.AvailScore = 0
-			limits.Recommendation = "status unknown"
+			limits.Recommendation = "avoid - little left before the reset"
 		}
 
 		data.Profiles = append(data.Profiles, limits)
