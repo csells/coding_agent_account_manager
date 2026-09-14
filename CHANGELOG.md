@@ -71,6 +71,10 @@ logging in again. Architecture and the facts behind it:
   log; the API's `/usage` `last_used` comes from the activity log (the
   probe time is `last_checked`). `limits --format json` is unchanged,
   pinned byte for byte.
+- **Shared files are respected on clear**: Antigravity and the Gemini CLI
+  share `~/.gemini`'s OAuth cache and accounts file; clearing one tool's
+  credential no longer logs the other out. `google_accounts.json` is part
+  of Gemini's file set.
 - **Dashboard edges**: help teaches `n`; the export dialog names its
   directory and that the bundle is plaintext; empty states say "press n";
   the name dialog speaks of login; `l` moves right; the palette has New

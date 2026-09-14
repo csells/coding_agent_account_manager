@@ -7,9 +7,15 @@ file:line was read at the time; the five most consequential (1, 2, 3, 6, 9)
 were re-verified by hand. Status (2026-09-14): findings 1–15 (credential
 paths) and 26–32 (the dashboard's edges) are fixed on the `account-switcher`
 branch per `SURFACE_PLAN.md` gaps 1, 2, 3 and 5; findings 16–25 (output
-formats) are fixed as gap 4. Left as noted in the gap 4 report: four stale
-"valid providers: codex, claude, gemini" hints in `robot.go` outside the
-fixed commands, and `limits --best`/`--recommend` still say "used".
+formats) are fixed as gap 4. A review of the whole change (19 findings)
+was acted on the same night: one shared capture for logins that also
+handles system-profile matches, clearing that respects files shared
+between tools, refresh moved into the switch core behind the one gate,
+terminal pool refusals, login logging through the core, and the dead
+threshold and handoff-login plumbing removed. Left as noted in the gap 4
+report: four stale "valid providers: codex, claude, gemini" hints in
+`robot.go` outside the fixed commands, and `limits --best`/`--recommend`
+still say "used".
 
 Rule numbers refer to `AGENTS.md` "Credentials — the rules the switcher lives
 by": (1) re-capture before you replace, (2) a login is a logout first,
