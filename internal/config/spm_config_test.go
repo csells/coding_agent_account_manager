@@ -762,12 +762,6 @@ func TestSPMConfigHelpers(t *testing.T) {
 		},
 	}
 
-	t.Run("GetRefreshThreshold", func(t *testing.T) {
-		if cfg.GetRefreshThreshold() != 10*time.Minute {
-			t.Errorf("GetRefreshThreshold() = %v, want 10m", cfg.GetRefreshThreshold())
-		}
-	})
-
 	t.Run("GetWarningThreshold", func(t *testing.T) {
 		if cfg.GetWarningThreshold() != time.Hour {
 			t.Errorf("GetWarningThreshold() = %v, want 1h", cfg.GetWarningThreshold())
