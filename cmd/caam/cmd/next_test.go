@@ -308,3 +308,68 @@ func containsHelper(s, substr string) bool {
 	}
 	return false
 }
+
+// caam next switches through the shared core: when the outgoing profile
+// cannot be re-captured the switch is refused with the live credential
+// untouched, instead of a warning and a stale vault copy. --force proceeds.
+func TestNext_AbortsWhenRecaptureFails(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	_, cleanup := setupNextTestEnv(t)
+	defer cleanup()
+
+	// Real-shaped credentials: the live file is a's, rotated since capture,
+	// so it still reads as a but a re-capture has to write.
+	base := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC).Unix()
+	stale := syntheticCodexAuth(t, "a@example.com", "a-stale", base)
+	rotated := syntheticCodexAuth(t, "a@example.com", "a-rotated", base+3600)
+	incoming := syntheticCodexAuth(t, "b@example.com", "b", base)
+	write := func(path string, data []byte) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(vault.ProfilePath("codex", "a"), "auth.json"), stale)
+	write(filepath.Join(vault.ProfilePath("codex", "b"), "auth.json"), incoming)
+	authPath := filepath.Join(os.Getenv("CODEX_HOME"), "auth.json")
+	write(authPath, rotated)
+	spmCfg := []byte("version: 1\nstealth:\n  rotation:\n    enabled: true\n    algorithm: round_robin\n")
+	if err := os.MkdirAll(filepath.Dir(config.SPMConfigPath()), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.SPMConfigPath(), spmCfg, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Make a's vault copy un-refreshable.
+	aDir := vault.ProfilePath("codex", "a")
+	if err := os.Chmod(aDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(aDir, 0o700) })
+
+	newCmd := func(force bool) *cobra.Command {
+		c := &cobra.Command{}
+		c.Flags().Bool("dry-run", false, "")
+		c.Flags().Bool("quiet", true, "")
+		c.Flags().Bool("force", force, "")
+		c.Flags().String("algorithm", "", "")
+		return c
+	}
+	if err := runNext(newCmd(false), []string{"codex"}); err == nil {
+		t.Fatal("runNext() should refuse when the outgoing profile cannot be re-captured")
+	}
+	if got, _ := os.ReadFile(authPath); string(got) != string(rotated) {
+		t.Fatalf("live credential was replaced despite the refusal: %s", got)
+	}
+	if err := runNext(newCmd(true), []string{"codex"}); err != nil {
+		t.Fatalf("forced runNext() error = %v", err)
+	}
+	if got, _ := os.ReadFile(authPath); string(got) != string(incoming) {
+		t.Fatalf("forced next did not switch to b: %s", got)
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	caamdb "github.com/Dicklesworthstone/coding_agent_account_manager/internal/db"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/rotation"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
 	"github.com/spf13/cobra"
 )
@@ -93,16 +94,10 @@ func runNext(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Only one profile available for %s (%s), already active\n", tool, profiles[0])
 			return nil
 		}
-		// Single profile case: just activate it
+		// Single profile case: switch to it through the shared core.
 		if !dryRun {
-			// Re-snapshot outgoing profile's rotated tokens first (see activate.go).
-			if currentProfile != "" && currentProfile != profiles[0] {
-				if err := vault.ResnapshotOutgoing(fileSet, currentProfile, profiles[0]); err != nil && !quiet {
-					fmt.Printf("Warning: could not re-snapshot outgoing profile %s: %v\n", currentProfile, err)
-				}
-			}
-			if err := vault.Restore(fileSet, profiles[0]); err != nil {
-				return fmt.Errorf("activate failed: %w", err)
+			if _, err := switcher.Switch(cmd.Context(), vault, fileSet, switcher.Options{Profile: profiles[0], Force: force, Source: "next"}); err != nil {
+				return err
 			}
 		}
 		if !quiet {
@@ -215,27 +210,30 @@ func runNext(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Re-snapshot outgoing profile's rotated tokens before clobbering the live
-	// file (refresh-token rotation safety; see activate.go / ResnapshotOutgoing).
-	if currentProfile != "" && currentProfile != selection.Selected {
-		if err := vault.ResnapshotOutgoing(fileSet, currentProfile, selection.Selected); err != nil && !quiet {
-			fmt.Printf("Warning: could not re-snapshot outgoing profile %s: %v\n", currentProfile, err)
+	// Switch through the shared core: the outgoing profile is re-captured
+	// first and a failed re-capture refuses the switch unless --force; the
+	// activity log gets the deactivate/activate pair (issue #31).
+	var logDB *caamdb.DB
+	if spmCfg.Analytics.Enabled {
+		logDB = db
+	}
+	res, err := switcher.Switch(cmd.Context(), vault, fileSet, switcher.Options{
+		Profile: selection.Selected,
+		Force:   force,
+		Config:  spmCfg,
+		DB:      logDB,
+		Source:  "next",
+	})
+	if err != nil {
+		return err
+	}
+	if !quiet {
+		if res.RecaptureWarning != "" {
+			fmt.Printf("Warning: %s\n", res.RecaptureWarning)
 		}
-	}
-
-	// Activate selected profile
-	if err := vault.Restore(fileSet, selection.Selected); err != nil {
-		return fmt.Errorf("activate failed: %w", err)
-	}
-
-	// Log event. logProfileSwitch also emits a duration-bearing deactivate event
-	// for the outgoing profile so usage analytics accrue active time (issue #31).
-	if spmCfg.Analytics.Enabled && db != nil {
-		logProfileSwitch(db, tool, currentProfile, selection.Selected, map[string]any{
-			"previous_profile": currentProfile,
-			"selection_source": "next",
-			"algorithm":        selection.Algorithm,
-		})
+		if res.Recaptured {
+			fmt.Printf("Re-captured outgoing profile %s (token rotation safety)\n", res.PreviousProfile)
+		}
 	}
 
 	if !quiet {
