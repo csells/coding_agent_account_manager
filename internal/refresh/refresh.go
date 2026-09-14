@@ -21,9 +21,6 @@ import (
 // Prevents memory exhaustion from malicious/buggy servers.
 const maxErrorBodySize = 64 * 1024 // 64KB
 
-// DefaultRefreshThreshold is the time before expiry to trigger a refresh.
-const DefaultRefreshThreshold = 10 * time.Minute
-
 // refusedStatus matches an HTTP 401 as a status, not as digits inside a
 // larger number.
 var refusedStatus = regexp.MustCompile(`\b401\b`)
