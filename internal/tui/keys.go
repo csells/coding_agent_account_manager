@@ -67,7 +67,7 @@ func defaultKeyMap() keyMap {
 		),
 		Backup: key.NewBinding(
 			key.WithKeys("b"),
-			key.WithHelp("b", "backup current auth"),
+			key.WithHelp("b", "re-capture the signed-in account"),
 		),
 		Delete: key.NewBinding(
 			key.WithKeys("d"),
