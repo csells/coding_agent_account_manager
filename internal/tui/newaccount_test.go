@@ -423,27 +423,27 @@ func TestRefresh_OffersTheLoginWhenTheSessionIsDead(t *testing.T) {
 	h := &newAccountHooks{}
 	m := modelWithTwoClaudeProfiles(h.hooks(t))
 	m.width, m.height = 170, 40
-	// Kimi renews its own tokens: a refused token means a new login.
-	m.profiles["kimi"] = []Profile{{Name: "k@example.com", Provider: "kimi", IsActive: true}}
+	// zcode renews its own tokens: a refused token means a new login.
+	m.profiles["zcode"] = []Profile{{Name: "z@example.com", Provider: "zcode", IsActive: true}}
 	m.syncProfilesPanel()
-	for m.currentProvider() != "kimi" {
+	for m.currentProvider() != "zcode" {
 		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
 		m = updated.(Model)
 	}
-	m.applyLimitsLoaded(limitsLoadedMsg{provider: "kimi", profile: "k@example.com", err: errors.New("unauthorized: status 401")})
+	m.applyLimitsLoaded(limitsLoadedMsg{provider: "zcode", profile: "z@example.com", err: errors.New("unauthorized: status 401")})
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
 	m = updated.(Model)
 	if m.state != stateReloginConfirm || m.confirmDialog == nil {
 		t.Fatalf("r should offer a login, state=%v status=%q", m.state, m.statusMsg)
 	}
-	if view := ansi.Strip(m.View()); !strings.Contains(view, "Log in again?") || !strings.Contains(view, "k@example.com") {
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "Log in again?") || !strings.Contains(view, "z@example.com") {
 		t.Fatalf("the offer should name the account:\n%s", view)
 	}
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
 	m = updated.(Model)
-	if cmd == nil || m.state != stateList || !strings.Contains(m.statusMsg, "Complete the kimi login") {
-		t.Fatalf("yes should start the kimi login: cmd=%v state=%v status=%q", cmd, m.state, m.statusMsg)
+	if cmd == nil || m.state != stateList || !strings.Contains(m.statusMsg, "Complete the zcode login") {
+		t.Fatalf("yes should start the zcode login: cmd=%v state=%v status=%q", cmd, m.state, m.statusMsg)
 	}
 
 	// A Codex refresh that comes back "invalidated" makes the same offer.
