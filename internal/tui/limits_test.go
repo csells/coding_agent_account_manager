@@ -532,7 +532,7 @@ func TestVerticalLayout_SelectedAccountExpandsInPlace(t *testing.T) {
 }
 
 func TestVerticalLayout_ScrollsByAccountKeepingTheExpansionVisible(t *testing.T) {
-	m := modelWithLimits(t, 170, 22) // few rows: header (2) + strip (7) + pane
+	m := modelWithLimits(t, 170, 24) // few rows: header (2) + strip (8) + pane
 	for _, n := range []string{"c", "d", "e", "f", "g", "h"} {
 		m.profiles["claude"] = append(m.profiles["claude"], Profile{Name: n + "@example.com", Provider: "claude"})
 	}
@@ -545,7 +545,7 @@ func TestVerticalLayout_ScrollsByAccountKeepingTheExpansionVisible(t *testing.T)
 	if !strings.Contains(view, "h@example.com") || !strings.Contains(view, "└─") {
 		t.Fatalf("last account and its expansion must be in view:\n%s", view)
 	}
-	if lipgloss.Height(m.View()) > 22 {
+	if lipgloss.Height(m.View()) > 24 {
 		t.Fatalf("view taller than the terminal: %d", lipgloss.Height(m.View()))
 	}
 }

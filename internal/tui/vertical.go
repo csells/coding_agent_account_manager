@@ -192,7 +192,7 @@ func (m Model) renderProviderStrip(inner int) string {
 	default:
 		body = m.renderProviderTabRow(inner)
 	}
-	return ps.Border.Width(paneWidth(m.width)).Render(body)
+	return ps.Border.Width(paneWidth(m.width)).Render(fitWidth(body, inner))
 }
 
 // renderProviderCards lays out three-line cards, wrapping into rows.
@@ -212,17 +212,27 @@ func (m Model) renderProviderCards(inner int) string {
 	}
 
 	// Each card is three plain lines cut to the card's text width, then
-	// painted in one style; the unselected card's count and summary carry
-	// their own colours on top.
-	pad := ps.Item.GetHorizontalPadding()
-	textW := cw - pad
-	if textW < 8 {
-		textW = 8
-	}
+	// painted in one style. The style's frame (padding, margins) counts
+	// against the card's width, and the painted line is measured and cut
+	// again if it still overshoots: a row even one column wider than the
+	// pane is soft-wrapped by the border style, which is what interleaved
+	// the second row of cards with the first.
 	paint := func(style lipgloss.Style, text string) string {
-		return padStyled(style.Render(truncateWithEllipsis(text, textW)), cw, style)
+		textW := cw - style.GetHorizontalFrameSize()
+		if textW < 6 {
+			textW = 6
+		}
+		out := style.Render(truncateWithEllipsis(text, textW))
+		for lipgloss.Width(out) > cw && textW > 6 {
+			textW--
+			out = style.Render(truncateWithEllipsis(text, textW))
+		}
+		return padStyled(out, cw, style)
 	}
+	textW := cw - ps.Item.GetHorizontalFrameSize()
 
+	// Providers with no accounts are not cards: they go on one muted line
+	// under the grid, so they never read as part of the card above them.
 	var folded []string
 	var rendered []string
 	for _, c := range cards {
@@ -256,21 +266,9 @@ func (m Model) renderProviderCards(inner int) string {
 				l3 = paint(style, c.summary)
 			} else {
 				l3 = padStyled(style.Render("")+c.summaryS, cw, style)
-			}
-		}
-		rendered = append(rendered, lipgloss.JoinVertical(lipgloss.Left, l1, l2, l3))
-	}
-	if len(folded) > 0 {
-		muted := m.styles.StatusText
-		text := strings.Join(folded, " · ")
-		l1 := paint(muted, "  not logged in")
-		l2 := paint(muted, text)
-		l3 := paint(muted, "")
-		if lipgloss.Width(text) > textW {
-			// Split the names over the two remaining lines.
-			if cut := strings.LastIndex(text[:textW], " · "); cut > 0 {
-				l2 = paint(muted, text[:cut])
-				l3 = paint(muted, strings.TrimPrefix(text[cut:], " · "))
+				if lipgloss.Width(l3) > cw {
+					l3 = paint(style, c.summary)
+				}
 			}
 		}
 		rendered = append(rendered, lipgloss.JoinVertical(lipgloss.Left, l1, l2, l3))
@@ -289,9 +287,25 @@ func (m Model) renderProviderCards(inner int) string {
 			}
 			parts = append(parts, rendered[j])
 		}
-		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, parts...))
+		rows = append(rows, fitWidth(lipgloss.JoinHorizontal(lipgloss.Top, parts...), inner))
+	}
+	if len(folded) > 0 {
+		muted := m.styles.StatusText
+		rows = append(rows, fitWidth(muted.Render(truncateWithEllipsis("  not logged in: "+strings.Join(folded, " · "), inner)), inner))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+// fitWidth cuts every line of a block to width so a style with a fixed
+// Width never soft-wraps it. Lines already within width are untouched.
+func fitWidth(block string, width int) string {
+	lines := strings.Split(block, "\n")
+	for i, line := range lines {
+		if lipgloss.Width(line) > width {
+			lines[i] = truncateStyledWidth(line, width)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // renderProviderChips lays out one-line chips, wrapping by width.
@@ -343,7 +357,7 @@ func (m Model) renderProviderChips(inner int) string {
 	if len(row) > 0 {
 		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, row...))
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+	return fitWidth(lipgloss.JoinVertical(lipgloss.Left, rows...), inner)
 }
 
 // renderProviderTabRow is the narrow strip: one row of tabs, scrolled so
@@ -403,7 +417,7 @@ func (m Model) renderProviderTabRow(inner int) string {
 	if end < len(cards) {
 		parts = append(parts, m.styles.StatusText.Render(" ›"))
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+	return fitWidth(lipgloss.JoinHorizontal(lipgloss.Top, parts...), inner)
 }
 
 // --- accounts pane --------------------------------------------------------
@@ -453,7 +467,7 @@ func (m Model) renderAccountsPane(inner, height int) string {
 	bodyHeight := height - 2 - 1 // border, title
 	if len(profiles) == 0 {
 		lines = append(lines, ps.Empty.Render(emptyProfilesMessage(provider)))
-		return ps.Border.Width(paneWidth(m.width)).Height(height - 2).Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+		return ps.Border.Width(paneWidth(m.width)).Height(height - 2).Render(fitWidth(lipgloss.JoinVertical(lipgloss.Left, lines...), inner))
 	}
 
 	tableRows := bodyHeight - 1 // header
@@ -530,7 +544,7 @@ func (m Model) renderAccountsPane(inner, height int) string {
 		lines = append(lines, "")
 	}
 
-	return ps.Border.Width(paneWidth(m.width)).Height(height - 2).Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	return ps.Border.Width(paneWidth(m.width)).Height(height - 2).Render(fitWidth(lipgloss.JoinVertical(lipgloss.Left, lines...), inner))
 }
 
 // accountColumns builds the table's columns for the tier and fits them to
@@ -818,11 +832,14 @@ func (m Model) vaultPathFor(provider, name string) string {
 
 // --- small rendering helpers ---------------------------------------------
 
-// padStyled pads an already-styled line to width using the row style, so a
-// background reaches the pane's edge.
+// padStyled pads an already-styled line to width in the row style's
+// background, so a highlight reaches the pane's edge. Only the background
+// is carried: a style with padding or margins would add its frame to the
+// padding run and overshoot the width — which is how every provider card
+// came out one column too wide and a full row of them soft-wrapped.
 func padStyled(s string, width int, style lipgloss.Style) string {
 	if pad := width - lipgloss.Width(s); pad > 0 {
-		return s + style.Render(strings.Repeat(" ", pad))
+		return s + lipgloss.NewStyle().Background(style.GetBackground()).Render(strings.Repeat(" ", pad))
 	}
 	return s
 }
