@@ -12,6 +12,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
@@ -359,6 +360,107 @@ func TestProviderLabels(t *testing.T) {
 	for id, want := range cases {
 		if got := providerLabel(id); got != want {
 			t.Errorf("providerLabel(%q) = %q, want %q", id, got, want)
+		}
+	}
+}
+
+// TestSelectedRowBackgroundCoversEveryCell: the selection highlight used to
+// stop at the first cell with its own style, which on the active row is the
+// green dot — so selecting the active account highlighted two characters.
+// Every cell of the selected row must carry the row background, active or
+// not, and unselected rows must carry none of it.
+func TestSelectedRowBackgroundCoversEveryCell(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	panel := NewProfilesPanel()
+	panel.SetSize(140, 20)
+	panel.SetProvider("claude")
+	panel.SetProfiles([]ProfileInfo{
+		{Name: "idle@example.com", AuthMode: "oauth", HealthStatus: health.StatusHealthy, Account: "idle@example.com"},
+		{Name: "live@example.com", AuthMode: "oauth", HealthStatus: health.StatusHealthy, Account: "live@example.com", IsActive: true},
+	})
+
+	bg := sgrBackground(t, panel.styles.SelectedRow)
+
+	for _, sel := range []int{0, 1} {
+		panel.SetSelected(sel)
+		lines := strings.Split(panel.View(), "\n")
+		var selectedLine, otherLine string
+		for _, l := range lines {
+			switch {
+			case strings.Contains(l, panel.profiles[sel].Name):
+				selectedLine = l
+			case strings.Contains(l, panel.profiles[1-sel].Name):
+				otherLine = l
+			}
+		}
+		if selectedLine == "" || otherLine == "" {
+			t.Fatalf("rows not found in view:\n%s", panel.View())
+		}
+		// Every visible cell of the selected row sits inside a span that set
+		// the row background: name, auth, status, last used, account.
+		for _, cell := range []string{panel.profiles[sel].Name, "oauth", "Healthy", "never", "@example.com"} {
+			if !spanHasBackground(selectedLine, cell, bg) {
+				t.Errorf("selected=%d: cell %q lacks the row background:\n%q", sel, cell, selectedLine)
+			}
+		}
+		if strings.Contains(otherLine, bg) {
+			t.Errorf("selected=%d: unselected row carries the selection background:\n%q", sel, otherLine)
+		}
+	}
+}
+
+// sgrBackground extracts the background SGR parameters a style emits.
+func sgrBackground(t *testing.T, s lipgloss.Style) string {
+	t.Helper()
+	rendered := lipgloss.NewStyle().Background(s.GetBackground()).Render("x")
+	i := strings.Index(rendered, "48;")
+	if i < 0 {
+		t.Fatalf("style emits no background: %q", rendered)
+	}
+	j := strings.Index(rendered[i:], "m")
+	return rendered[i : i+j]
+}
+
+// spanHasBackground reports whether the styled span that contains text was
+// opened with the given background parameters (no reset in between).
+func spanHasBackground(line, text, bg string) bool {
+	idx := strings.Index(line, text)
+	for idx >= 0 {
+		before := line[:idx]
+		if reset := strings.LastIndex(before, "\x1b[0m"); reset >= 0 {
+			before = before[reset:]
+		}
+		if strings.Contains(before, bg) {
+			return true
+		}
+		next := strings.Index(line[idx+1:], text)
+		if next < 0 {
+			break
+		}
+		idx += 1 + next
+	}
+	return false
+}
+
+// TestSelectionColourDiffersFromZebraStripe: the profile list stripes odd
+// rows with SurfaceMuted, so a Selection of the same colour cannot be told
+// from a stripe. Every palette, both modes.
+func TestSelectionColourDiffersFromZebraStripe(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	for _, contrast := range []ThemeContrast{ContrastNormal, ContrastHigh} {
+		for _, mode := range []ThemeMode{ThemeLight, ThemeDark} {
+			pal := paletteFor(ThemeOptions{Mode: mode, Contrast: contrast})
+			sel := lipgloss.NewStyle().Background(pal.Selection).Render("x")
+			alt := lipgloss.NewStyle().Background(pal.SurfaceMuted).Render("x")
+			if sel == alt {
+				t.Errorf("%v/%v: Selection renders the same as SurfaceMuted (%q)", contrast, mode, sel)
+			}
 		}
 	}
 }

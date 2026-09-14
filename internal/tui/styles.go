@@ -320,7 +320,10 @@ func defaultPalette(opts ThemeOptions) Palette {
 		SurfaceMuted: resolveColor("#e2e8f0", "#1f2937", opts),
 		Border:       resolveColor("#cbd5e1", "#1f2937", opts),
 		BorderMuted:  resolveColor("#e2e8f0", "#374151", opts),
-		Selection:    resolveColor("#e2e8f0", "#1f2937", opts),
+		// Distinct from SurfaceMuted: the profile list zebra-stripes odd rows
+		// with SurfaceMuted, so a selection the same colour is invisible
+		// on those rows and indistinguishable from a stripe on the others.
+		Selection:    resolveColor("#dbeafe", "#1e3a5f", opts),
 		KeycapBg:     resolveColor("#e2e8f0", "#1f2937", opts),
 		KeycapBorder: resolveColor("#94a3b8", "#374151", opts),
 		KeycapText:   resolveColor("#0f172a", "#e6edf3", opts),

@@ -471,17 +471,42 @@ func (p *ProfilesPanel) View() string {
 	// Profile rows with zebra striping
 	var rows []string
 	for i, prof := range p.profiles {
+		// The row's own style (selection, zebra stripe) is applied to every
+		// cell rather than wrapped around the assembled line: a cell's own
+		// ANSI reset would otherwise end the row background at the first
+		// styled cell, which on the active row is the green dot — so the
+		// selection highlight covered two characters of it and the rest of
+		// the row looked unselected.
+		var rowStyle lipgloss.Style
+		switch {
+		case i == p.selected:
+			rowStyle = p.styles.SelectedRow
+		case i%2 == 1:
+			// Alternate rows get subtle background
+			rowStyle = p.styles.RowAlt
+		default:
+			rowStyle = p.styles.Row
+		}
+		inRow := func(s lipgloss.Style) lipgloss.Style { return s.Inherit(rowStyle) }
+		rowBG := rowStyle.GetBackground()
+		_, noBG := rowBG.(lipgloss.NoColor)
+		hasBG := rowBG != nil && !noBG
+
 		// Left icon indicator for active profile
-		indicator := "  "
+		indicator := rowStyle.Render("  ")
 		if prof.IsActive {
-			indicator = p.styles.ActiveIndicator.Render("● ")
+			indicator = inRow(p.styles.ActiveIndicator).Render("● ")
 		}
 
-		// Status badge with icon and consistent styling
+		// Status badge with icon and consistent styling. The badge paints
+		// its own surface; on a highlighted row it takes the row's instead.
 		statusText := formatTUIStatus(&prof)
 		statusBadgeStyle := p.statusBadgeStyle(prof.HealthStatus)
+		if hasBG {
+			statusBadgeStyle = statusBadgeStyle.Background(rowBG)
+		}
 		if prof.Locked && layout == "full" {
-			statusText += " " + p.styles.LockIcon.Render("🔒")
+			statusText += " " + inRow(p.styles.LockIcon).Render("🔒")
 		}
 
 		// Last used - relative time (right-aligned in display)
@@ -500,36 +525,32 @@ func (p *ProfilesPanel) View() string {
 		paddedStatusText := padRight(statusText, colWidths.status)
 		renderedStatus := statusBadgeStyle.Render(paddedStatusText)
 
-		rowParts := []string{indicator + paddedName}
+		metadata := inRow(p.styles.RowMetadata)
+		rowParts := []string{indicator + rowStyle.Render(paddedName)}
 		if layout == "full" {
 			// Auth mode as secondary metadata
-			rowParts = append(rowParts, p.styles.RowMetadata.Render(padRight(prof.AuthMode, colWidths.auth)))
+			rowParts = append(rowParts, metadata.Render(padRight(prof.AuthMode, colWidths.auth)))
 		}
 		rowParts = append(rowParts, renderedStatus)
 		if layout != "narrow" {
 			// Right-aligned time value
-			rowParts = append(rowParts, p.styles.RowMetadata.Render(padRight(lastUsed, colWidths.lastUsed)))
+			rowParts = append(rowParts, metadata.Render(padRight(lastUsed, colWidths.lastUsed)))
 		}
 		if layout == "full" {
-			rowParts = append(rowParts, p.styles.RowMetadata.Render(padRight(account, colWidths.account)))
+			rowParts = append(rowParts, metadata.Render(padRight(account, colWidths.account)))
 		}
 
-		rowStr := strings.Join(rowParts, " ")
+		sep := rowStyle.Render(" ")
+		rowStr := strings.Join(rowParts, sep)
 		if prof.ProjectDefault && layout == "full" {
-			rowStr += " " + p.styles.ProjectBadge.Render("[PROJECT DEFAULT]")
+			rowStr += sep + inRow(p.styles.ProjectBadge).Render("[PROJECT DEFAULT]")
 		}
-
-		// Apply row style with zebra striping
-		var style lipgloss.Style
-		if i == p.selected {
-			style = p.styles.SelectedRow
-		} else if i%2 == 1 {
-			// Alternate rows get subtle background
-			style = p.styles.RowAlt
-		} else {
-			style = p.styles.Row
+		// Carry the background to the panel's edge so a highlighted row
+		// reads as one bar, not as a run of coloured cells.
+		if pad := (p.width - 4) - lipgloss.Width(rowStr); hasBG && pad > 0 {
+			rowStr += rowStyle.Render(strings.Repeat(" ", pad))
 		}
-		rows = append(rows, style.Render(rowStr))
+		rows = append(rows, rowStr)
 	}
 
 	// Combine header and rows
