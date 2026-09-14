@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,6 +33,11 @@ var weztermLoginAllCmd = &cobra.Command{
 	Short: "Send /login to all matching WezTerm panes",
 	Long: `Send /login to all matching WezTerm panes for the specified tool.
 
+Prefer "caam wezterm switch-all": it switches the account under the panes and
+resumes them with no login. Use login-all only when there is no other vaulted
+account to switch to. The signed-in account is captured first, since a login
+is a logout first.
+
 By default, panes are matched by scanning recent output for a tool-specific
 pattern. Use --all to broadcast to every pane.
 
@@ -42,6 +48,24 @@ Examples:
 `,
 	Args: cobra.ExactArgs(1),
 	RunE: runWeztermLoginAll,
+}
+
+var weztermSwitchAllCmd = &cobra.Command{
+	Use:   "switch-all <tool>",
+	Short: "Switch the tool's account and resume every rate-limited WezTerm pane on its history",
+	Long: `Switch the tool to its next vaulted account (through the switch core, so the
+outgoing account is re-captured first), then end each rate-limited pane's
+session and reopen it on its history with the tool's resume command
+(claude --continue, codex resume --last, gemini --resume latest). No login is
+run: a login is a logout first. With only one vaulted account there is nothing
+to switch to; use login-all then.
+
+Examples:
+  caam wezterm switch-all claude
+  caam wezterm switch-all claude --all --yes
+`,
+	Args: cobra.ExactArgs(1),
+	RunE: runWeztermSwitchAll,
 }
 
 var weztermOAuthReportCmd = &cobra.Command{
@@ -96,6 +120,11 @@ Examples:
 func init() {
 	rootCmd.AddCommand(weztermCmd)
 	weztermCmd.AddCommand(weztermLoginAllCmd)
+	weztermCmd.AddCommand(weztermSwitchAllCmd)
+	weztermSwitchAllCmd.Flags().Bool("all", false, "every pane, not only rate-limited ones")
+	weztermSwitchAllCmd.Flags().Bool("yes", false, "skip confirmation prompt")
+	weztermSwitchAllCmd.Flags().Bool("dry-run", false, "show target panes without switching")
+	weztermSwitchAllCmd.Flags().String("match", "", "override the pane-matching pattern")
 	weztermCmd.AddCommand(weztermOAuthReportCmd)
 	weztermCmd.AddCommand(weztermRecoverCmd)
 
@@ -135,11 +164,140 @@ var (
 	weztermSendTextFunc  = weztermSendText
 	// weztermBeforeLogin captures the tool's signed-in account before any
 	// pane is told to log in; tests replace it.
-	weztermBeforeLogin           = func(tool string) error { return captureSignedInAccount(tool) }
+	weztermBeforeLogin = func(tool string) error { return captureSignedInAccount(tool) }
+	// weztermSwitchFunc switches the tool to its next vaulted account and
+	// returns it; tests replace it.
+	weztermSwitchFunc = func(tool string) (string, error) {
+		account, _, err := switchToNextAccount(context.Background(), tool)
+		return account, err
+	}
+	// weztermResumeDelay is the pause between ending a session and resuming it.
+	weztermResumeDelay           = 1500 * time.Millisecond
 	weztermIsTerminal            = term.IsTerminal
 	weztermNow                   = time.Now
 	weztermDebugWriter io.Writer = os.Stderr
 )
+
+// weztermTargetsFor lists the panes a command acts on: every pane with
+// --all, else those whose recent output matches the tool's rate-limit or
+// tool marker (or --match).
+func weztermTargetsFor(cmd *cobra.Command, tool string) ([]weztermTarget, error) {
+	if _, err := weztermLookupFunc("wezterm"); err != nil {
+		return nil, fmt.Errorf("wezterm CLI not found in PATH; install from https://wezfurlong.org/wezterm/install/")
+	}
+	all, _ := cmd.Flags().GetBool("all")
+	matchOverride, _ := cmd.Flags().GetString("match")
+	logger := weztermDebugLogger()
+
+	panes, err := weztermListPanesFunc()
+	if err != nil {
+		return nil, err
+	}
+	if len(panes) == 0 {
+		return nil, fmt.Errorf("no wezterm panes found; start wezterm first or use 'wezterm cli list-clients' to verify")
+	}
+	var matcher *regexp.Regexp
+	if !all && matchOverride != "" {
+		matcher, err = regexp.Compile(matchOverride)
+		if err != nil {
+			return nil, fmt.Errorf("invalid match pattern: %w", err)
+		}
+	}
+	var targets []weztermTarget
+	for _, pane := range panes {
+		if all {
+			targets = append(targets, weztermTarget{Pane: pane, Reason: "all"})
+			continue
+		}
+		text, err := weztermGetTextFunc(pane.ID)
+		if err != nil {
+			if logger != nil {
+				logger.Warn("wezterm pane read failed", "pane_id", pane.ID, "title", pane.Title, "error", err)
+			}
+			continue
+		}
+		match := matchWeztermPane(tool, text, matcher)
+		if logger != nil {
+			logger.Debug("pane scan", "pane_id", pane.ID, "title", pane.Title, "matched", match.Matched, "reason", match.Reason, "tool", tool)
+		}
+		if match.Matched {
+			targets = append(targets, weztermTarget{Pane: pane, Reason: match.Reason})
+		}
+	}
+	return targets, nil
+}
+
+func runWeztermSwitchAll(cmd *cobra.Command, args []string) error {
+	tool := strings.ToLower(strings.TrimSpace(args[0]))
+	if _, ok := resumeCommands[tool]; !ok {
+		return fmt.Errorf("%s has no resume command (supported: claude, codex, gemini, kimi)", tool)
+	}
+	targets, err := weztermTargetsFor(cmd, tool)
+	if err != nil {
+		return err
+	}
+	if len(targets) == 0 {
+		fmt.Fprintln(cmd.OutOrStdout(), "No matching panes found")
+		return nil
+	}
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	yes, _ := cmd.Flags().GetBool("yes")
+	if dryRun {
+		fmt.Fprintf(cmd.OutOrStdout(), "Would switch %s and resume %d pane(s):\n", tool, len(targets))
+		for _, target := range targets {
+			fmt.Fprintf(cmd.OutOrStdout(), "  pane %d %s (%s)\n", target.Pane.ID, target.Pane.Title, target.Reason)
+		}
+		return nil
+	}
+	if !yes {
+		if !weztermIsTerminal(int(os.Stdin.Fd())) {
+			return fmt.Errorf("non-interactive session: use --yes or --dry-run")
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Switch %s to its next account and resume %d pane(s)? Each pane's session is ended and reopened on its history. [y/N]: ", tool, len(targets))
+		var resp string
+		fmt.Fscanln(os.Stdin, &resp)
+		resp = strings.TrimSpace(strings.ToLower(resp))
+		if resp != "y" && resp != "yes" {
+			fmt.Fprintln(cmd.OutOrStdout(), "Cancelled")
+			return nil
+		}
+	}
+
+	// One switch per tool: every pane shares the live credential.
+	account, err := weztermSwitchFunc(tool)
+	if err != nil {
+		if errors.Is(err, ErrNoOtherAccount) {
+			return fmt.Errorf("%s has no other vaulted account to switch to; log another in (caam add %s, or n in the dashboard), or use login-all", tool, tool)
+		}
+		return fmt.Errorf("not resuming any pane: %w", err)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Switched %s to %s\n", tool, account)
+
+	resume := resumeCommands[tool]
+	successCount, failCount := 0, 0
+	for _, target := range targets {
+		if err := weztermSendTextFunc(target.Pane.ID, "/exit\n"); err != nil {
+			failCount++
+			fmt.Fprintf(cmd.ErrOrStderr(), "pane %d: %v\n", target.Pane.ID, err)
+			continue
+		}
+		if weztermResumeDelay > 0 {
+			time.Sleep(weztermResumeDelay)
+		}
+		if err := weztermSendTextFunc(target.Pane.ID, resume+"\n"); err != nil {
+			failCount++
+			fmt.Fprintf(cmd.ErrOrStderr(), "pane %d: %v\n", target.Pane.ID, err)
+			continue
+		}
+		successCount++
+	}
+	if failCount > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "Resumed %d pane(s): %d succeeded, %d failed.\n", len(targets), successCount, failCount)
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(), "Resumed %d pane(s) on %s.\n", successCount, account)
+	}
+	return nil
+}
 
 func runWeztermLoginAll(cmd *cobra.Command, args []string) error {
 	tool := strings.ToLower(strings.TrimSpace(args[0]))

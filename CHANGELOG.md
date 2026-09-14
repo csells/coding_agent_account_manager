@@ -48,9 +48,14 @@ logging in again. Architecture and the facts behind it:
   runs the login, and files the new session under the account that signed
   in. The dashboard's `n` and `caam add` both use it (`add` no longer files
   the outgoing account as `_auto_backup_` or deletes files around the
-  keychain). The smart handoff no longer injects a login on top of a
-  restored credential; the coordinator and `wezterm login-all` capture the
-  signed-in account before injecting `/login` and refuse when they cannot;
+  keychain). The smart handoff, the coordinator and the new `caam wezterm
+  switch-all` no longer inject a login: on a rate limit they switch the
+  agent through the switch core, end the session and resume it on its
+  history (`claude --continue`, `codex resume --last`, `gemini --resume
+  latest`, `kimi --continue`). Only with no other vaulted account does the
+  coordinator fall back to `/login`, and then it captures the signed-in
+  account first and refuses when it cannot; `wezterm login-all` does the
+  same and points at switch-all;
   isolated `caam login` for Claude Code and Antigravity is refused on macOS
   while the keychain bridge is on; `caam watch` no longer files auto-named
   profiles.

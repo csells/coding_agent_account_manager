@@ -1125,3 +1125,49 @@ func TestRateLimit_LoginNotInjectedWhenCaptureFails(t *testing.T) {
 		t.Fatalf("capture then inject expected: captured=%d sent=%v", captured, sent)
 	}
 }
+
+// A rate-limited pane is recovered by switching the account under it and
+// resuming the session on its history — not by a new login. The command
+// layer's Recover does the switch and names the resume command; the
+// coordinator ends the session and types it.
+func TestCoordinator_SwitchesAndResumesARateLimitedPane(t *testing.T) {
+	client := &fakePaneClient{panes: []Pane{{PaneID: 1, Title: "claude-code"}}}
+	cfg := DefaultConfig()
+	cfg.LoginCooldown = 10 * time.Millisecond
+	cfg.ResumeDelay = 0
+	recovered := 0
+	cfg.Recover = func(ctx context.Context, paneID int) (string, error) {
+		recovered++
+		return "claude --continue", nil
+	}
+	cfg.BeforeLogin = func(ctx context.Context, paneID int) error {
+		t.Fatal("no login should be injected when a switch is possible")
+		return nil
+	}
+	coord := New(cfg)
+	coord.paneClient = client
+	client.output = "You've hit your limit on Claude usage today. This resets 2pm"
+	coord.pollPanes(context.Background())
+	sent := client.sentText()
+	if recovered != 1 || len(sent) != 2 || sent[0] != "/exit\n" || sent[1] != "claude --continue\n" {
+		t.Fatalf("want one switch, then /exit and the resume command; recovered=%d sent=%v", recovered, sent)
+	}
+}
+
+// With no other account to switch to, the old path stays: capture first,
+// then inject /login.
+func TestCoordinator_FallsBackToLoginWhenNoOtherAccount(t *testing.T) {
+	client := &fakePaneClient{panes: []Pane{{PaneID: 1, Title: "claude-code"}}}
+	cfg := DefaultConfig()
+	cfg.LoginCooldown = 10 * time.Millisecond
+	cfg.Recover = func(ctx context.Context, paneID int) (string, error) { return "", ErrNoOtherAccount }
+	captured := 0
+	cfg.BeforeLogin = func(ctx context.Context, paneID int) error { captured++; return nil }
+	coord := New(cfg)
+	coord.paneClient = client
+	client.output = "You've hit your limit on Claude usage today. This resets 2pm"
+	coord.pollPanes(context.Background())
+	if sent := client.sentText(); captured != 1 || len(sent) != 1 || sent[0] != "/login\n" {
+		t.Fatalf("want capture then /login: captured=%d sent=%v", captured, sent)
+	}
+}

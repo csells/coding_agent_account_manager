@@ -271,7 +271,11 @@ that run.
   them. Gaps 1 (one switch core), 2 (one refresh gate, no timers), 3
   (every login is capture → clear → login) and 5 (the dashboard's edges)
   and 4 (one vocabulary and "left, resets at" in every output) are done.
-- The smart handoff (`caam run` with handoff enabled) now switches the
-  credential under the running session and does not inject a login. The
-  session picks the new credential up on its next token refresh; until then
-  it is still on the rate-limited one. Restarting it switches at once.
+- A running session holds its credential in memory, so switching the
+  file under it is not enough. The smart handoff (`caam run` with handoff
+  enabled), the coordinator and `caam wezterm switch-all` therefore
+  switch through the core, end the session and resume it on its history
+  (`claude --continue`, `codex resume --last`, `gemini --resume latest`,
+  `kimi --continue`). Nothing injects `/login` while another vaulted
+  account exists; with none, the coordinator captures the signed-in
+  account and then sends `/login`, and `wezterm login-all` does the same.

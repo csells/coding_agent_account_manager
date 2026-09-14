@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -359,5 +360,48 @@ func TestRunWeztermLoginAll_CapturesBeforeSending(t *testing.T) {
 	weztermBeforeLogin = func(tool string) error { captured++; return nil }
 	if err := runWeztermLoginAll(cmd, []string{"claude"}); err != nil || captured != 1 || sent != 1 {
 		t.Fatalf("capture then send expected: err=%v captured=%d sent=%d", err, captured, sent)
+	}
+}
+
+// switch-all switches the tool's account once through the core, then ends
+// and resumes each rate-limited pane on its history. No /login is sent.
+func TestRunWeztermSwitchAll_SwitchesOnceThenResumesEachPane(t *testing.T) {
+	savedLookup, savedList, savedGet, savedSend, savedIsTerminal, savedSwitch, savedDelay := weztermLookupFunc, weztermListPanesFunc, weztermGetTextFunc, weztermSendTextFunc, weztermIsTerminal, weztermSwitchFunc, weztermResumeDelay
+	defer func() {
+		weztermLookupFunc, weztermListPanesFunc, weztermGetTextFunc, weztermSendTextFunc, weztermIsTerminal, weztermSwitchFunc, weztermResumeDelay = savedLookup, savedList, savedGet, savedSend, savedIsTerminal, savedSwitch, savedDelay
+	}()
+	weztermLookupFunc = func(string) (string, error) { return "wezterm", nil }
+	weztermListPanesFunc = func() ([]weztermPane, error) {
+		return []weztermPane{{ID: 1, Title: "one"}, {ID: 2, Title: "two"}, {ID: 3, Title: "three"}}, nil
+	}
+	weztermGetTextFunc = func(paneID int) (string, error) {
+		if paneID == 3 {
+			return "bash prompt", nil
+		}
+		return "You've hit your limit · resets soon", nil
+	}
+	var sent []string
+	weztermSendTextFunc = func(paneID int, text string) error {
+		sent = append(sent, fmt.Sprintf("%d:%s", paneID, text))
+		return nil
+	}
+	weztermIsTerminal = func(int) bool { return false }
+	weztermResumeDelay = 0
+	switches := 0
+	weztermSwitchFunc = func(tool string) (string, error) { switches++; return "b@example.com", nil }
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.Flags().Bool("all", false, "")
+	cmd.Flags().Bool("yes", true, "")
+	cmd.Flags().Bool("dry-run", false, "")
+	cmd.Flags().String("match", "", "")
+	if err := runWeztermSwitchAll(cmd, []string{"claude"}); err != nil {
+		t.Fatalf("runWeztermSwitchAll: %v", err)
+	}
+	want := []string{"1:/exit\n", "1:claude --continue\n", "2:/exit\n", "2:claude --continue\n"}
+	if switches != 1 || strings.Join(sent, "|") != strings.Join(want, "|") {
+		t.Fatalf("switches=%d sent=%v, want one switch and %v", switches, sent, want)
 	}
 }

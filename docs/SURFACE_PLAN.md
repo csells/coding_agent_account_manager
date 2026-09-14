@@ -288,7 +288,7 @@ by `KIMI_CODE_OAUTH_HOST`/`KIMI_OAUTH_HOST`; the CLI also sends its
    includes kimi, so `r` refreshes instead of offering a login; the refresh
    still happens only behind `NeedsRefresh` (expired or refused).
 
-## R3 — Switch, then resume: the handoff and the pane tools
+## R3 — Switch, then resume: the handoff and the pane tools (done)
 
 A running session holds its credential in memory, so switching the file
 under it is not enough, and injecting `/login` is a new OAuth login (a
@@ -311,6 +311,12 @@ Resume flags, verified on this machine: Claude Code `--continue`, Codex
 3. `caam wezterm switch-all <tool>` — one switch per tool through the
    core, then `/exit` + resume in each rate-limited pane; `login-all`
    stays for the no-other-account case and says so.
+
+Status: all three slices landed (`d612c90` handoff; coordinator `Recover`
+and `wezterm switch-all` in the following commit). The coordinator's
+resume pause is `Config.ResumeDelay` (1.5 s); `wezterm switch-all` uses
+the same pause. Kimi has a resume command but no rate-limit pattern in
+the coordinator yet, so only the handoff and switch-all cover it.
 
 ## R4 — One word for the thing with accounts: "agent"
 

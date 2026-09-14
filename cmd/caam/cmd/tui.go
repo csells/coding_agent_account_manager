@@ -2,13 +2,16 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/identity"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/switcher"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/tui"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
 )
@@ -157,6 +160,65 @@ func captureSignedInAccount(tool string) error {
 	_, err := vault.CaptureSignedIn(get())
 	return err
 }
+
+// resumeCommands are the commands that reopen a tool's most recent session
+// in a pane after the account under it was switched.
+var resumeCommands = map[string]string{
+	"claude": "claude --continue",
+	"codex":  "codex resume --last",
+	"gemini": "gemini --resume latest",
+	"kimi":   "kimi --continue",
+}
+
+// switchToNextAccount switches tool to the next vaulted account by the
+// configured rotation, through the switch core, and returns the account
+// and the command that resumes a session on its history. With no other
+// vaulted account it returns ErrNoOtherAccount.
+func switchToNextAccount(ctx context.Context, tool string) (account, resume string, err error) {
+	resume, ok := resumeCommands[tool]
+	if !ok {
+		return "", "", fmt.Errorf("%s has no resume command; switch and restart it by hand", tool)
+	}
+	get, ok := tools[tool]
+	if !ok {
+		return "", "", fmt.Errorf("unknown provider %s", tool)
+	}
+	if vault == nil {
+		vault = authfile.NewVault(authfile.DefaultVaultPath())
+	}
+	fileSet := get()
+	profiles, err := vault.List(tool)
+	if err != nil {
+		return "", "", err
+	}
+	current, _ := vault.ActiveProfile(fileSet)
+	var others []string
+	for _, p := range profiles {
+		if p != current && !authfile.IsSystemProfile(p) {
+			others = append(others, p)
+		}
+	}
+	if len(others) == 0 {
+		return "", "", ErrNoOtherAccount
+	}
+	spmCfg, cfgErr := config.LoadSPMConfig()
+	if cfgErr != nil {
+		spmCfg = config.DefaultSPMConfig()
+	}
+	db, _ := getDB()
+	selection, err := selectProfileWithRotation(tool, others, current, spmCfg, db)
+	if err != nil {
+		return "", "", err
+	}
+	if _, err := switcher.Switch(ctx, vault, fileSet, coreOptions(switcher.Options{Profile: selection.Selected, Config: spmCfg, DB: db, Source: "pane-recover"})); err != nil {
+		return "", "", err
+	}
+	return selection.Selected, resume, nil
+}
+
+// ErrNoOtherAccount is returned by switchToNextAccount when the tool has
+// only the signed-in account vaulted.
+var ErrNoOtherAccount = errors.New("no other account to switch to")
 
 // fetchProfileLimits reads one profile's rate-limit windows: from the live
 // credential when the profile is the active one (the tool rotates it in
