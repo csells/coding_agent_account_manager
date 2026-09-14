@@ -51,6 +51,7 @@ Examples:
 func init() {
 	rootCmd.AddCommand(addCmd)
 	addCmd.Flags().Bool("no-activate", false, "don't activate the new profile after adding")
+	_ = addCmd.Flags().MarkDeprecated("no-activate", "the account that logs in is the live one; there is nothing to activate")
 	addCmd.Flags().Duration("timeout", 5*time.Minute, "timeout for login flow completion")
 	addCmd.Flags().Bool("force", false, "skip confirmation prompts")
 	addCmd.Flags().Bool("device-code", false, "use device code flow for codex (headless)")
@@ -58,7 +59,6 @@ func init() {
 
 func runAdd(cmd *cobra.Command, args []string) error {
 	tool := strings.ToLower(args[0])
-	noActivate, _ := cmd.Flags().GetBool("no-activate")
 	timeout, _ := cmd.Flags().GetDuration("timeout")
 	force, _ := cmd.Flags().GetBool("force")
 	deviceCode, _ := cmd.Flags().GetBool("device-code")
@@ -169,8 +169,6 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		}
 	}
 	fmt.Printf("  Saved %s/%s\n", tool, profileName)
-	// The account that just logged in is the live one; nothing to activate.
-	_ = noActivate
 
 	fmt.Println()
 	fmt.Println("Done! Your new account has been added.")
