@@ -156,6 +156,23 @@ func WindowLeftText(w *UsageWindow, now time.Time) string {
 	return fmt.Sprintf("%d%% left, resets %s", left, LocalReset(w.ResetsAt, now))
 }
 
+// WindowLeftShort is the table-cell form of WindowLeftText: the share left
+// and the local reset clock joined by a middle dot ("88% left · 8:50 PM"),
+// as the dashboard's wide tier spells it.
+func WindowLeftShort(w *UsageWindow, now time.Time) string {
+	if w == nil {
+		return "-"
+	}
+	if w.Rolled {
+		return "100% left (reset)"
+	}
+	left := PercentLeft(w)
+	if w.ResetsAt.IsZero() {
+		return fmt.Sprintf("%d%% left", left)
+	}
+	return fmt.Sprintf("%d%% left · %s", left, LocalReset(w.ResetsAt, now))
+}
+
 // LocalReset renders a reset instant in now's location, dropping the day
 // when it is today and using the weekday within the next six days.
 func LocalReset(at, now time.Time) string {

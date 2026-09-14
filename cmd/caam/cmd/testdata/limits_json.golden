@@ -1,0 +1,87 @@
+[
+  {
+    "provider": "claude",
+    "profile_name": "work",
+    "usage": {
+      "provider": "claude",
+      "profile_name": "work",
+      "plan_type": "max",
+      "primary_window": {
+        "utilization": 0.12,
+        "used_percent": 12,
+        "resets_at": "2026-09-13T20:50:00Z",
+        "window_duration": 18000000000000,
+        "kind": "session"
+      },
+      "secondary_window": {
+        "utilization": 0.5,
+        "used_percent": 50,
+        "resets_at": "2026-09-16T17:00:00Z",
+        "window_duration": 604800000000000,
+        "kind": "weekly_all"
+      },
+      "model_windows": {
+        "fable": {
+          "utilization": 0.9,
+          "used_percent": 90,
+          "resets_at": "0001-01-01T00:00:00Z",
+          "window_duration": 604800000000000,
+          "label": "Fable",
+          "kind": "weekly_scoped"
+        }
+      },
+      "source": "api",
+      "fetched_at": "2026-09-13T18:00:00Z",
+      "burn_rate": {
+        "tokens_per_minute": 0,
+        "tokens_per_hour": 12000,
+        "sample_period": 0,
+        "sample_size": 0,
+        "confidence": 0,
+        "total_tokens": 0,
+        "first_entry": "0001-01-01T00:00:00Z",
+        "last_entry": "0001-01-01T00:00:00Z"
+      },
+      "estimated_depletion": "0001-01-01T00:00:00Z"
+    }
+  },
+  {
+    "provider": "codex",
+    "profile_name": "personal",
+    "usage": {
+      "provider": "codex",
+      "profile_name": "personal",
+      "plan_type": "plus",
+      "primary_window": {
+        "utilization": 0.4,
+        "used_percent": 40,
+        "resets_at": "2026-09-13T21:15:00Z",
+        "window_duration": 18000000000000
+      },
+      "secondary_window": {
+        "utilization": 0.7,
+        "used_percent": 70,
+        "resets_at": "2026-09-18T09:00:00Z",
+        "window_duration": 604800000000000
+      },
+      "credits": {
+        "has_credits": true,
+        "unlimited": false
+      },
+      "source": "api",
+      "fetched_at": "2026-09-13T18:00:00Z",
+      "estimated_depletion": "0001-01-01T00:00:00Z"
+    }
+  },
+  {
+    "provider": "codex",
+    "profile_name": "broken",
+    "usage": {
+      "provider": "codex",
+      "profile_name": "broken",
+      "fetched_at": "2026-09-13T18:00:00Z",
+      "error": "boom",
+      "estimated_depletion": "0001-01-01T00:00:00Z"
+    }
+  }
+]

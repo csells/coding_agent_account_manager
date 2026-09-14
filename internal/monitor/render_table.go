@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider"
 )
 
 // Render implements the Renderer interface for TableRenderer.
@@ -36,7 +38,7 @@ func (r *TableRenderer) Render(state *MonitorState) string {
 	if len(state.Profiles) == 0 {
 		writeCentered(&b, innerWidth, "No profiles configured")
 	} else {
-		keys := sortProfileKeys(state)
+		keys := displayOrderedKeys(state)
 		currentProvider := ""
 		now := time.Now()
 
@@ -48,7 +50,7 @@ func (r *TableRenderer) Render(state *MonitorState) string {
 
 			if p.Provider != currentProvider {
 				currentProvider = p.Provider
-				provHeader := fmt.Sprintf("  %s", strings.ToUpper(p.Provider))
+				provHeader := fmt.Sprintf("  %s", provider.Label(p.Provider))
 				writeLine(&b, innerWidth, provHeader)
 			}
 
@@ -62,18 +64,19 @@ func (r *TableRenderer) Render(state *MonitorState) string {
 				// The fetch failed or returned no data (e.g. an expired token) —
 				// show why instead of a misleading 0% bar, so logged-in accounts
 				// don't look idle (issue #37).
-				line = fmt.Sprintf("  %s%-20s %s", indicator, truncate(p.ProfileName, 20), reason)
+				line = fmt.Sprintf("  %s%-16s %s", indicator, truncate(p.ProfileName, 16), reason)
 			} else {
+				// A narrower name and bar leave room for the sentence that
+				// matters: what is left and when it resets.
 				percent := usagePercent(p.Usage)
-				bar := progressBar(percent, 20)
-				percentStr := fmt.Sprintf("%3.0f%%", percent)
+				bar := progressBar(percent, 12)
 
 				status := p.PoolStatus.String()
 				if p.InCooldown && p.CooldownUntil != nil {
 					status = fmt.Sprintf("cooldown %s", formatCooldown(p.CooldownUntil, now))
 				}
 
-				line = fmt.Sprintf("  %s%-20s %s %s | %s", indicator, truncate(p.ProfileName, 20), bar, percentStr, status)
+				line = fmt.Sprintf("  %s%-16s %s %s | %s", indicator, truncate(p.ProfileName, 16), bar, leftText(p.Usage, now), status)
 			}
 			writeLine(&b, innerWidth, line)
 		}

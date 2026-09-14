@@ -399,7 +399,7 @@ func TestOutcomes_OpenADialogInTheMiddle(t *testing.T) {
 		t.Fatalf("a switch outcome should open the message dialog, state=%v", m.state)
 	}
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"Switched", "Claude now uses b@example.com", "enter"} {
+	for _, want := range []string{"Switched", "Claude Code now uses b@example.com", "enter"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("dialog lacks %q:\n%s", want, view)
 		}

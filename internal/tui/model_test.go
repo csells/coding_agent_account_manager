@@ -1087,19 +1087,19 @@ func TestStatusBarSeveritySnapshots(t *testing.T) {
 			name:    "success",
 			message: "Exported",
 			want: "" +
-				"  CLAUDE   Exported                 [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ n  :new login] [ /  :search]",
+				"  CLAUDE CODE   Exported            [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ n  :new login] [ /  :search]",
 		},
 		{
 			name:    "warning",
 			message: "No profile selected",
 			want: "" +
-				"  CLAUDE   No profile selected      [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ n  :new login] [ /  :search]",
+				"  CLAUDE CODE   No profile sele...  [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ n  :new login] [ /  :search]",
 		},
 		{
 			name:    "error",
 			message: "Export failed",
 			want: "" +
-				"  CLAUDE   Export failed            [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ n  :new login] [ /  :search]",
+				"  CLAUDE CODE   Export failed       [ ←/→  :provider] [ ↑/↓  :account] [ enter  :switch] [ n  :new login] [ /  :search]",
 		},
 	}
 

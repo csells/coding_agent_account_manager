@@ -22,11 +22,80 @@ func TestTableRendererOutput(t *testing.T) {
 	if !strings.Contains(out, "LIVE USAGE MONITOR") {
 		t.Fatalf("table output missing header: %q", out)
 	}
-	if !strings.Contains(out, "CLAUDE") {
+	if !strings.Contains(out, "Claude Code") {
 		t.Fatalf("table output missing provider: %q", out)
 	}
 	if !strings.Contains(out, "alice") {
 		t.Fatalf("table output missing profile name: %q", out)
+	}
+}
+
+// TestMonitorBrief_ListsEveryProviderAndSaysLeft: the one-line brief used
+// to list five hardcoded providers, so Antigravity, Kimi, zcode and Grok
+// never appeared, and printed a bare used percentage. It now lists every
+// provider the state holds, in the strip's order, by product name, and
+// says what is left and the clock it resets at; the table and alerts
+// speak the same way.
+func TestMonitorBrief_ListsEveryProviderAndSaysLeft(t *testing.T) {
+	now := time.Now()
+	resets := now.Add(2 * time.Hour)
+	withReset := func(p *ProfileState) *ProfileState {
+		p.Usage.PrimaryWindow.ResetsAt = resets
+		return p
+	}
+	state := &MonitorState{
+		UpdatedAt: now,
+		Profiles: map[string]*ProfileState{
+			"kimi/k":      withReset(buildProfile("kimi", "k", 30)),
+			"agy/g":       withReset(buildProfile("agy", "g", 12)),
+			"claude/a":    withReset(buildProfile("claude", "a", 42)),
+			"claude/busy": withReset(buildProfile("claude", "busy", 90)),
+		},
+	}
+
+	brief := NewBriefRenderer().Render(state)
+	if len(brief) > 80 {
+		t.Fatalf("brief output too long (%d): %q", len(brief), brief)
+	}
+	for _, want := range []string{"Claude Code", "Antigravity", "Kimi Code", "10% left", "88% left", "70% left", "left"} {
+		if !strings.Contains(brief, want) {
+			t.Errorf("brief lacks %q: %q", want, brief)
+		}
+	}
+	for _, gone := range []string{"claude:", "agy", "kimi:", "90%", "42%", "12%"} {
+		if strings.Contains(brief, gone) {
+			t.Errorf("brief still says %q (raw id or used-side): %q", gone, brief)
+		}
+	}
+	if strings.Index(brief, "Claude Code") > strings.Index(brief, "Antigravity") || strings.Index(brief, "Antigravity") > strings.Index(brief, "Kimi Code") {
+		t.Errorf("brief is not in strip order: %q", brief)
+	}
+
+	// With room to spare the brief names the reset clock too.
+	small := &MonitorState{UpdatedAt: now, Profiles: map[string]*ProfileState{"claude/a": withReset(buildProfile("claude", "a", 42))}}
+	brief = NewBriefRenderer().Render(small)
+	if want := "Claude Code 58% left, resets " + usage.LocalReset(resets, now); brief != want {
+		t.Errorf("brief = %q, want %q", brief, want)
+	}
+
+	table := NewTableRenderer().Render(state)
+	for _, want := range []string{"Claude Code", "Antigravity", "Kimi Code", "10% left, resets " + usage.LocalReset(resets, now)} {
+		if !strings.Contains(table, want) {
+			t.Errorf("table lacks %q:\n%s", want, table)
+		}
+	}
+	if strings.Contains(table, "CLAUDE") || strings.Contains(table, " 90%") {
+		t.Errorf("table still says a raw id or used-side figure:\n%s", table)
+	}
+
+	alerts := NewAlertRenderer(80).Render(state)
+	for _, want := range []string{"Claude Code busy", "10% left, resets " + usage.LocalReset(resets, now)} {
+		if !strings.Contains(alerts, want) {
+			t.Errorf("alerts lack %q: %q", want, alerts)
+		}
+	}
+	if strings.Contains(alerts, "claude/busy") || strings.Contains(alerts, "at 90%") {
+		t.Errorf("alerts still say a raw id or used-side figure: %q", alerts)
 	}
 }
 
@@ -45,7 +114,7 @@ func TestBriefRendererLength(t *testing.T) {
 	if len(out) > 80 {
 		t.Fatalf("brief output too long: %d", len(out))
 	}
-	if !strings.Contains(out, "claude:") {
+	if !strings.Contains(out, "Claude Code") {
 		t.Fatalf("brief output missing provider: %q", out)
 	}
 }

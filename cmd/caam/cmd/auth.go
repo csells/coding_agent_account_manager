@@ -298,12 +298,10 @@ func printAuthDetectReport(report *AuthDetectReport) {
 	}
 }
 
+// getProviderDisplayName is the one vocabulary every caam surface prints
+// for a provider (provider.Label): the product's name, never the id.
 func getProviderDisplayName(id string) string {
-	meta, ok := provider.GetProviderMeta(id)
-	if ok {
-		return meta.DisplayName
-	}
-	return capitalizeFirst(id)
+	return provider.Label(id)
 }
 
 // capitalizeFirst returns the string with its first letter capitalized.

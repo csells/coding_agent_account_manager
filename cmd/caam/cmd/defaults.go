@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider"
 )
 
 // useCmd sets the default profile for a provider.
@@ -92,24 +94,26 @@ Examples:
 Use 'caam use <provider> <profile>' to set defaults.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		providers := []string{"codex", "claude", "gemini"}
+		// Every tool caam manages, in the dashboard strip's order; a default
+		// set on Antigravity or Kimi is as visible as one on Codex.
+		providers := toolsInDisplayOrder(supportedTools())
 
 		if len(args) > 0 {
-			provider := strings.ToLower(args[0])
-			if _, ok := tools[provider]; !ok {
-				return fmt.Errorf("unknown provider: %s", provider)
+			id := strings.ToLower(args[0])
+			if _, ok := tools[id]; !ok {
+				return fmt.Errorf("unknown provider: %s", id)
 			}
-			providers = []string{provider}
+			providers = []string{id}
 		}
 
 		hasDefaults := false
-		for _, provider := range providers {
-			defaultProfile := cfg.GetDefault(provider)
+		for _, id := range providers {
+			defaultProfile := cfg.GetDefault(id)
 			if defaultProfile != "" {
-				fmt.Printf("%s: %s\n", provider, defaultProfile)
+				fmt.Printf("%s: %s\n", provider.Label(id), defaultProfile)
 				hasDefaults = true
 			} else {
-				fmt.Printf("%s: (none)\n", provider)
+				fmt.Printf("%s: (none)\n", provider.Label(id))
 			}
 		}
 

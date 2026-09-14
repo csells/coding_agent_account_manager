@@ -340,9 +340,9 @@ func TestGetProviderMeta(t *testing.T) {
 		wantURL     string
 		wantDisplay string
 	}{
-		{"codex", true, "https://platform.openai.com/account", "Codex (OpenAI)"},
-		{"claude", true, "https://console.anthropic.com/", "Claude (Anthropic)"},
-		{"gemini", true, "https://aistudio.google.com/", "Gemini (Google)"},
+		{"codex", true, "https://platform.openai.com/account", "Codex"},
+		{"claude", true, "https://console.anthropic.com/", "Claude Code"},
+		{"gemini", true, "https://aistudio.google.com/", "Gemini"},
 		{"unknown", false, "", ""},
 	}
 
@@ -436,5 +436,71 @@ func TestProviderMetaStruct(t *testing.T) {
 	}
 	if meta.Description != "Test account page" {
 		t.Errorf("Description = %q, want %q", meta.Description, "Test account page")
+	}
+}
+
+// TestProviderLabel_IsTheOneVocabulary pins the name every surface prints
+// for a provider: the product's own name, never the caam id or a vendor
+// suffix. The TUI strip, caam ls/status/which, the monitor and caam auth
+// all read this one function.
+func TestProviderLabel_IsTheOneVocabulary(t *testing.T) {
+	cases := map[string]string{
+		"agy":      "Antigravity",
+		"kimi":     "Kimi Code",
+		"zcode":    "zcode",
+		"opencode": "OpenCode",
+		"grok":     "Grok",
+		"claude":   "Claude Code",
+		"codex":    "Codex",
+		"gemini":   "Gemini",
+		"cursor":   "Cursor",
+	}
+	for id, want := range cases {
+		if got := Label(id); got != want {
+			t.Errorf("Label(%q) = %q, want %q", id, got, want)
+		}
+	}
+	// An id caam has no name for is shown capitalised, not blank.
+	if got := Label("newtool"); got != "Newtool" {
+		t.Errorf("Label(unknown) = %q, want %q", got, "Newtool")
+	}
+	if got := Label(""); got != "" {
+		t.Errorf("Label(\"\") = %q, want empty", got)
+	}
+	// ProviderMeta carries the same name, so the open/robot surfaces agree.
+	for id, want := range cases {
+		meta, ok := GetProviderMeta(id)
+		if !ok {
+			t.Errorf("GetProviderMeta(%q) missing", id)
+			continue
+		}
+		if meta.DisplayName != want {
+			t.Errorf("GetProviderMeta(%q).DisplayName = %q, want %q", id, meta.DisplayName, want)
+		}
+	}
+	for _, meta := range AllProviderMeta() {
+		if meta.DisplayName != Label(meta.ID) {
+			t.Errorf("AllProviderMeta %q: DisplayName %q != Label %q", meta.ID, meta.DisplayName, Label(meta.ID))
+		}
+	}
+}
+
+// TestDisplayOrder_IsTheDashboardStrip pins the one order providers are
+// listed in wherever caam lists them: the dashboard strip, caam ls.
+func TestDisplayOrder_IsTheDashboardStrip(t *testing.T) {
+	want := []string{"claude", "codex", "gemini", "grok", "opencode", "cursor", "agy", "kimi", "zcode"}
+	got := DisplayOrder()
+	if len(got) != len(want) {
+		t.Fatalf("DisplayOrder() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("DisplayOrder() = %v, want %v", got, want)
+		}
+	}
+	// A copy, so a caller cannot reorder the strip for everyone.
+	got[0] = "x"
+	if DisplayOrder()[0] != "claude" {
+		t.Error("DisplayOrder() must return a fresh slice")
 	}
 }

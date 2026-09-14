@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/config"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
 )
 
@@ -118,14 +119,17 @@ func renderRank(w io.Writer, format string, result *usage.RankResult) error {
 		return nil
 
 	case "table", "":
-		return renderRankTable(w, result)
+		return renderRankTable(w, result, time.Now())
 
 	default:
 		return fmt.Errorf("unsupported format: %s", format)
 	}
 }
 
-func renderRankTable(w io.Writer, result *usage.RankResult) error {
+// renderRankTable prints the ranking for a person: the provider by its
+// product name, the headroom as what is left, the reset as a local clock.
+// The JSON form keeps used_percent and resets_in_seconds for machines.
+func renderRankTable(w io.Writer, result *usage.RankResult, now time.Time) error {
 	fmt.Fprintf(w, "Rank: %s (headroom ceiling %d%%", result.Rank, result.HeadroomCeiling)
 	if result.Model != "" {
 		fmt.Fprintf(w, ", model %s", result.Model)
@@ -140,26 +144,26 @@ func renderRankTable(w io.Writer, result *usage.RankResult) error {
 		fmt.Fprintln(w, "No profiles found.")
 	} else {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "#\tPROFILE\tTIER\tUSED\tRESETS IN\tWHY")
+		fmt.Fprintln(tw, "#\tPROVIDER\tPROFILE\tTIER\tLEFT\tRESETS\tWHY")
 		for _, p := range result.Profiles {
 			pos := "-"
 			if p.Rank > 0 {
 				pos = fmt.Sprintf("%d", p.Rank)
 			}
 			resets := "-"
-			if p.ResetsInSeconds != nil {
-				resets = formatLimitsDuration(time.Duration(*p.ResetsInSeconds) * time.Second)
+			if p.ResetsAt != nil {
+				resets = usage.LocalReset(*p.ResetsAt, now)
 			}
-			fmt.Fprintf(tw, "%s\t%s/%s\t%s\t%d%%\t%s\t%s\n",
-				pos, p.Provider, p.Profile, p.Tier, p.UsedPercent, resets, p.Reason)
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d%% left\t%s\t%s\n",
+				pos, provider.Label(p.Provider), p.Profile, p.Tier, p.HeadroomPercent, resets, p.Reason)
 		}
 		tw.Flush()
 	}
 
 	fmt.Fprintln(w)
 	if result.Selected != nil {
-		fmt.Fprintf(w, "Selected: %s/%s — %s\n",
-			result.Selected.Provider, result.Selected.Profile, result.Selected.Reason)
+		fmt.Fprintf(w, "Selected: %s %s — %s\n",
+			provider.Label(result.Selected.Provider), result.Selected.Profile, result.Selected.Reason)
 	} else {
 		fmt.Fprintf(w, "Selected: none — %s\n", result.Error)
 	}

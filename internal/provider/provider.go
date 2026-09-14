@@ -4,6 +4,8 @@ package provider
 import (
 	"context"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/profile"
 )
@@ -193,64 +195,100 @@ func (r *Registry) IDs() []string {
 // instantiating a provider (e.g., for TUI display, open command).
 type ProviderMeta struct {
 	ID          string // Provider identifier (e.g., "codex", "claude", "gemini")
-	DisplayName string // Human-friendly name
+	DisplayName string // The product's name, always Label(ID)
 	AccountURL  string // URL to the provider's account/console page
 	Description string // Short description of the account page
 }
 
-// providerMetaRegistry holds static metadata for all known providers.
+// Label is the one name a provider goes by wherever a person reads caam:
+// the product's own name ("Antigravity", "Claude Code"), never the caam id
+// or a vendor suffix. Every surface — the dashboard strip, ls, status,
+// which, the monitor, auth — prints this. An id caam has no name for is
+// shown capitalised rather than blank.
+func Label(id string) string {
+	switch id {
+	case "agy":
+		return "Antigravity"
+	case "kimi":
+		return "Kimi Code"
+	case "zcode":
+		return "zcode"
+	case "opencode":
+		return "OpenCode"
+	case "grok":
+		return "Grok"
+	case "claude":
+		return "Claude Code"
+	case "codex":
+		return "Codex"
+	case "gemini":
+		return "Gemini"
+	case "cursor":
+		return "Cursor"
+	}
+	if id == "" {
+		return ""
+	}
+	r, size := utf8.DecodeRuneInString(id)
+	if r == utf8.RuneError {
+		return id
+	}
+	return string(unicode.ToUpper(r)) + id[size:]
+}
+
+// DisplayOrder is the one order providers are listed in wherever caam
+// lists them: the dashboard strip and caam ls. The six agents the
+// switcher is for are not grouped first; the order is the strip's as
+// people know it. Returns a fresh slice.
+func DisplayOrder() []string {
+	return []string{"claude", "codex", "gemini", "grok", "opencode", "cursor", "agy", "kimi", "zcode"}
+}
+
+// providerMetaRegistry holds static metadata for all known providers. The
+// DisplayName is filled from Label on read so there is one vocabulary.
 var providerMetaRegistry = map[string]ProviderMeta{
 	"codex": {
 		ID:          "codex",
-		DisplayName: "Codex (OpenAI)",
 		AccountURL:  "https://platform.openai.com/account",
 		Description: "OpenAI Platform account settings",
 	},
 	"claude": {
 		ID:          "claude",
-		DisplayName: "Claude (Anthropic)",
 		AccountURL:  "https://console.anthropic.com/",
 		Description: "Anthropic Console dashboard",
 	},
 	"gemini": {
 		ID:          "gemini",
-		DisplayName: "Gemini (Google)",
 		AccountURL:  "https://aistudio.google.com/",
 		Description: "Google AI Studio dashboard",
 	},
 	"agy": {
 		ID:          "agy",
-		DisplayName: "Antigravity (Google)",
 		AccountURL:  "https://antigravity.google/",
 		Description: "Google Antigravity account",
 	},
 	"grok": {
 		ID:          "grok",
-		DisplayName: "Grok Build (xAI)",
 		AccountURL:  "https://console.x.ai/",
 		Description: "xAI Console",
 	},
 	"opencode": {
 		ID:          "opencode",
-		DisplayName: "OpenCode",
 		AccountURL:  "https://opencode.ai/",
 		Description: "OpenCode dashboard",
 	},
 	"cursor": {
 		ID:          "cursor",
-		DisplayName: "Cursor",
 		AccountURL:  "https://cursor.com/settings",
 		Description: "Cursor account settings",
 	},
 	"kimi": {
 		ID:          "kimi",
-		DisplayName: "Kimi Code (Moonshot AI)",
 		AccountURL:  "https://www.kimi.com/code/console",
 		Description: "Kimi Code console",
 	},
 	"zcode": {
 		ID:          "zcode",
-		DisplayName: "zcode (Z.ai)",
 		AccountURL:  "https://z.ai/manage-apikey/coding-plan/personal/my-plan",
 		Description: "Z.ai coding plan",
 	},
@@ -260,6 +298,9 @@ var providerMetaRegistry = map[string]ProviderMeta{
 // Returns the metadata and true if found, or zero value and false if not.
 func GetProviderMeta(id string) (ProviderMeta, bool) {
 	meta, ok := providerMetaRegistry[id]
+	if ok {
+		meta.DisplayName = Label(meta.ID)
+	}
 	return meta, ok
 }
 
@@ -267,6 +308,7 @@ func GetProviderMeta(id string) (ProviderMeta, bool) {
 func AllProviderMeta() []ProviderMeta {
 	result := make([]ProviderMeta, 0, len(providerMetaRegistry))
 	for _, meta := range providerMetaRegistry {
+		meta.DisplayName = Label(meta.ID)
 		result = append(result, meta)
 	}
 	return result

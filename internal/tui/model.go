@@ -20,6 +20,7 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/identity"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/profile"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/project"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/refresh"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/signals"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/sync"
@@ -289,7 +290,7 @@ func (m *Model) setNotice(provider, profile, text string, isErr bool) {
 // DefaultProviders returns the default list of provider names: every
 // provider the vault knows an auth file set for.
 func DefaultProviders() []string {
-	return []string{"claude", "codex", "gemini", "grok", "opencode", "cursor", "agy", "kimi", "zcode"}
+	return provider.DisplayOrder()
 }
 
 // New creates a new TUI model with default settings.
@@ -2645,6 +2646,11 @@ func (m Model) syncDetailPanel() {
 	}
 	if description == "" {
 		description = vmeta.Description
+	}
+	// The activity log's last use, as the row shows it; the isolated store
+	// above is consulted first and is empty for vault profiles.
+	if lastUsedAt.IsZero() {
+		lastUsedAt = vmeta.LastUsed
 	}
 
 	if path == "" {

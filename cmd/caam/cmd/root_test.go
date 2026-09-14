@@ -694,3 +694,77 @@ func TestGetVaultIdentity_ClaudeEmailFromClaudeJSON(t *testing.T) {
 		t.Errorf("solo display email = %q, want %q", email, "n/a")
 	}
 }
+
+// TestStatus_HidesNeverLoggedInToolsAndLabelsTheRest: `caam status` names
+// tools by their product name, shows the identity `caam backup` recorded
+// in meta.json (Antigravity, Kimi) instead of "unknown", and moves the
+// tools nobody has logged in to onto one footer line, as the dashboard
+// hides exactly those. --json keeps every tool.
+func TestStatus_HidesNeverLoggedInToolsAndLabelsTheRest(t *testing.T) {
+	originalVault := vault
+	defer func() { vault = originalVault }()
+	vaultDir := t.TempDir()
+	vault = authfile.NewVault(vaultDir)
+
+	// A synthetic Kimi login (not a JWT, so the identity is not in the token)
+	// live under the isolated HOME, and the same bytes in the vault under
+	// "me" with the identity `caam backup kimi` recorded.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cred := []byte(`{"access_token":"synthetic-access","refresh_token":"synthetic-refresh","expires_at":4102444800}`)
+	livePath := filepath.Join(home, ".kimi-code", "credentials", "kimi-code.json")
+	if err := os.MkdirAll(filepath.Dir(livePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(livePath, cred, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(livePath) })
+	profileDir := filepath.Join(vaultDir, "kimi", "me")
+	if err := os.MkdirAll(profileDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profileDir, "kimi-code.json"), cred, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profileDir, "meta.json"), []byte(`{"identity":"me@example.com"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = statusCmd.Flags().Set("json", "false") })
+	if err := statusCmd.Flags().Set("json", "false"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := captureStdout(t, func() error { return runStatus(statusCmd, nil) })
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+
+	for _, want := range []string{"Kimi Code", "me@example.com", "Not logged in: Claude Code, Codex, Gemini, Grok, OpenCode, Cursor, Antigravity, zcode"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status lacks %q:\n%s", want, out)
+		}
+	}
+	for _, gone := range []string{"(not logged in)", "kimi "} {
+		if strings.Contains(out, gone) {
+			t.Errorf("status still says %q:\n%s", gone, out)
+		}
+	}
+	if n := strings.Count(out, "Not logged in:"); n != 1 {
+		t.Errorf("want one footer line, got %d:\n%s", n, out)
+	}
+
+	// --json is a contract: every tool, logged in or not.
+	if err := statusCmd.Flags().Set("json", "true"); err != nil {
+		t.Fatal(err)
+	}
+	jsonOut, err := captureStdout(t, func() error { return runStatus(statusCmd, nil) })
+	if err != nil {
+		t.Fatalf("status --json: %v", err)
+	}
+	if n := strings.Count(jsonOut, `"logged_in": false`); n != len(statusTools())-1 {
+		t.Errorf("status --json lists %d not-logged-in tools, want %d:\n%s", n, len(statusTools())-1, jsonOut)
+	}
+}

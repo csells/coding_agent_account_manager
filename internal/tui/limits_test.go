@@ -358,7 +358,7 @@ func TestHealthHookDrivesTheListStatus(t *testing.T) {
 func TestProviderLabels(t *testing.T) {
 	cases := map[string]string{
 		"agy": "Antigravity", "kimi": "Kimi Code", "zcode": "zcode", "opencode": "OpenCode",
-		"claude": "Claude", "codex": "Codex", "gemini": "Gemini", "grok": "Grok", "cursor": "Cursor",
+		"claude": "Claude Code", "codex": "Codex", "gemini": "Gemini", "grok": "Grok", "cursor": "Cursor",
 	}
 	for id, want := range cases {
 		if got := providerLabel(id); got != want {

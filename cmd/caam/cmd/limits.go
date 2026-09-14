@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/authfile"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/logs"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/provider"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/shallow"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
 )
@@ -332,7 +332,7 @@ func runLimits(cmd *cobra.Command, args []string) error {
 		return renderForecast(out, format, allResults)
 	}
 
-	return renderLimits(out, format, allResults, model)
+	return renderLimits(out, format, allResults, time.Now())
 }
 
 // sortResultsForModel re-ranks profiles by their availability for one model.
@@ -473,7 +473,12 @@ func getVaultDir() string {
 	return authfile.DefaultVaultPath()
 }
 
-func renderLimits(w io.Writer, format string, results []usage.ProfileUsage, model string) error {
+// renderLimits prints the limits rows. The JSON form is a contract
+// (used_percent, resets_at) and marshals the rows untouched; the table is
+// for a person and reads as the dashboard does: the provider by its
+// product name, one column per window, each cell the share left and the
+// local clock it resets at, STATUS as before.
+func renderLimits(w io.Writer, format string, results []usage.ProfileUsage, now time.Time) error {
 	format = strings.ToLower(strings.TrimSpace(format))
 
 	switch format {
@@ -509,76 +514,54 @@ func renderLimits(w io.Writer, format string, results []usage.ProfileUsage, mode
 		}
 		fmt.Fprintln(w, "──────────────────────────────────────────────────────────────────────────────────────────")
 
+		// One column per window, in the dashboard's order: the union of every
+		// row's windows, shorter general windows first, then per-model ones.
+		columns := limitsWindowColumns(results)
+
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		header := "PROFILE\tSCORE\tPRIMARY\tSECONDARY\tSCOPED\tRESETS IN\tBURN/HR\tDEPLETES\tSTATUS"
+		header := "PROVIDER\tPROFILE"
+		for _, c := range columns {
+			header += "\t" + c
+		}
+		header += "\tSTATUS"
 		if offline {
 			header += "\tAS OF"
 		}
 		fmt.Fprintln(tw, header)
 
-		now := time.Now()
 		for _, r := range results {
-			profileName := fmt.Sprintf("%s/%s", r.Provider, r.ProfileName)
-			score := "-"
-			primary := "-"
-			secondary := "-"
-			scoped := "-"
-			resetsIn := "-"
 			status := "unknown"
-			burnRate := "-"
-			depletesIn := "-"
+			cells := make(map[string]string, len(columns))
 
 			if r.Usage != nil {
-				noData := r.Usage.Error == usage.ErrNoCachedUsage.Error()
-
 				switch {
-				case noData:
+				case r.Usage.Error == usage.ErrNoCachedUsage.Error():
 					// Not a failure: this account simply has not refreshed a
-					// snapshot yet. Never render it as 0% used.
+					// snapshot yet. Never render it as 100% left.
 					status = "no cached data"
 				case r.Usage.Error != "":
 					status = "error: " + truncate(r.Usage.Error, 20)
 				default:
 					status = "ok"
 				}
-
-				// A row with no data scores nothing. Running the availability
-				// scorer over empty windows would return a perfect 100 and
-				// present an account caam knows nothing about as the idlest
-				// one on the table.
-				if !noData {
-					score = strconv.Itoa(r.Usage.AvailabilityScoreForModel(model))
-					scoped = formatScopedLimit(r.Usage.ScopedLimit(model))
-				}
-
-				primary = formatWindowPercent(r.Usage.PrimaryWindow)
-				secondary = formatWindowPercent(r.Usage.SecondaryWindow)
-
-				if ttl := r.Usage.TimeUntilReset(); ttl > 0 {
-					resetsIn = formatLimitsDuration(ttl)
-				}
-
-				if r.Usage.BurnRate != nil && r.Usage.BurnRate.TokensPerHour > 0 {
-					burnRate = formatBurnRate(r.Usage.BurnRate.TokensPerHour)
-				}
-
-				if ttl := r.Usage.TimeToDepletion(); ttl > 0 {
-					depletesIn = formatLimitsDuration(ttl)
-					// Add warning indicator for imminent depletion
-					if ttl < 30*time.Minute {
-						depletesIn += " ⚠️"
-					}
+				for _, c := range usage.WindowsOf(r.Usage) {
+					cells[c.Column] = usage.WindowLeftShort(c.Window, now)
 				}
 			}
 
+			line := provider.Label(r.Provider) + "\t" + r.ProfileName
+			for _, c := range columns {
+				cell := cells[c]
+				if cell == "" {
+					cell = "-"
+				}
+				line += "\t" + cell
+			}
+			line += "\t" + status
 			if offline {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-					profileName, score, primary, secondary, scoped, resetsIn, burnRate, depletesIn, status,
-					formatCacheAge(r.Usage, now))
-			} else {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-					profileName, score, primary, secondary, scoped, resetsIn, burnRate, depletesIn, status)
+				line += "\t" + formatCacheAge(r.Usage, now)
 			}
+			fmt.Fprintln(tw, line)
 		}
 
 		tw.Flush()
@@ -594,17 +577,29 @@ func renderLimits(w io.Writer, format string, results []usage.ProfileUsage, mode
 	}
 }
 
-// formatWindowPercent renders a window's utilization. A window that had
-// already rolled over when the figures were read is marked, so an honest 0%
-// from a stale snapshot is not mistaken for a measured one.
-func formatWindowPercent(w *usage.UsageWindow) string {
-	if w == nil {
-		return "-"
+// limitsWindowColumns is the union of window columns across the rows, in
+// display order (usage.WindowsOf's rank, then name), so every row of the
+// table lines up under the same headers.
+func limitsWindowColumns(results []usage.ProfileUsage) []string {
+	ranks := make(map[string]int)
+	for _, r := range results {
+		for _, c := range usage.WindowsOf(r.Usage) {
+			if _, seen := ranks[c.Column]; !seen {
+				ranks[c.Column] = c.Rank
+			}
+		}
 	}
-	if w.Rolled {
-		return "0% (rolled)"
+	columns := make([]string, 0, len(ranks))
+	for column := range ranks {
+		columns = append(columns, column)
 	}
-	return fmt.Sprintf("%d%%", w.UsedPercent)
+	sort.Slice(columns, func(i, j int) bool {
+		if ranks[columns[i]] != ranks[columns[j]] {
+			return ranks[columns[i]] < ranks[columns[j]]
+		}
+		return columns[i] < columns[j]
+	})
+	return columns
 }
 
 // formatCacheAge renders how stale a cached snapshot is. A snapshot with no
@@ -755,6 +750,8 @@ type Recommendation struct {
 // Forecast represents a usage forecast for a profile.
 type Forecast struct {
 	Profile           string `json:"profile"`
+	Provider          string `json:"provider"`
+	ProfileName       string `json:"profile_name"`
 	CurrentPrimary    int    `json:"current_primary_percent"`
 	CurrentSecondary  int    `json:"current_secondary_percent"`
 	PrimaryResetsIn   string `json:"primary_resets_in"`
@@ -934,8 +931,9 @@ func renderForecast(w io.Writer, format string, results []usage.ProfileUsage) er
 		fmt.Fprintln(w, "────────────────────────────────────────────────────────────────")
 
 		for _, f := range forecasts {
-			fmt.Fprintf(w, "%s\n", f.Profile)
-			fmt.Fprintf(w, "  Current: Primary %d%%, Secondary %d%%\n", f.CurrentPrimary, f.CurrentSecondary)
+			fmt.Fprintf(w, "%s %s\n", provider.Label(f.Provider), f.ProfileName)
+			fmt.Fprintf(w, "  Left:    Primary %d%% left, Secondary %d%% left\n",
+				max(0, 100-f.CurrentPrimary), max(0, 100-f.CurrentSecondary))
 			fmt.Fprintf(w, "  Resets:  Primary in %s, Secondary in %s\n", f.PrimaryResetsIn, f.SecondaryResetsIn)
 			if f.SafeToUseIn != "" {
 				fmt.Fprintf(w, "  Safe to use in: %s\n", f.SafeToUseIn)
@@ -960,7 +958,9 @@ func generateForecasts(results []usage.ProfileUsage) []Forecast {
 		}
 
 		f := Forecast{
-			Profile: fmt.Sprintf("%s/%s", r.Provider, r.ProfileName),
+			Profile:     fmt.Sprintf("%s/%s", r.Provider, r.ProfileName),
+			Provider:    r.Provider,
+			ProfileName: r.ProfileName,
 		}
 
 		if r.Usage.PrimaryWindow != nil {
