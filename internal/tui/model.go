@@ -1270,14 +1270,33 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleConfirmKeys handles keys in confirmation state.
 func (m Model) handleConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case key.Matches(msg, m.keys.Confirm):
-		return m.executeConfirmedAction()
-	case key.Matches(msg, m.keys.Cancel):
+	cancel := func() (tea.Model, tea.Cmd) {
+		m.confirmDialog = nil
 		m.state = stateList
 		m.pendingAction = confirmNone
 		m.statusMsg = "Cancelled"
 		return m, nil
+	}
+	if m.confirmDialog != nil {
+		var cmd tea.Cmd
+		m.confirmDialog, cmd = m.confirmDialog.Update(msg)
+		switch m.confirmDialog.Result() {
+		case DialogResultSubmit:
+			if m.confirmDialog.Confirmed() {
+				m.confirmDialog = nil
+				return m.executeConfirmedAction()
+			}
+			return cancel()
+		case DialogResultCancel:
+			return cancel()
+		}
+		return m, cmd
+	}
+	switch {
+	case key.Matches(msg, m.keys.Confirm):
+		return m.executeConfirmedAction()
+	case key.Matches(msg, m.keys.Cancel):
+		return cancel()
 	}
 	return m, nil
 }
@@ -1364,7 +1383,7 @@ func (m Model) handleActivateProfile() (tea.Model, tea.Cmd) {
 
 	// Check if this profile is already active (no-op)
 	if info.IsActive {
-		m.statusMsg = fmt.Sprintf("'%s' is already active", info.Name)
+		m.showMessage(StatusInfo, "Already in use", "%s is the account %s uses now.", info.Name, providerLabel(m.currentProvider()))
 		return m, nil
 	}
 
@@ -1372,17 +1391,40 @@ func (m Model) handleActivateProfile() (tea.Model, tea.Cmd) {
 	// settings would leave the live login as it is while reporting success.
 	if info.NoCredential {
 		provider := m.currentProvider()
-		msg := fmt.Sprintf("%s has no captured credential; log in with %s as that account, then run: caam backup %s %s", info.Name, provider, provider, info.Name)
+		msg := fmt.Sprintf("%s has no captured credential; log in as that account with n", info.Name)
 		m.setNotice(provider, info.Name, msg, true)
-		m.statusMsg = "Cannot activate: no credential captured for " + info.Name
-		return m, m.addToast(m.statusMsg, StatusError)
+		m.showMessage(StatusError, "Cannot switch", "%s has no captured credential, so switching to it would change nothing. Press n and log in as that account.", info.Name)
+		return m, nil
 	}
 
-	// Enter confirmation state
-	m.state = stateConfirm
-	m.pendingAction = confirmActivate
-	m.statusMsg = fmt.Sprintf("Activate '%s'? Current auth will be replaced. (y/n)", info.Name)
+	// The question goes in the middle of the screen.
+	provider := m.currentProvider()
+	active := ""
+	for _, p := range m.profiles[provider] {
+		if p.IsActive {
+			active = p.Name
+		}
+	}
+	question := fmt.Sprintf("Switch %s to %s?", providerLabel(provider), info.Name)
+	if active != "" {
+		question += fmt.Sprintf("\n\n%s is captured into the vault first, then %s's credential is installed.", active, info.Name)
+	} else {
+		question += fmt.Sprintf("\n\n%s's credential is installed as the live login.", info.Name)
+	}
+	m.openConfirm(confirmActivate, "Switch account?", question, "Switch")
 	return m, nil
+}
+
+// openConfirm asks a yes/no question in a dialog in the middle of the
+// screen; the answer runs through executeConfirmedAction.
+func (m *Model) openConfirm(action confirmAction, title, question, yes string) {
+	m.state = stateConfirm
+	m.pendingAction = action
+	m.confirmDialog = NewConfirmDialog(title, question)
+	m.confirmDialog.SetStyles(m.styles)
+	m.confirmDialog.SetWidth(m.dialogWidth(64))
+	m.confirmDialog.yesLabel, m.confirmDialog.noLabel = yes, "Cancel"
+	m.statusMsg = ""
 }
 
 // handleDeleteProfile initiates profile deletion with confirmation.
@@ -1392,9 +1434,7 @@ func (m Model) handleDeleteProfile() (tea.Model, tea.Cmd) {
 		m.statusMsg = "No profile selected"
 		return m, nil
 	}
-	m.state = stateConfirm
-	m.pendingAction = confirmDelete
-	m.statusMsg = fmt.Sprintf("Delete '%s'? (y/n)", info.Name)
+	m.openConfirm(confirmDelete, "Delete account?", fmt.Sprintf("Delete %s from the vault?\n\nIts captured credential is removed; the live login, if this is the account in use, is untouched. This cannot be undone.", info.Name), "Delete")
 	return m, nil
 }
 
@@ -2659,6 +2699,11 @@ func (m Model) View() string {
 	case stateMessage:
 		if m.messageDialog != nil {
 			return m.dialogOverlayView(m.messageDialog.View())
+		}
+		return m.mainView()
+	case stateConfirm:
+		if m.confirmDialog != nil {
+			return m.dialogOverlayView(m.confirmDialog.View())
 		}
 		return m.mainView()
 	case stateReloginConfirm:

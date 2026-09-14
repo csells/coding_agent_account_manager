@@ -256,9 +256,11 @@ func TestEnterRefusesACredentialLessProfileUpFront(t *testing.T) {
 	if m.state == stateConfirm || called {
 		t.Fatalf("enter should refuse, not confirm: state=%v called=%v", m.state, called)
 	}
-	if cmd == nil {
-		t.Fatalf("refusal should raise a toast")
+	if cmd != nil || m.state != stateMessage {
+		t.Fatalf("refusal should open a dialog and start nothing: state=%v cmd=%v", m.state, cmd)
 	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // dismiss it
+	m = updated.(Model)
 	m.syncDetailPanel()
 	v := flatCard(m.detailPanel.View())
 	for _, want := range []string{"none captured", "caam backup claude b@example.com", "no captured credential"} {

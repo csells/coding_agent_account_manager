@@ -198,10 +198,13 @@ the selected agent's Accounts below.
   an agent that renews its own tokens — `r` offers the Login instead and
   yes runs the `n` flow for that agent), `i` full card, `/` search, `e`
   edit, `o` browser, `d` delete, `?` help.
-- **Outcomes are dialogs.** Everything that answers an action — switched,
-  logged in, refused, failed, deleted, refreshed — opens a message dialog
-  in the middle of the screen (`MessageDialog`, via `showMessage`), one key
-  to dismiss. The status bar carries progress ("Refreshing limits…",
+- **Questions and outcomes are dialogs.** Every question the dashboard
+  asks — switch to this account, delete it, log in again, which provider —
+  is a dialog in the middle of the screen (`ConfirmDialog` via
+  `openConfirm`, the provider picker), never a `(y/n)` on the status bar.
+  Everything that answers an action — switched, logged in, refused, failed,
+  deleted, refreshed — opens a message dialog there too (`MessageDialog`,
+  via `showMessage`), one key to dismiss. The status bar carries progress ("Refreshing limits…",
   "Login finished; reading who signed in…") and nothing the user must not
   miss. The expansion under the Account keeps the last outcome as its first
   line for context after the dialog is gone. Upstream's `b` (backup under a typed name)

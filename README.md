@@ -841,9 +841,10 @@ refused it, the token is refreshed first (Codex and Gemini; the other
 tools renew their own) and the limits follow. When a refresh cannot help
 — the provider has ended the session, or renews its own tokens — `r`
 offers the login instead, right there, and yes runs it the way `n` does.
-`i` opens the full card as an overlay. Every outcome — switched, logged
-in, refused, failed — is reported in a dialog in the middle of the
-screen, dismissed with enter; the status bar carries progress only.
+`i` opens the full card as an overlay. Every question — switch this
+account? delete it? log in again? — and every outcome — switched, logged
+in, refused, failed — is a dialog in the middle of the screen; the status
+bar carries progress only.
 Limits are fetched for the accounts on screen — the selected provider's
 rows and every provider's active account — at most once a minute each,
 failures included, through the same credential resolution as
