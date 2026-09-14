@@ -589,25 +589,11 @@ func orDash(cell string) string {
 // display order (usage.WindowsOf's rank, then name), so every row of the
 // table lines up under the same headers.
 func limitsWindowColumns(results []usage.ProfileUsage) []string {
-	ranks := make(map[string]int)
+	infos := make([]*usage.UsageInfo, 0, len(results))
 	for _, r := range results {
-		for _, c := range usage.WindowsOf(r.Usage) {
-			if _, seen := ranks[c.Column]; !seen {
-				ranks[c.Column] = c.Rank
-			}
-		}
+		infos = append(infos, r.Usage)
 	}
-	columns := make([]string, 0, len(ranks))
-	for column := range ranks {
-		columns = append(columns, column)
-	}
-	sort.Slice(columns, func(i, j int) bool {
-		if ranks[columns[i]] != ranks[columns[j]] {
-			return ranks[columns[i]] < ranks[columns[j]]
-		}
-		return columns[i] < columns[j]
-	})
-	return columns
+	return usage.WindowColumns(infos)
 }
 
 // formatCacheAge renders how stale a cached snapshot is. A snapshot with no

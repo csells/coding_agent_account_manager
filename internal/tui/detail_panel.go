@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -473,26 +474,7 @@ func (p *DetailPanel) renderLimits(l *LimitsInfo) []string {
 // shortLimitsError condenses a fetch error to a phrase that fits a card
 // row or a provider chip.
 func shortLimitsError(err string) string {
-	e := strings.ToLower(err)
-	switch {
-	case strings.Contains(e, "unauthorized"), strings.Contains(e, "token expired"), strings.Contains(e, "401"):
-		return "auth expired (re-login)"
-	case strings.Contains(e, "no usage api"), strings.Contains(e, "no limits api"):
-		return "no limits API"
-	case strings.Contains(e, "no z.ai coding plan"):
-		return "no coding plan"
-	case strings.Contains(e, "no credential"):
-		return "no credential captured"
-	case strings.Contains(e, "permission_denied"), strings.Contains(e, "403"):
-		return "quota API refused (403)"
-	}
-	if i := strings.Index(err, ";"); i > 0 {
-		err = err[:i]
-	}
-	if len(err) > 48 {
-		return err[:45] + "..."
-	}
-	return err
+	return usage.ShortError(err, 48)
 }
 
 // formatDurationFull formats duration for details view.

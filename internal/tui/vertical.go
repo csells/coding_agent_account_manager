@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -813,29 +812,13 @@ func (m Model) accountColumns(provider string, profiles []ProfileInfo, tier layo
 // windowColumnsFor is the union of window columns across a provider's
 // accounts, in rank order.
 func (m Model) windowColumnsFor(provider string, profiles []ProfileInfo) []string {
-	ranks := make(map[string]int)
+	infos := make([]*usage.UsageInfo, 0, len(profiles))
 	for _, p := range profiles {
-		e, ok := m.limits[limitsKey(provider, p.Name)]
-		if !ok {
-			continue
-		}
-		for _, c := range usage.WindowsOf(e.info) {
-			if _, seen := ranks[c.Column]; !seen {
-				ranks[c.Column] = c.Rank
-			}
+		if e, ok := m.limits[limitsKey(provider, p.Name)]; ok {
+			infos = append(infos, e.info)
 		}
 	}
-	cols := make([]string, 0, len(ranks))
-	for c := range ranks {
-		cols = append(cols, c)
-	}
-	sort.Slice(cols, func(i, j int) bool {
-		if ranks[cols[i]] != ranks[cols[j]] {
-			return ranks[cols[i]] < ranks[cols[j]]
-		}
-		return cols[i] < cols[j]
-	})
-	return cols
+	return usage.WindowColumns(infos)
 }
 
 // windowCell renders one account's two cells for a window column: the

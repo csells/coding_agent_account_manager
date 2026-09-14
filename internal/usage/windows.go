@@ -64,14 +64,33 @@ func WindowsOf(u *UsageInfo) []WindowCell {
 	return cells
 }
 
+// WindowColumns is the union of the window columns across profiles, in
+// display order (WindowsOf's rank, then name), so every row of a table
+// lines up under the same headers. A nil profile contributes nothing.
+func WindowColumns(infos []*UsageInfo) []string {
+	ranks := make(map[string]int)
+	for _, u := range infos {
+		for _, c := range WindowsOf(u) {
+			if _, seen := ranks[c.Column]; !seen {
+				ranks[c.Column] = c.Rank
+			}
+		}
+	}
+	columns := make([]string, 0, len(ranks))
+	for column := range ranks {
+		columns = append(columns, column)
+	}
+	sort.Slice(columns, func(i, j int) bool {
+		if ranks[columns[i]] != ranks[columns[j]] {
+			return ranks[columns[i]] < ranks[columns[j]]
+		}
+		return columns[i] < columns[j]
+	})
+	return columns
+}
+
 // modelOnlyRank is the rank of a window named by nothing but its model.
 const modelOnlyRank = 60
-
-// WindowColumn names the table column a window belongs in and its rank.
-func WindowColumn(w *UsageWindow, fallback string) (string, int) {
-	column, _, rank := windowNames(w, fallback)
-	return column, rank
-}
 
 // windowNames derives a window's names from its duration when the provider
 // reports one, else from its kind, else from the fallback; a per-model

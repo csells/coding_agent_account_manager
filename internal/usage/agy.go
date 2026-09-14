@@ -52,12 +52,17 @@ type AgyFetcher struct {
 	loadURL     string // Overridable for testing
 	userInfoURL string // Overridable for testing
 
-	// The Code Assist project is a property of the account, so the last
-	// answer is reused while the same token keeps being presented.
-	mu              sync.Mutex
-	projectToken    string
-	projectForToken string
+	// The Code Assist project is a property of the account, so the answer
+	// is reused while the same token keeps being presented — per token,
+	// since one fetcher serves every agy account and they are fetched in
+	// parallel.
+	mu       sync.Mutex
+	projects map[string]string // access token -> Code Assist project
 }
+
+// agyProjectCacheSize bounds the project cache; past it the cache starts
+// over, one loadCodeAssist per account being the cost.
+const agyProjectCacheSize = 16
 
 // NewAgyFetcher creates a new Antigravity usage fetcher.
 func NewAgyFetcher() *AgyFetcher {
@@ -137,12 +142,11 @@ func (f *AgyFetcher) Fetch(ctx context.Context, accessToken string) (*UsageInfo,
 // for as long as the same access token is presented.
 func (f *AgyFetcher) codeAssistProject(ctx context.Context, accessToken string) (string, error) {
 	f.mu.Lock()
-	if f.projectToken == accessToken && f.projectForToken != "" {
-		project := f.projectForToken
-		f.mu.Unlock()
+	project, cached := f.projects[accessToken]
+	f.mu.Unlock()
+	if cached {
 		return project, nil
 	}
-	f.mu.Unlock()
 
 	status, body, err := f.post(ctx, f.resolveLoadURL(), accessToken, agyClientMetadata)
 	if err != nil {
@@ -151,13 +155,16 @@ func (f *AgyFetcher) codeAssistProject(ctx context.Context, accessToken string) 
 	if err := agyStatusError(status, body); err != nil {
 		return "", err
 	}
-	project := agyProjectOf(body)
+	project = agyProjectOf(body)
 	if project == "" {
 		return "", fmt.Errorf("no Code Assist project on this account: Google has not onboarded it yet" + agyRefreshHint)
 	}
 
 	f.mu.Lock()
-	f.projectToken, f.projectForToken = accessToken, project
+	if f.projects == nil || len(f.projects) >= agyProjectCacheSize {
+		f.projects = make(map[string]string)
+	}
+	f.projects[accessToken] = project
 	f.mu.Unlock()
 	return project, nil
 }
@@ -253,31 +260,14 @@ func (f *AgyFetcher) resolveQuotaURL() string {
 }
 
 // googleErrorDetail extracts the status and message of a Google API error
-// body ({"error":{"code":..,"message":..,"status":..}}) as a short suffix.
-// Error bodies carry no credential.
+// body ({"error":{"code":..,"message":..,"status":..}}) as a short suffix:
+// " (STATUS: message)" when both are present, else whichever one is.
 func googleErrorDetail(body []byte) string {
-	var payload struct {
-		Error struct {
-			Message string `json:"message"`
-			Status  string `json:"status"`
-		} `json:"error"`
+	status, msg := errorField(body, "error.status"), errorField(body, "error.message")
+	if status != "" && msg != "" {
+		return " (" + status + ": " + msg + ")"
 	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return ""
-	}
-	msg := strings.TrimSpace(payload.Error.Message)
-	if len(msg) > 160 {
-		msg = msg[:157] + "..."
-	}
-	switch {
-	case payload.Error.Status != "" && msg != "":
-		return fmt.Sprintf(" (%s: %s)", payload.Error.Status, msg)
-	case msg != "":
-		return " (" + msg + ")"
-	case payload.Error.Status != "":
-		return " (" + payload.Error.Status + ")"
-	}
-	return ""
+	return errorDetail(body, "error.message", "error.status")
 }
 
 // agyOpaqueBucket reports a bucket Google names by an internal id rather
@@ -308,13 +298,7 @@ func applyAgyBuckets(info *UsageInfo, buckets []agyQuotaBucket) {
 		}
 		remaining := 1.0
 		if b.RemainingFraction != nil {
-			remaining = *b.RemainingFraction
-		}
-		if remaining < 0 {
-			remaining = 0
-		}
-		if remaining > 1 {
-			remaining = 1
+			remaining = clamp01(*b.RemainingFraction)
 		}
 		used := 1 - remaining
 		w := &UsageWindow{

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestWindowColumn_NamesByDurationThenKindThenLabel(t *testing.T) {
+func TestWindowsOf_NamesByDurationThenKindThenLabel(t *testing.T) {
 	cases := []struct {
 		w    UsageWindow
 		want string
@@ -22,10 +22,34 @@ func TestWindowColumn_NamesByDurationThenKindThenLabel(t *testing.T) {
 		{UsageWindow{WindowDuration: 3 * 24 * time.Hour}, "3D"},
 	}
 	for _, c := range cases {
-		got, _ := WindowColumn(&c.w, "Primary")
-		if got != c.want {
-			t.Errorf("WindowColumn(%+v) = %q, want %q", c.w, got, c.want)
+		cells := WindowsOf(&UsageInfo{PrimaryWindow: &c.w})
+		if len(cells) != 1 || cells[0].Column != c.want {
+			t.Errorf("WindowsOf(primary %+v) = %+v, want one column %q", c.w, cells, c.want)
 		}
+	}
+}
+
+// WindowColumns is the union of every profile's columns, ordered by rank
+// and then name, so a table's headers are the same for every row.
+func TestWindowColumns_UnionInRankThenNameOrder(t *testing.T) {
+	infos := []*UsageInfo{
+		{PrimaryWindow: &UsageWindow{WindowDuration: 7 * 24 * time.Hour}},
+		nil,
+		{
+			PrimaryWindow: &UsageWindow{WindowDuration: 5 * time.Hour},
+			ModelWindows: map[string]*UsageWindow{
+				"Opus":  {WindowDuration: 7 * 24 * time.Hour, Label: "Opus"},
+				"Fable": {WindowDuration: 7 * 24 * time.Hour, Label: "Fable"},
+			},
+		},
+		{PrimaryWindow: &UsageWindow{WindowDuration: 5 * time.Hour}},
+	}
+	got := strings.Join(WindowColumns(infos), ",")
+	if want := "5-HOUR,WEEKLY,WEEKLY FABLE,WEEKLY OPUS"; got != want {
+		t.Fatalf("WindowColumns = %q, want %q", got, want)
+	}
+	if cols := WindowColumns(nil); len(cols) != 0 {
+		t.Fatalf("WindowColumns(nil) = %v, want none", cols)
 	}
 }
 

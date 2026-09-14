@@ -3,7 +3,6 @@ package monitor
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -360,25 +359,11 @@ func fetchedAt(u *usage.UsageInfo, now time.Time) time.Time {
 
 // windowColumns is the union of every row's window columns, in rank order.
 func windowColumns(rows []dashRow) []string {
-	ranks := make(map[string]int)
+	infos := make([]*usage.UsageInfo, 0, len(rows))
 	for _, r := range rows {
-		for _, c := range usage.WindowsOf(r.Usage) {
-			if _, seen := ranks[c.Column]; !seen {
-				ranks[c.Column] = c.Rank
-			}
-		}
+		infos = append(infos, r.Usage)
 	}
-	cols := make([]string, 0, len(ranks))
-	for name := range ranks {
-		cols = append(cols, name)
-	}
-	sort.Slice(cols, func(i, j int) bool {
-		if ranks[cols[i]] != ranks[cols[j]] {
-			return ranks[cols[i]] < ranks[cols[j]]
-		}
-		return cols[i] < cols[j]
-	})
-	return cols
+	return usage.WindowColumns(infos)
 }
 
 // rowStatus is the STATUS cell: the newest fact about the row that the

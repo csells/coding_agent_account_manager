@@ -1,7 +1,6 @@
 package monitor
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -46,14 +45,9 @@ func (r *BriefRenderer) Render(state *MonitorState) string {
 		parts := make([]string, 0, len(providers))
 		for _, prov := range providers {
 			p := byProvider[prov]
-			text := "-"
-			if p.Usage != nil {
-				if w := p.Usage.MostConstrainedWindow(); w != nil {
-					text = fmt.Sprintf("%d%% left", usage.PercentLeft(w))
-					if withReset && !w.ResetsAt.IsZero() {
-						text += ", resets " + usage.LocalReset(w.ResetsAt, now)
-					}
-				}
+			text := usage.LeftText(p.Usage.MostConstrainedWindow())
+			if withReset {
+				text = leftText(p.Usage, now)
 			}
 			parts = append(parts, provider.Label(prov)+" "+text)
 		}

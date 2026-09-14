@@ -89,13 +89,7 @@ func (d *kimiUsageDetail) window(duration time.Duration) *UsageWindow {
 	}
 	util := 0.0
 	if limit > 0 {
-		util = used / limit
-		if util < 0 {
-			util = 0
-		}
-		if util > 1 {
-			util = 1
-		}
+		util = clamp01(used / limit)
 	}
 	return &UsageWindow{
 		Utilization:    util,
@@ -219,72 +213,27 @@ func SetKimiDeviceHeaders(req *http.Request, home string) {
 	}
 }
 
-// kimiErrorDetail extracts an error message from a Kimi API error body.
+// kimiErrorDetail extracts an error message from a Kimi API error body,
+// which names it as message, msg or error.
 func kimiErrorDetail(body []byte) string {
-	var payload struct {
-		Error   string `json:"error"`
-		Message string `json:"message"`
-		Msg     string `json:"msg"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return ""
-	}
-	for _, m := range []string{payload.Message, payload.Msg, payload.Error} {
-		if m = strings.TrimSpace(m); m != "" {
-			if len(m) > 160 {
-				m = m[:157] + "..."
-			}
-			return " (" + m + ")"
-		}
-	}
-	return ""
+	return errorDetail(body, "message", "msg", "error")
 }
 
 // Fetch retrieves usage data from the Kimi Code API.
 func (f *KimiFetcher) Fetch(ctx context.Context, accessToken string) (*UsageInfo, error) {
-	if accessToken == "" {
-		return nil, fmt.Errorf("access token is empty")
-	}
-	req, err := http.NewRequestWithContext(ctx, "GET", f.base()+KimiUsagePath, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	f.setKimiHeaders(req, accessToken)
-
-	resp, err := f.client.Do(req)
-	if err != nil {
-		return &UsageInfo{
-			Provider:  "kimi",
-			FetchedAt: time.Now(),
-			Error:     fmt.Sprintf("request failed: %v", err),
-		}, err
-	}
-	defer resp.Body.Close()
-
-	info := &UsageInfo{
-		Provider:  "kimi",
-		Source:    SourceAPI,
-		FetchedAt: time.Now(),
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		info.Error = fmt.Sprintf("read response: %v", err)
-		return info, fmt.Errorf("read response: %w", err)
-	}
-	switch resp.StatusCode {
-	case http.StatusOK:
-	case http.StatusUnauthorized, http.StatusForbidden:
-		info.Error = "unauthorized: token expired or invalid" + kimiErrorDetail(body) + "; refresh it (caam refresh kimi <account>, or r in the dashboard), then retry"
-		return info, fmt.Errorf("unauthorized: status %d%s", resp.StatusCode, kimiErrorDetail(body))
-	default:
-		info.Error = fmt.Sprintf("API error: status %d%s", resp.StatusCode, kimiErrorDetail(body))
-		return info, fmt.Errorf("API error: status %d%s", resp.StatusCode, kimiErrorDetail(body))
-	}
-
 	var usage kimiUsageResponse
-	if err := json.Unmarshal(body, &usage); err != nil {
-		info.Error = fmt.Sprintf("decode error: %v", err)
-		return info, fmt.Errorf("decode response: %w", err)
+	info, err := getJSON(ctx, f.client, jsonRequest{
+		provider: "kimi",
+		url:      f.base() + KimiUsagePath,
+		token:    accessToken,
+		headers:  func(req *http.Request) { SetKimiDeviceHeaders(req, f.home()) },
+		unauthorized: func(detail string) string {
+			return "unauthorized: token expired or invalid" + detail + "; refresh it (caam refresh kimi <account>, or r in the dashboard), then retry"
+		},
+		detail: kimiErrorDetail,
+	}, &usage)
+	if err != nil {
+		return info, err
 	}
 	applyKimiUsage(info, &usage)
 	return info, nil
