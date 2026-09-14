@@ -342,6 +342,12 @@ Status: rewritten 2026-09-14; the v2 text it replaced is kept as
   rotated).
 - Two decisions: Claude's label ("Claude Code") and the `limits` table's
   dropped SCORE/BURN/DEPLETES columns.
-- `golangci-lint migrate` on `.golangci.yml`: run it, report the count of
-  findings, decide.
+- `golangci-lint migrate` on `.golangci.yml`: run on a scratch copy
+  2026-09-14 with golangci-lint 2.9.0. The migration adds `version: "2"`,
+  drops `run.timeout`, and adds the default exclusion presets. Against the
+  branch it reports 12 findings, all staticcheck: 11 quick-fix style
+  suggestions (tagged switches, De Morgan, `fmt.Fprintf`) in upstream code,
+  and one real one, a nil dereference in the dashboard's `applyState`,
+  fixed on the branch with a test. Decision for Chris: commit the migrated
+  config as is (and either silence QF* or fix the 11 upstream spots).
 - Remove the two merged agent worktrees under `.claude/worktrees`.

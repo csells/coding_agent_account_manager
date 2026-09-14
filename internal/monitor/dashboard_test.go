@@ -377,3 +377,34 @@ func TestDashboard_CursorSurvivesRefreshAndStaysInRange(t *testing.T) {
 		t.Fatalf("cursor after refresh = %d (%s)", d.cursor, d.Rows()[d.cursor].Name)
 	}
 }
+
+// nilStateRefresher answers the first refresh with a good snapshot and
+// every later one with no snapshot at all, as a monitor that has not yet
+// (or no longer) built one does.
+type nilStateRefresher struct {
+	first   *MonitorState
+	fetches int
+}
+
+func (f *nilStateRefresher) Refresh(ctx context.Context) error { f.fetches++; return nil }
+
+func (f *nilStateRefresher) GetState() *MonitorState {
+	if f.fetches <= 1 {
+		return f.first
+	}
+	return nil
+}
+
+func TestDashboard_KeepsRowsWhenARefreshYieldsNoSnapshot(t *testing.T) {
+	ref := &nilStateRefresher{first: stateWith(claudeProfile("chris", true))}
+	d := NewDashboard(ref, DashboardOptions{Interval: time.Minute, Now: dashNow})
+	d.width = 200
+	load(t, d)
+	if len(d.Rows()) != 1 {
+		t.Fatalf("first fetch produced %d rows, want 1", len(d.Rows()))
+	}
+	load(t, d) // must not panic
+	if len(d.Rows()) != 1 || d.Rows()[0].Usage == nil {
+		t.Fatalf("rows lost when the refresh yielded no snapshot: %+v", d.Rows())
+	}
+}

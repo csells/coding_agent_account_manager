@@ -296,40 +296,41 @@ func (d *Dashboard) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // good usage for a profile whose latest fetch failed so the screen keeps
 // answering "how much is left" with an honest age instead of an error.
 func (d *Dashboard) applyState(state *MonitorState) {
+	if state == nil {
+		return // no snapshot is no news: the rows stand
+	}
 	var selected string
 	if d.cursor >= 0 && d.cursor < len(d.rows) {
 		selected = d.rows[d.cursor].key()
 	}
 
 	rows := make([]dashRow, 0, len(state.Profiles))
-	if state != nil {
-		for _, key := range sortProfileKeys(state) {
-			p := state.Profiles[key]
-			if p == nil {
-				continue
-			}
-			row := dashRow{
-				Provider:      p.Provider,
-				Name:          p.ProfileName,
-				Active:        p.Active,
-				Usage:         p.Usage,
-				InCooldown:    p.InCooldown,
-				CooldownUntil: p.CooldownUntil,
-			}
-			if p.Usage != nil {
-				row.AsOf = p.Usage.FetchedAt
-				row.Err = p.Usage.Error
-			}
-			if hasUsageData(p.Usage) {
-				d.lastGood[key] = lastKnown{usage: p.Usage, at: fetchedAt(p.Usage, d.now())}
-				row.AsOf = d.lastGood[key].at
-			} else if prev, ok := d.lastGood[key]; ok {
-				row.Usage = prev.usage
-				row.AsOf = prev.at
-				row.Stale = true
-			}
-			rows = append(rows, row)
+	for _, key := range sortProfileKeys(state) {
+		p := state.Profiles[key]
+		if p == nil {
+			continue
 		}
+		row := dashRow{
+			Provider:      p.Provider,
+			Name:          p.ProfileName,
+			Active:        p.Active,
+			Usage:         p.Usage,
+			InCooldown:    p.InCooldown,
+			CooldownUntil: p.CooldownUntil,
+		}
+		if p.Usage != nil {
+			row.AsOf = p.Usage.FetchedAt
+			row.Err = p.Usage.Error
+		}
+		if hasUsageData(p.Usage) {
+			d.lastGood[key] = lastKnown{usage: p.Usage, at: fetchedAt(p.Usage, d.now())}
+			row.AsOf = d.lastGood[key].at
+		} else if prev, ok := d.lastGood[key]; ok {
+			row.Usage = prev.usage
+			row.AsOf = prev.at
+			row.Stale = true
+		}
+		rows = append(rows, row)
 	}
 	d.rows = rows
 	d.columns = windowColumns(rows)
