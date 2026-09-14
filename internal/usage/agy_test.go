@@ -284,3 +284,31 @@ func TestApplyAgyBuckets_SkipsOpaqueBuckets(t *testing.T) {
 		}
 	}
 }
+
+// One AgyFetcher serves every agy account and they are fetched together,
+// so the Code Assist project is remembered per token: a second account
+// does not evict the first one's answer.
+func TestAgyFetcher_ProjectCacheIsPerToken(t *testing.T) {
+	var loads int
+	f := NewAgyFetcher()
+	agyServer(t, f, "", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, agyQuotaPayload)
+	}, func(w http.ResponseWriter, r *http.Request) {
+		loads++
+		project := "projects/" + strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"cloudaicompanionProject":`+strconv.Quote(project)+`}`)
+	})
+	for _, token := range []string{"tok-a", "tok-b", "tok-a", "tok-b"} {
+		if _, err := f.Fetch(context.Background(), token); err != nil {
+			t.Fatalf("Fetch(%s): %v", token, err)
+		}
+	}
+	if loads != 2 {
+		t.Fatalf("loadCodeAssist called %d times for two alternating accounts, want 2", loads)
+	}
+	if got := f.projects["tok-b"]; got != "projects/tok-b" {
+		t.Fatalf("cached project for tok-b = %q, want projects/tok-b", got)
+	}
+}
