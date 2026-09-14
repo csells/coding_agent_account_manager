@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -824,8 +825,8 @@ func TestHandleExportVault(t *testing.T) {
 	m.profiles = map[string][]Profile{}
 	result, _ := m.handleExportVault()
 	updated := result.(Model)
-	if !strings.Contains(updated.statusMsg, "No profiles") {
-		t.Errorf("expected 'No profiles' message, got %q", updated.statusMsg)
+	if !strings.Contains(updated.statusMsg, "No accounts") {
+		t.Errorf("expected 'No accounts' message, got %q", updated.statusMsg)
 	}
 
 	// Test with profiles - should show confirmation dialog
@@ -839,6 +840,37 @@ func TestHandleExportVault(t *testing.T) {
 	}
 	if updated.confirmDialog == nil {
 		t.Error("expected confirmDialog to be set")
+	}
+}
+
+// The E dialog says where the bundle lands and that it is plaintext: the
+// vault's credentials are copied into a zip in the working directory with
+// no encryption, and the person confirming should know both before saying
+// yes.
+func TestExportDialog_SaysWhereAndThatItIsPlaintext(t *testing.T) {
+	m := modelWithTwoClaudeProfiles(Hooks{})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("E")})
+	m = updated.(Model)
+	if m.state != stateExportConfirm || m.confirmDialog == nil {
+		t.Fatalf("E should open the export confirmation, state=%v", m.state)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The header behind the overlay shows the cwd too, so the directory is
+	// looked for in the dialog itself; it wraps a long path across lines,
+	// so compare without the wrapping, padding and box border.
+	dialog := ansi.Strip(m.confirmDialog.View())
+	flat := strings.NewReplacer("\n", "", " ", "", "║", "").Replace(dialog)
+	if !strings.Contains(flat, cwd) {
+		t.Errorf("export dialog does not name the output directory %q:\n%s", cwd, dialog)
+	}
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"not encrypted", "2 accounts"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("export dialog lacks %q:\n%s", want, view)
+		}
 	}
 }
 
