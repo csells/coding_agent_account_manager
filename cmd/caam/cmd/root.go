@@ -1037,16 +1037,20 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	var output statusOutput
 	var warnings []string
 	var recommendations []string
+	// Tools nobody has logged in to go on one footer line, as the dashboard
+	// hides exactly those; the table is for the tools that are in use.
+	var notLoggedIn []string
 
 	if !jsonOutput {
 		fmt.Println("Active Profiles")
 		fmt.Println("───────────────────────────────────────────────────")
-		fmt.Printf("%-10s  %-20s  %-24s  %-10s  %s\n", "TOOL", "PROFILE", "EMAIL", "PLAN", "STATUS")
+		fmt.Printf("%-12s  %-20s  %-24s  %-10s  %s\n", "TOOL", "PROFILE", "EMAIL", "PLAN", "STATUS")
 	}
 
 	for _, tool := range toolsToCheck {
 		fileSet := tools[tool]()
 		hasAuth := authfile.HasAuthFiles(fileSet)
+		label := provider.Label(tool)
 
 		if !hasAuth {
 			if jsonOutput {
@@ -1055,7 +1059,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 					LoggedIn: false,
 				})
 			} else {
-				fmt.Printf("%-10s  (not logged in)\n", tool)
+				notLoggedIn = append(notLoggedIn, label)
 			}
 			continue
 		}
@@ -1069,7 +1073,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 					Error:    err.Error(),
 				})
 			} else {
-				fmt.Printf("%-10s  (error: %v)\n", tool, err)
+				fmt.Printf("%-12s  (error: %v)\n", label, err)
 			}
 			continue
 		}
@@ -1093,9 +1097,9 @@ func runStatus(cmd *cobra.Command, args []string) error {
 					if savedCount == 1 {
 						noun = "profile"
 					}
-					fmt.Printf("%-10s  (logged in; live auth matches no saved profile — %d saved %s available, see `caam ls %s`)\n", tool, savedCount, noun, tool)
+					fmt.Printf("%-12s  (logged in; live auth matches no saved profile — %d saved %s available, see `caam ls %s`)\n", label, savedCount, noun, tool)
 				} else {
-					fmt.Printf("%-10s  (logged in, no matching profile; none saved — save one with `caam add %s <name>`)\n", tool, tool)
+					fmt.Printf("%-12s  (logged in, no matching profile; none saved — save one with `caam add %s <name>`)\n", label, tool)
 				}
 			}
 			continue
@@ -1141,7 +1145,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 				healthStr = healthStr + " " + cooldownStr
 			}
 
-			fmt.Printf("%-10s  %-20s  %-24s  %-10s  %s\n", tool, activeProfile, email, plan, healthStr)
+			fmt.Printf("%-12s  %-20s  %-24s  %-10s  %s\n", label, activeProfile, email, plan, healthStr)
 		}
 
 		// Collect warnings
@@ -1170,6 +1174,10 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(output)
+	}
+
+	if len(notLoggedIn) > 0 {
+		fmt.Printf("\nNot logged in: %s\n", strings.Join(notLoggedIn, ", "))
 	}
 
 	// Show warnings
