@@ -59,8 +59,11 @@ seconds earlier. The symptom is `401 token_revoked` from
 token endpoint; nothing brings the Account back but a new login.
 
 The rule, implemented in the dashboard's `n` flow
-(`internal/tui/newaccount.go: startNewAccountLogin`) and already the shape of
-upstream's `caam add`:
+(`internal/tui/newaccount.go: startNewAccountLogin`); upstream's `caam add`
+has the same outline but not the same care — it vaults the outgoing account
+under an `_auto_backup_` name instead of its own, clears with a raw file
+delete that skips the keychain item, and asks for a name instead of reading
+identity (audit finding 9):
 
 1. Re-capture the Active Account into the vault (newest tokens).
 2. **Clear the live credential** (`authfile.ClearAuthFiles`), so the agent's
@@ -250,3 +253,8 @@ that run.
   a 3.x model.
 - The parent handoff (`caam-handoff.md`) still describes the mission in its
   pre-product framing; ADR-0001 says it should be rewritten.
+- `docs/SURFACE_AUDIT_2026-09-13.md` lists the rest of caam's surface that
+  does not yet follow §1–§6: eight other switch paths that restore without
+  re-capturing, two timers that spend refresh tokens, `caam add` and the
+  smart handoff running a login in the unsafe order, and output surfaces
+  that still say "used %" and raw ids. None of it is fixed yet.
