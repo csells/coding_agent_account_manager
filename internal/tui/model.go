@@ -1226,7 +1226,8 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case key.Matches(msg, m.keys.Right):
+	case key.Matches(msg, m.keys.Right), key.Matches(msg, m.keys.Tab):
+		// Cycle through providers
 		if n := len(m.providers); n > 0 {
 			m.activeProvider = (m.activeProvider + 1) % n
 			m.selected = 0
@@ -1237,16 +1238,6 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Enter):
 		return m.handleActivateProfile()
-
-	case key.Matches(msg, m.keys.Tab):
-		// Cycle through providers
-		if n := len(m.providers); n > 0 {
-			m.activeProvider = (m.activeProvider + 1) % n
-			m.selected = 0
-			m.selectedProfileName = ""
-			m.syncProfilesPanel()
-		}
-		return m, nil
 
 	case key.Matches(msg, m.keys.Delete):
 		return m.handleDeleteProfile()
