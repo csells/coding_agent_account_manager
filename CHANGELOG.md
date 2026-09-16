@@ -189,6 +189,13 @@ The design and the facts behind it are in `docs/ACCOUNT_SWITCHER.md`.
 
 ### Fixed
 
+- **A refused account no longer looks green.** The dashboard's STATUS cell
+  came from the vault token's expiry date; a revoked refresh-token family
+  still carries an access token with days left, so a dead account showed a
+  green countdown and dashes for its limits, and the only hint was in the
+  row's expansion. When the service refuses the token, the row now says
+  "auth expired (re-login)" in red, as the strip already did.
+
 - **The test suite ran to the end.** A test that reached `syscall.Exec` was
   replaced by the isolated test environment's no-op stand-in, which exited
   0, so the cmd package silently ran 366 of its 476 tests and reported six

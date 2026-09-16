@@ -12,8 +12,7 @@ import "strings"
 func ShortError(msg string, width int) string {
 	e := strings.ToLower(msg)
 	switch {
-	case strings.Contains(e, "unauthorized"), strings.Contains(e, "token expired"),
-		strings.Contains(e, "expired or invalid"), strings.Contains(e, "401"):
+	case AuthRefused(msg):
 		return "auth expired (re-login)"
 	case strings.Contains(e, "no usage api"), strings.Contains(e, "no limits api"):
 		return "no limits API"
@@ -37,4 +36,14 @@ func ShortError(msg string, width int) string {
 		return msg[:width-3] + "..."
 	}
 	return msg
+}
+
+// AuthRefused reports whether a usage-fetch error means the service refused
+// the account's token. A revoked refresh-token family leaves an access token
+// whose expiry is days away, so the vault copy looks healthy while every call
+// with it is refused; this is the fact that must win over the expiry date.
+func AuthRefused(msg string) bool {
+	e := strings.ToLower(msg)
+	return strings.Contains(e, "unauthorized") || strings.Contains(e, "token expired") ||
+		strings.Contains(e, "expired or invalid") || strings.Contains(e, "401")
 }

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -839,4 +840,44 @@ func paletteText(cmds []CommandAction) string {
 		b.WriteString(c.Name + " " + c.Description + "\n")
 	}
 	return b.String()
+}
+
+// A row is only as healthy as the service says. A revoked refresh-token
+// family leaves an access token whose expiry is days away, so the vault
+// copy looks fine, while every limits fetch with it is refused. The STATUS
+// cell must show the refusal, in red, in the strip's words — not a green
+// countdown that sends the user to a re-login they were never told about.
+func TestAccountRow_RefusedLimitsBeatAHealthyLookingToken(t *testing.T) {
+	rec := &limitsRecorder{info: sampleLimits()}
+	m := modelWithTwoClaudeProfiles(Hooks{Limits: rec.fetch})
+	m.width, m.height = 170, 40
+	for i := range m.profilesPanel.profiles {
+		m.profilesPanel.profiles[i].HealthStatus = health.StatusHealthy
+		m.profilesPanel.profiles[i].TokenExpiry = time.Now().Add(8 * 24 * time.Hour)
+	}
+	m.applyLimitsLoaded(limitsLoadedMsg{provider: "claude", profile: "a@example.com", info: sampleLimits()})
+	m.applyLimitsLoaded(limitsLoadedMsg{provider: "claude", profile: "b@example.com", err: errors.New("unauthorized: token expired or invalid")})
+
+	view := ansi.Strip(m.View())
+	var rowA, rowB string
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "a@example.com") && strings.Contains(line, "left") {
+			rowA = line
+		}
+		if strings.Contains(line, "b@example.com") && rowB == "" && !strings.Contains(line, "Log in") {
+			rowB = line
+		}
+	}
+	if rowA == "" || rowB == "" {
+		t.Fatalf("rows not found:\n%s", view)
+	}
+	if !strings.Contains(rowA, "8d") && !strings.Contains(rowA, "7d") {
+		t.Errorf("the healthy row should still show its token countdown: %q", rowA)
+	}
+	if !strings.Contains(rowB, "auth expired (re-login)") {
+		t.Errorf("the refused row should say auth expired (re-login) in STATUS: %q", rowB)
+	}
+	if strings.Contains(rowB, "8d") || strings.Contains(rowB, "7d") || strings.Contains(rowB, "🟢") {
+		t.Errorf("the refused row still looks healthy: %q", rowB)
+	}
 }

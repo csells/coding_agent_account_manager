@@ -728,6 +728,13 @@ func (m Model) accountColumns(provider string, profiles []ProfileInfo, tier layo
 		}
 		status.cells[i] = formatTUIStatus(&profiles[i])
 		status.styles[i] = ps.StatusStyle(p.HealthStatus)
+		// The service's answer beats the token's expiry date: a revoked
+		// refresh-token family still carries an access token with days
+		// left, so the row would say healthy while every fetch is refused.
+		if e, ok := m.limits[limitsKey(provider, p.Name)]; ok && e.err != nil && usage.AuthRefused(e.err.Error()) {
+			status.cells[i] = health.StatusCritical.Icon() + " auth expired (re-login)"
+			status.styles[i] = ps.StatusStyle(health.StatusCritical)
+		}
 	}
 	cols := []accountColumn{name, status}
 
