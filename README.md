@@ -1442,6 +1442,8 @@ While codex-pool answers "which account should handle THIS request?" (real-time 
 
 See [`docs/SMART_PROFILE_MANAGEMENT.md`](docs/SMART_PROFILE_MANAGEMENT.md) for the full design document.
 
+The rest of the documentation, including the account switcher's design, glossary and decisions, is indexed in [`docs/README.md`](docs/README.md).
+
 ---
 
 ## Contributions

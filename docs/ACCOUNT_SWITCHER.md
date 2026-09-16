@@ -8,15 +8,11 @@ against a real account. The user-facing description is in `README.md`
 ("Supported Agents" and the dashboard sections); the credential rules in
 short form are in `AGENTS.md`.
 
-Vocabulary: an **Agent** is a CLI coding tool (caam's code calls it a
-provider), an **Account** is one login identity at that Agent's service
-(caam's code calls it a profile), **Capture** brings an Account's credential
-into the vault (caam's `backup`), **Switch** makes a captured Account the
-Active one (caam's `activate`), **Login** obtains a credential by
-authenticating with the Agent's service, **Limits** are an Account's
-**Windows** (the rate-limit periods the service enforces) and how much of
-each is left. Prose uses these words; flag names, subcommands and JSON keys
-keep caam's original ones.
+Vocabulary: **Agent**, **Account**, **Capture**, **Switch**, **Login**,
+**Limits** and **Window** are defined, with the words to avoid, in
+`GLOSSARY.md`. Prose uses these words; flag names, subcommands and JSON keys
+keep caam's original ones. The decisions behind the design are recorded as
+ADRs under `adr/`.
 
 ## 1. The one rule everything else follows from
 
@@ -300,6 +296,6 @@ installs v2); `go vet`, `gofmt` and `go test -race` are the other checks.
   limits API`; a Zen API key reports limits.
 - caam cannot refresh Claude Code, Antigravity, zcode or OpenCode tokens;
   when one of those sessions ends, only a new Login helps.
-- `docs/SURFACE_AUDIT_2026-09-13.md` and `docs/SURFACE_PLAN.md` are the
+- `SURFACE_AUDIT_2026-09-13.md` and `SURFACE_PLAN.md` are the
   dated record of the gaps found between the dashboard and the rest of caam
   and the plan that closed them; they are kept as history.

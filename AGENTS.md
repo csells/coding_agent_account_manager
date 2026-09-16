@@ -59,6 +59,34 @@ The rules that cost real accounts to learn:
 
 ---
 
+## Working on the account-switcher branch
+
+The fork's product work lives on `account-switcher`, pushed to `origin` only.
+On the fork, `main` and `master` stay untouched and no upstream PR is opened;
+whether to upstream is the owner's call. The design is `docs/ACCOUNT_SWITCHER.md`,
+the vocabulary `docs/GLOSSARY.md`, the decisions `docs/adr/`, the index
+`docs/README.md`.
+
+- Live logins on the development machine are in daily use. Read them freely;
+  write to `~/.codex/auth.json`, the login keychain, `~/.kimi-code/credentials/`,
+  `~/.zcode/v2/credentials.json` or OpenCode's store only through the switcher's
+  own paths.
+- Red-green: a failing test before each change. Tests never touch the real
+  keychain (`testutil.FakeKeychain`) and every test package uses
+  `testutil.IsolatedMain`. A test that reaches an exec must fake it
+  (`spawnExec` is fenced in the cmd package's TestMain); a green
+  `go test ./...` is not proof when a test can replace the process.
+- Checks: `make build`, `go vet ./...`, `gofmt`, `go test ./...`,
+  `go test -race ./...`, `make lint` (v2 config, clean; keep it that way).
+- Install: `make build && cp caam ~/.local/bin/caam.new && mv -f ~/.local/bin/caam.new ~/.local/bin/caam`
+  (an in-place copy gets the binary killed by the macOS signature cache).
+- Vocabulary in anything a person reads: agent, account, "left, resets at".
+  Flag and subcommand names (`--tool`, `provider`) are the CLI's contract and stay.
+- Commits carry no AI attribution. A decision that is the owner's stays
+  pending until the owner answers; do the independent work meanwhile.
+
+---
+
 ## Git Branch: ONLY Use `main`, NEVER `master`
 
 **The default branch is `main`. The `master` branch exists only for legacy URL compatibility.**

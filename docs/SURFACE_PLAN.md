@@ -345,7 +345,7 @@ the dashboard section.
 
 ## R5 — The design document (done)
 
-`docs/ACCOUNT_SWITCHER.md` is written around the product mission: what the
+`ACCOUNT_SWITCHER.md` is written around the product mission: what the
 switcher is, the rules, what each agent's credential is, what is done and
 what is left. Earlier working notes that framed the work as a series of
 sessions are superseded by it.
@@ -368,3 +368,11 @@ Status: rewritten 2026-09-14.
   again.
 - A Kimi rate-limit pattern for the coordinator waits until one is observed
   in real Kimi output.
+- Explicitly deferred: a `--warm` background refresh; thresholds and
+  notifications (never a requirement); the license rider question (whether
+  the fork's owner counts as acting for OpenAI/Anthropic) is a business
+  matter, not a code one.
+- Done means: every Account the owner has, on every Agent, captured and
+  switchable from the dashboard and the CLI, with truthful Limits, on a real
+  machine. Not a green test on one Account per Agent. The checks in
+  `ACCOUNT_SWITCHER.md` §7 are the gate.
