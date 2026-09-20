@@ -1051,7 +1051,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			// A refused refresh is not re-presented on the next r: that is
 			// what trips reuse detection. It stays refused until a fetch
-			// succeeds or the account logs in again.
+			// succeeds or the account logs in again. Either way the person
+			// is asked to log in: that is the one thing that helps.
 			if m.refreshRefused == nil {
 				m.refreshRefused = make(map[string]bool)
 			}
@@ -1059,8 +1060,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if sessionEnded(msg.err) {
 				return m.offerRelogin(msg.provider, msg.profile, "the agent's service has ended its session and a refresh cannot revive it")
 			}
-			m.showError(msg.err, "Refresh")
-			return m, nil
+			return m.offerRelogin(msg.provider, msg.profile, "the refresh failed ("+firstLine(msg.err.Error())+")")
 		}
 		delete(m.refreshRefused, limitsKey(msg.provider, msg.profile))
 		m.showRefreshSuccess(msg.profile, time.Time{}) // TODO: pass actual expiry time
@@ -1713,11 +1713,17 @@ func (m Model) handleRefresh() (tea.Model, tea.Cmd) {
 	provider := m.currentProvider()
 	info := m.selectedProfileInfo()
 	if info != nil && m.tokenInTrouble(provider, info.Name) {
-		if refreshableProvider(provider) {
-			m.statusMsg = fmt.Sprintf("Refreshing %s's token, then its limits…", info.Name)
-			return m, m.doRefreshProfile(provider, info.Name)
+		switch {
+		case !refreshableProvider(provider):
+			return m.offerRelogin(provider, info.Name, providerLabel(provider)+" renews its own tokens, so caam cannot refresh this one")
+		case m.refreshRefused[limitsKey(provider, info.Name)]:
+			// One refusal is enough: a second attempt trips reuse
+			// detection. The offer is repeated instead, for as long as the
+			// service keeps refusing the account.
+			return m.offerRelogin(provider, info.Name, "its last refresh was refused, and a refresh token is spent once")
 		}
-		return m.offerRelogin(provider, info.Name, providerLabel(provider)+" renews its own tokens, so caam cannot refresh this one")
+		m.statusMsg = fmt.Sprintf("Refreshing %s's token, then its limits…", info.Name)
+		return m, m.doRefreshProfile(provider, info.Name)
 	}
 	m.limitsRefresh()
 	m.statusMsg = "Refreshing limits…"
@@ -1728,12 +1734,8 @@ func (m Model) handleRefresh() (tea.Model, tea.Cmd) {
 // or the last limits fetch was refused as unauthorized — the two reasons r
 // does more than re-fetch limits.
 func (m Model) tokenInTrouble(provider, name string) bool {
-	key := limitsKey(provider, name)
-	if m.refreshRefused[key] {
-		return false // one refusal is enough; a person decides what is next
-	}
 	var lastErr error
-	if e, ok := m.limits[key]; ok {
+	if e, ok := m.limits[limitsKey(provider, name)]; ok {
 		lastErr = e.err
 	}
 	return refresh.NeedsRefresh(m.healthFor(provider, name), lastErr)
@@ -1745,11 +1747,24 @@ func refreshableProvider(provider string) bool {
 	return provider == "codex" || provider == "gemini" || provider == "kimi"
 }
 
-// tokenNeedsRefresh reports whether r should refresh the account's token
-// before re-fetching its limits: a token in trouble, on a provider caam
-// can refresh.
+// tokenNeedsRefresh reports whether r should spend a refresh token on the
+// account: a token in trouble, on a provider caam can refresh, whose last
+// refresh was not refused.
 func (m Model) tokenNeedsRefresh(provider, name string) bool {
-	return refreshableProvider(provider) && m.tokenInTrouble(provider, name)
+	return refreshableProvider(provider) && !m.refreshRefused[limitsKey(provider, name)] && m.tokenInTrouble(provider, name)
+}
+
+// firstLine is an error's first line, cut to fit a dialog: a provider's
+// JSON body has no place in a question, nor has the brace that opened it.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.TrimRight(strings.TrimSpace(s), " {:")
+	if len(s) > 120 {
+		s = s[:117] + "..."
+	}
+	return s
 }
 
 // sessionEnded reports whether a refresh failed because the provider has

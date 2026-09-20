@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -458,6 +460,92 @@ func TestRefresh_OffersTheLoginWhenTheSessionIsDead(t *testing.T) {
 	m = updated.(Model)
 	if m.state != stateList || m.pendingRelogin != "" {
 		t.Fatalf("esc should decline without starting anything, state=%v", m.state)
+	}
+}
+
+// The dashboard's own picture of a dead Codex session: the token has days
+// left by its own clock, the service refuses it, and the person just
+// switched to the account. r must try the token, not only the limits.
+func TestRefresh_TriesTheTokenWhenTheServiceRefusesAnUnexpiredOne(t *testing.T) {
+	h := &newAccountHooks{}
+	m := modelWithTwoClaudeProfiles(h.hooks(t))
+	m.width, m.height = 170, 40
+	m.profiles["codex"] = []Profile{
+		{Name: "c@example.com", Provider: "codex", IsActive: true},
+		{Name: "d@example.com", Provider: "codex"},
+	}
+	m.syncProfilesPanel()
+	for m.currentProvider() != "codex" {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+		m = updated.(Model)
+	}
+	if m.profileHealth == nil {
+		m.profileHealth = map[string]*health.ProfileHealth{}
+	}
+	m.profileHealth[limitsKey("codex", "c@example.com")] = &health.ProfileHealth{TokenExpiresAt: time.Now().Add(3 * 24 * time.Hour)}
+	m.applyLimitsLoaded(limitsLoadedMsg{provider: "codex", profile: "c@example.com", err: errors.New("unauthorized: status 401")})
+	updated, _ := m.Update(activateResultMsg{provider: "codex", profile: "c@example.com"})
+	m = updated.(Model)
+	for m.state != stateList {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(Model)
+	}
+
+	// The row's legend says where r leads on a refused account.
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "refresh, or re-login") {
+		t.Fatalf("a refused row's legend should say r can re-login:\n%s", view)
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	m = updated.(Model)
+	if cmd == nil || !strings.Contains(m.statusMsg, "token") {
+		t.Fatalf("r should refresh the refused token first, status=%q state=%v", m.statusMsg, m.state)
+	}
+
+	// What the service actually answers for a dead session.
+	sessionDead := errors.New(`refresh api: codex refresh error 401: {"error": {"message": "Your session has ended. Please log in again.", "type": "invalid_request_error", "code": "refresh_token_reused"}}`)
+	updated, _ = m.Update(refreshResultMsg{provider: "codex", profile: "c@example.com", err: sessionDead})
+	m = updated.(Model)
+	if m.state != stateConfirm || m.pendingAction != confirmRelogin {
+		t.Fatalf("a dead session should offer the login, state=%v status=%q", m.state, m.statusMsg)
+	}
+
+	// Declined once, the account must still have a way back to the offer,
+	// and that way must not spend another refresh token.
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = updated.(Model)
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	m = updated.(Model)
+	if m.state != stateConfirm || m.pendingAction != confirmRelogin {
+		t.Fatalf("after 'Not now', r should offer the login again instead of only re-fetching limits, state=%v status=%q", m.state, m.statusMsg)
+	}
+	if cmd != nil {
+		t.Fatal("a second r after a refusal must not spend another refresh token")
+	}
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "Log in again?") || !strings.Contains(view, "c@example.com") {
+		t.Fatalf("the repeated offer should name the account:\n%s", view)
+	}
+
+	// Once the service accepts the account again, r is back to normal.
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = updated.(Model)
+	m.applyLimitsLoaded(limitsLoadedMsg{provider: "codex", profile: "c@example.com", info: sampleLimits()})
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	m = updated.(Model)
+	if m.state != stateList || !strings.Contains(m.statusMsg, "Refreshing limits") {
+		t.Fatalf("an accepted account should get a plain limits refresh, state=%v status=%q", m.state, m.statusMsg)
+	}
+
+	// A refresh that fails for any other reason asks for the login too,
+	// with the reason in the question and the provider's JSON kept out.
+	updated, _ = m.Update(refreshResultMsg{provider: "codex", profile: "c@example.com", err: errors.New("refresh api: codex refresh error 400: {\n  \"error\": \"server_error\"\n}")})
+	m = updated.(Model)
+	if m.state != stateConfirm || m.pendingAction != confirmRelogin {
+		t.Fatalf("a failed refresh should offer the login, state=%v", m.state)
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "the refresh failed") || !strings.Contains(view, "codex refresh error 400).") || strings.Contains(view, "server_error") {
+		t.Fatalf("the offer should carry the failure's first line only, without its brace:\n%s", view)
 	}
 }
 

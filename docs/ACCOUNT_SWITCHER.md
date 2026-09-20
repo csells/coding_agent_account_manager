@@ -214,10 +214,13 @@ agents across the top, the selected agent's Accounts below.
 - **Keys**: ←/→ agent, ↑/↓ Account, Enter switch (confirm), `n` new Login
   (picker of every agent, install status shown), `r` refresh (limits; the
   token first only when it has expired or the agent's service just refused it, and
-  only for Codex, Gemini and Kimi; when a refresh cannot help — session ended, or
-  an agent that renews its own tokens — `r` offers the Login instead and
-  yes runs the `n` flow for that agent), `i` full card, `/` search, `e`
-  edit, `o` browser, `d` delete, `?` help.
+  only for Codex, Gemini and Kimi; when a refresh cannot help — it failed,
+  the session has ended, or the agent renews its own tokens — `r` asks
+  "Log in again?" and yes runs the `n` flow for that agent; a refused
+  account keeps getting that question on every `r`, without spending a
+  second refresh token, until the service accepts it again or it logs in;
+  the row's legend reads "r refresh, or re-login" while it is refused),
+  `i` full card, `/` search, `e` edit, `o` browser, `d` delete, `?` help.
 - **Questions and outcomes are dialogs.** Every question the dashboard
   asks — switch to this account, delete it, log in again, which agent —
   is a dialog in the middle of the screen (`ConfirmDialog` via

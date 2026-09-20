@@ -174,6 +174,11 @@ func (m *Model) applyLimitsLoaded(msg limitsLoadedMsg) {
 		entry.at = prev.at
 		entry.stale = true
 	}
+	if entry.err == nil {
+		// The service accepts the account again: a refused refresh is
+		// history, and the next r may spend a token if it must.
+		delete(m.refreshRefused, key)
+	}
 	m.limits[key] = entry
 	m.limitsGen++
 }

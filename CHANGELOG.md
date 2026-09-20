@@ -189,6 +189,16 @@ The design and the facts behind it are in `docs/ACCOUNT_SWITCHER.md`.
 
 ### Fixed
 
+- **`r` on a refused account leads to the login every time.** After one
+  refused refresh the dashboard stopped asking: every further `r` only
+  re-fetched the limits, the row kept saying "auth expired (re-login)", and
+  no key on screen was labelled re-login (the way in was `n`, "new login",
+  which nobody reads as re-login for an existing account). Now any failed
+  refresh asks "Log in again?" with the reason, a refused account gets the
+  same question on every `r` without spending a second refresh token, the
+  latch clears once the service accepts the account again, and the row's
+  legend reads "r refresh, or re-login" while it is refused.
+
 - **A refused account no longer looks green.** The dashboard's STATUS cell
   came from the vault token's expiry date; a revoked refresh-token family
   still carries an access token with days left, so a dead account showed a

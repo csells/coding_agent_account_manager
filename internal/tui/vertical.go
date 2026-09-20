@@ -953,10 +953,15 @@ func (m Model) expandedLines(provider string, info *ProfileInfo, inner int, tier
 		items = append(items, muted.Render("last used "+formatRelativeTime(info.LastUsed)))
 	}
 
-	// Actions, from the tier's list and one legend.
+	// Actions, from the tier's list and one legend. On an account the
+	// service refuses, r is the way to the login, and the legend says so.
 	legend := make([]string, 0, len(tier.actions))
 	for _, k := range tier.actions {
-		legend = append(legend, m.styles.StatusKey.Render(k)+muted.Render(" "+actionLegend[k]))
+		label := actionLegend[k]
+		if k == "r" && m.tokenInTrouble(provider, info.Name) {
+			label = "refresh, or re-login"
+		}
+		legend = append(legend, m.styles.StatusKey.Render(k)+muted.Render(" "+label))
 	}
 	items = append(items, strings.Join(legend, "  "))
 

@@ -849,8 +849,11 @@ instead. `r` refreshes what is on screen: the limits are re-fetched, and
 when the selected account's token has expired or the agent's service just
 refused it, the token is refreshed first (Codex, Gemini and Kimi; the other
 agents renew their own) and the limits follow. When a refresh cannot help
-— the agent's service has ended the session, or the agent renews its own tokens — `r`
-offers the login instead, right there, and yes runs it the way `n` does.
+— it failed, the agent's service has ended the session, or the agent renews its own
+tokens — `r` asks "Log in again?" right there, and yes runs the login the way `n`
+does. A refused account gets that question on every `r`, without spending a second
+refresh token, until the service accepts it again or it logs in; its row's legend
+reads "r refresh, or re-login" meanwhile.
 `i` opens the full card as an overlay. Every question — switch this
 account? delete it? log in again? — and every outcome — switched, logged
 in, refused, failed — is a dialog in the middle of the screen; the status
