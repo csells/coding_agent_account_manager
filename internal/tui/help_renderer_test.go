@@ -236,9 +236,9 @@ func TestRenderHintBar_EmptyHints(t *testing.T) {
 
 // The help screen teaches the dashboard's own keys: n logs in to a new
 // account (the capture → clear → login → capture ritual is what it does),
-// i opens the full card, ctrl+p the palette; E says plainly that the
-// bundle is not encrypted. It no longer claims Claude's identity cannot
-// be read, nor recommends the CLI ritual n replaced.
+// ctrl+p opens the palette; E says plainly that the bundle is not
+// encrypted. It no longer claims Claude's identity cannot be read, nor
+// recommends the CLI ritual n replaced, nor offers a full card.
 func TestHelp_TeachesNNotTheRitual(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	m := New()
@@ -247,7 +247,6 @@ func TestHelp_TeachesNNotTheRitual(t *testing.T) {
 	view := ansi.Strip(m.View())
 	for _, want := range []string{
 		"Log in to a new account",
-		"Full account card",
 		"ctrl+p",
 		"Command palette",
 		"press n",

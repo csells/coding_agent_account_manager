@@ -376,7 +376,7 @@ coding_agent_account_manager/
 | `internal/sync` | `pool.go` | Profile pool sync with mutex protection, atomic saves |
 | `internal/ratelimit` | `ratelimit.go` | Rate limit signal detection from provider responses |
 | `internal/daemon` | `daemon.go` | Background daemon: PID file, auto-rotation, health monitoring |
-| `internal/tui` | `vertical.go`, `model.go`, `newaccount.go`, `limits.go` | Bubble Tea dashboard (bare `caam`): a strip of providers across the top, the selected provider's accounts below with a column per limit window; Enter switches (confirmed), `n` logs in to a new account, `r` refreshes limits, `i` opens the full card |
+| `internal/tui` | `vertical.go`, `detail_panel.go`, `model.go`, `newaccount.go`, `limits.go` | Bubble Tea dashboard (bare `caam`): three panels — a strip of providers across the top, the selected provider's accounts below with a column per limit window, and the selected account's detail panel under the list (ADR-0005); Enter switches (confirmed), `n` logs in to a new account, `r` refreshes limits or offers the re-login |
 | `internal/exec` | `shell.go` | Shell quoting via `shellescape.Quote()` to prevent command injection |
 | `internal/config` | Configuration | Vault path, provider settings, rotation parameters |
 

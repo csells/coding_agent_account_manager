@@ -151,7 +151,7 @@ monitor`) a Window is two columns: `usage.LeftText` for what is left
 (`88% left`) under the Window's name, and `usage.ResetText` for the local
 clock it resets at (`8:50 PM`) under a `RESETS` column beside it.
 `usage.WindowLeftText` joins the two into the one sentence the prose
-surfaces print (`limits <agent>` detail, `robot`, the full card).
+surfaces print (`limits <agent>` detail, `robot`, the detail panel).
 
 - **Credential resolution** (`cmd/caam/cmd/tui.go: fetchProfileLimits`,
   shared with `caam limits`): the Active Account's limits come from its
@@ -177,14 +177,15 @@ surfaces print (`limits <agent>` detail, `robot`, the full card).
   every agent's Active Account — at most once a minute each, **failures
   included** (a dashboard that refetches on every relaunch can draw a 429
   from the service all by itself). A failed fetch keeps the last known
-  figures, marked stale, and the expansion says why in a short form (`auth
+  figures, marked stale, and the detail panel says why in a short form (`auth
   expired (re-login)`, `no limits API`, `no coding plan`, `quota API refused
   (403)`). Keys typed into search or a dialog never start a fetch.
 
 ## 5. The dashboard
 
-`caam` with no arguments (`internal/tui`), the product view: a strip of
-agents across the top, the selected agent's Accounts below.
+`caam` with no arguments (`internal/tui`), the product view: three panels
+top to bottom — a strip of agents, the selected agent's Accounts, and the
+selected Account's detail (ADR-0005).
 
 - **Strip** (`internal/tui/vertical.go`): a real tab strip — a fixed slot per
   agent in key order, one horizontally scrolled row, `‹ n` / `n ›` counts for
@@ -203,14 +204,34 @@ agents across the top, the selected agent's Accounts below.
   the width that fits both (about 50 columns) `TIGHTEST` stands alone.
   Columns the pane cannot fit are dropped least-important first (LAST
   USED, then the rightmost Windows, each losing its `RESETS` before its
-  figure) and every Window without both its columns is listed in the
-  expansion instead, so nothing the API reported is unreachable. The selected
-  Account expands in place like a tree node: the outcome of the last action
-  on it, its windows without a column, auth/plan/health/token, its vault
-  path, and the keys. **LAST USED** is the activity log's last activate,
-  deactivate, switch or login of the Account (`db.LastUsed`); a Login from
-  the dashboard is logged as one. caam's isolated-profile store, which
-  nothing writes, is consulted first and is always empty for vault profiles.
+  figure); the detail panel lists every Window regardless, so nothing the
+  API reported is unreachable. Every row is one line; the list scrolls by
+  row to keep the selected one in view. **LAST USED** is the activity
+  log's last activate, deactivate, switch or login of the Account
+  (`db.LastUsed`); a Login from the dashboard is logged as one. caam's
+  isolated-profile store, which nothing writes, is consulted first and is
+  always empty for vault profiles.
+- **Detail panel** (`internal/tui/detail_panel.go`): one box under the
+  list, titled with the selected Account (`●` when Active) and, at the
+  right, when its Limits were fetched. Everything the dashboard knows about
+  the Account, in three groups — ACCOUNT (auth mode · plan · health · token,
+  a missing credential, a lock, notes, the vault path, the browser), LIMITS
+  (every Window with what is left and when it resets, credits) and USAGE
+  (last used, errors in the last hour, penalty, created) — with the outcome
+  of the last action on the Account first and the key legend last. A field
+  with nothing to say is omitted, never printed as "None". The groups run
+  side by side when each can have forty columns (three on a wide terminal,
+  ACCOUNT over USAGE beside LIMITS on a medium one) and one under another
+  otherwise. The panel never scrolls and never takes focus: ↑/↓ always mean
+  Accounts. Height: what its content needs, out of what the list does not
+  need for all its rows or two fifths of the space under the strip,
+  whichever is more; when that is short of its content it drops lines by
+  priority (created, penalty, browser; then notes, the account label; the
+  path; last used; a lock, errors, a Window the table already shows with
+  both columns; the auth line and the other Windows last; the notice, a
+  missing credential and the keys never), a heading going with its last
+  line; below a title and two lines it is not drawn at all, and the list
+  never loses its title, header and first three rows to it.
 - **Keys**: ←/→ agent, ↑/↓ Account, Enter switch (confirm), `n` new Login
   (picker of every agent, install status shown), `r` refresh (limits; the
   token first only when it has expired or the agent's service just refused it, and
@@ -219,8 +240,9 @@ agents across the top, the selected agent's Accounts below.
   "Log in again?" and yes runs the `n` flow for that agent; a refused
   account keeps getting that question on every `r`, without spending a
   second refresh token, until the service accepts it again or it logs in;
-  the row's legend reads "r refresh, or re-login" while it is refused),
-  `i` full card, `/` search, `e` edit, `o` browser, `d` delete, `?` help.
+  the panel's legend reads "r refresh, or re-login" while it is refused),
+  `/` search, `e` edit, `o` browser, `d` delete, `?` help. There is no
+  full card and no `i`: the panel is the card.
 - **Questions and outcomes are dialogs.** Every question the dashboard
   asks — switch to this account, delete it, log in again, which agent —
   is a dialog in the middle of the screen (`ConfirmDialog` via
@@ -229,8 +251,8 @@ agents across the top, the selected agent's Accounts below.
   deleted, refreshed — opens a message dialog there too (`MessageDialog`,
   via `showMessage`), one key to dismiss. The status bar carries progress ("Refreshing limits…",
   "Login finished; reading who signed in…") and nothing the user must not
-  miss. The expansion under the Account keeps the last outcome as its first
-  line for context after the dialog is gone. The name dialog exists only as
+  miss. The detail panel keeps the last outcome as its first line for
+  context after the dialog is gone. The name dialog exists only as
   the `n` fallback when a login leaves no identity.
 - **Hooks** (`internal/tui/limits.go: Hooks`): the TUI does not open
   credentials itself. The command layer supplies `Switch` (the shared
@@ -242,7 +264,7 @@ agents across the top, the selected agent's Accounts below.
   no Accounts share the same empty selection key, so a line keyed on the
   selection alone would follow the user from one such tab to the next). The
   outcome of a switch, capture or refusal is also the first line of the
-  Account's expansion, not only a status-bar message.
+  detail panel, not only a status-bar message.
 
 `caam monitor` is the second view: the same Windows as column pairs across
 every agent's Accounts, `*` on the Active one, Enter switches through the same

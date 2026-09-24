@@ -13,7 +13,8 @@ record, or upstream's original design documents.
   the words to avoid.
 - `adr/` — the decisions: 0001 build on a caam fork in caam's spirit; 0002 a
   login is a logout first; 0003 Antigravity limits need the Code Assist
-  project; 0004 the dashboard strip and keys.
+  project; 0004 the dashboard strip and keys; 0005 the dashboard's three
+  panels, the selected account's detail under the list.
 - `PR_DESCRIPTION.md` — the body of the single upstream pull request, written
   to make the ideas easy to lift.
 - `SURFACE_AUDIT_2026-09-13.md` and `SURFACE_PLAN.md` — the dated audit of

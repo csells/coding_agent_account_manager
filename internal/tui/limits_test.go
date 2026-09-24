@@ -116,12 +116,12 @@ func TestSelectionChangeFetchesLimitsOnceWithinTTL(t *testing.T) {
 		t.Fatalf("fetch calls = %v", rec.calls)
 	}
 
-	// The detail card now carries the windows, as "left" with the reset.
-	m.syncDetailPanel()
-	view := m.detailPanel.View()
-	for _, want := range []string{"Limits", "5-hour:", "82% left, resets", "Weekly:", "50% left", "Weekly Fable:", "10% left", "As of"} {
+	// The detail panel carries the windows, as "left" with the reset.
+	m.width, m.height = 170, 40
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"LIMITS", "5-hour", "82% left, resets", "Weekly", "50% left", "Weekly Fable", "10% left", "limits as of"} {
 		if !strings.Contains(view, want) {
-			t.Errorf("detail card lacks %q:\n%s", want, view)
+			t.Errorf("detail panel lacks %q:\n%s", want, view)
 		}
 	}
 
@@ -141,9 +141,9 @@ func TestLimitsSectionHiddenWithoutAFetcher(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("no fetcher wired in, yet a command was returned")
 	}
-	m.syncDetailPanel()
-	if strings.Contains(m.detailPanel.View(), "Limits") {
-		t.Fatalf("Limits section rendered without a fetcher")
+	m.width, m.height = 170, 40
+	if v := ansi.Strip(m.View()); strings.Contains(v, "LIMITS") {
+		t.Fatalf("Limits section rendered without a fetcher:\n%s", v)
 	}
 }
 
@@ -152,16 +152,15 @@ func TestFailedLimitsFetchShowsReasonThenKeepsLastKnown(t *testing.T) {
 	m := modelWithTwoClaudeProfiles(Hooks{Limits: rec.fetch})
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = runCmd(t, updated.(Model), cmd)
-	m.syncDetailPanel()
-	if v := m.detailPanel.View(); !strings.Contains(v, "auth expired") {
+	m.width, m.height = 170, 40
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "auth expired") {
 		t.Fatalf("error not shown:\n%s", v)
 	}
 
 	// A later good fetch, then a failure: the good windows stay, marked.
 	m.applyLimitsLoaded(limitsLoadedMsg{provider: "claude", profile: "b@example.com", info: sampleLimits()})
 	m.applyLimitsLoaded(limitsLoadedMsg{provider: "claude", profile: "b@example.com", err: errors.New("unauthorized: token expired")})
-	m.syncDetailPanel()
-	v := m.detailPanel.View()
+	v := ansi.Strip(m.View())
 	if !strings.Contains(v, "82% left") || !strings.Contains(v, "last known") {
 		t.Fatalf("last known windows not retained:\n%s", v)
 	}
@@ -261,11 +260,11 @@ func TestEnterRefusesACredentialLessProfileUpFront(t *testing.T) {
 	}
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // dismiss it
 	m = updated.(Model)
-	m.syncDetailPanel()
-	v := flatCard(m.detailPanel.View())
+	m.width, m.height = 170, 40
+	v := flatCard(ansi.Strip(m.View()))
 	for _, want := range []string{"none captured", "press n and log in as this account", "no captured credential"} {
 		if !strings.Contains(v, want) {
-			t.Errorf("detail card lacks %q:\n%s", want, v)
+			t.Errorf("detail panel lacks %q:\n%s", want, v)
 		}
 	}
 
@@ -273,14 +272,13 @@ func TestEnterRefusesACredentialLessProfileUpFront(t *testing.T) {
 	// resurrect it.
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	m = updated.(Model)
-	m.syncDetailPanel()
-	if strings.Contains(flatCard(m.detailPanel.View()), "no captured credential") {
+	if strings.Contains(flatCard(ansi.Strip(m.View())), "no captured credential") {
 		t.Fatalf("notice followed the selection to another profile")
 	}
 }
 
-// flatCard collapses a rendered card to one line of words so a phrase that
-// wrapped inside the box can still be matched.
+// flatCard collapses a rendered view to one line of words so a phrase that
+// wrapped inside a box can still be matched.
 func flatCard(v string) string {
 	return strings.Join(strings.Fields(strings.ReplaceAll(v, "│", " ")), " ")
 }
@@ -296,9 +294,11 @@ func TestSwitchOutcomeShowsOnTheCard(t *testing.T) {
 	if cmd == nil {
 		t.Fatalf("a failed switch should raise a toast")
 	}
-	m.syncDetailPanel()
-	if v := flatCard(m.detailPanel.View()); !strings.Contains(v, "Activate failed") || !strings.Contains(v, "holds no credential") {
-		t.Fatalf("failure not on the card:\n%s", v)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // dismiss the dialog
+	m = updated.(Model)
+	m.width, m.height = 170, 40
+	if v := flatCard(ansi.Strip(m.View())); !strings.Contains(v, "Activate failed") || !strings.Contains(v, "holds no credential") {
+		t.Fatalf("failure not on the panel:\n%s", v)
 	}
 }
 
@@ -389,16 +389,7 @@ func TestSelectedRowBackgroundCoversEveryCell(t *testing.T) {
 	for _, sel := range []int{0, 1} {
 		m.profilesPanel.SetSelected(sel)
 		names := []string{"idle@example.com", "live@example.com"}
-		var selectedLine, otherLine string
-		for _, l := range strings.Split(m.View(), "\n") {
-			plain := ansi.Strip(l)
-			switch {
-			case strings.Contains(plain, names[sel]) && !strings.Contains(plain, "vault"):
-				selectedLine = l
-			case strings.Contains(plain, names[1-sel]):
-				otherLine = l
-			}
-		}
+		selectedLine, otherLine := tableRow(m.View(), names[sel]), tableRow(m.View(), names[1-sel])
 		if selectedLine == "" || otherLine == "" {
 			t.Fatalf("rows not found in view:\n%s", ansi.Strip(m.View()))
 		}

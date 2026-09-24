@@ -374,9 +374,9 @@ func TestKeyMapFullHelp(t *testing.T) {
 		t.Errorf("Secondary actions group should have 4 bindings, got %d", len(fullHelp[2]))
 	}
 
-	// Group 4: Account view (Detail card, Refresh limits, New account)
-	if len(fullHelp[3]) != 3 {
-		t.Errorf("Account view group should have 3 bindings, got %d", len(fullHelp[3]))
+	// Group 4: Account view (Refresh limits, New account)
+	if len(fullHelp[3]) != 2 {
+		t.Errorf("Account view group should have 2 bindings, got %d", len(fullHelp[3]))
 	}
 
 	// Group 5: Advanced (Sync, Export, Import)
@@ -473,9 +473,8 @@ func TestKeyBindingsHaveHelp(t *testing.T) {
 
 // The keys the dashboard teaches are the keys it has: h/l pair with ←/→
 // across the strip; the palette offers every dashboard action (a new
-// login, the full card, search) and speaks of accounts; and the full card
-// closes on esc, not on every cancel key, so n over it opens the picker
-// like n anywhere else.
+// login, search) and speaks of accounts; and there is no full card to
+// open, so i is not a key.
 func TestKeys_VimPairAndPalette(t *testing.T) {
 	m := nineProviders(t, 159, 42)
 	m.hooks.Login = (&newAccountHooks{}).hooks(t).Login
@@ -496,13 +495,13 @@ func TestKeys_VimPairAndPalette(t *testing.T) {
 		t.Fatalf("ctrl+p should open the palette, state=%v", m.state)
 	}
 	palette := ansi.Strip(m.commandPalette.View())
-	for _, want := range []string{"New Login", "Full Card", "Search", "account"} {
+	for _, want := range []string{"New Login", "Search", "account"} {
 		if !strings.Contains(palette, want) {
 			t.Errorf("palette lacks %q:\n%s", want, palette)
 		}
 	}
-	if strings.Contains(strings.ToLower(palette), "profile") {
-		t.Errorf("palette still says profile:\n%s", palette)
+	if strings.Contains(strings.ToLower(palette), "profile") || strings.Contains(palette, "Full Card") {
+		t.Errorf("palette offers something the dashboard no longer has:\n%s", palette)
 	}
 	if !strings.Contains(ansi.Strip(m.View()), "New Login") {
 		t.Errorf("the palette is not on screen")
@@ -519,24 +518,16 @@ func TestKeys_VimPairAndPalette(t *testing.T) {
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
 	m = updated.(Model)
 
-	// The card: i opens it, esc closes it and nothing more; n over it
-	// opens the picker.
+	// i is not a key; n opens the picker from the list.
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
 	m = updated.(Model)
-	if !m.showDetailCard {
-		t.Fatalf("i should open the full card")
+	if m.state != stateList {
+		t.Fatalf("i should do nothing, state=%v", m.state)
 	}
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	m = updated.(Model)
-	if m.showDetailCard || m.state != stateList {
-		t.Fatalf("esc should only close the card: card=%v state=%v", m.showDetailCard, m.state)
-	}
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
-	m = updated.(Model)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
 	m = updated.(Model)
 	if m.state != stateProviderPicker {
-		t.Fatalf("n over the card should open the provider picker, state=%v card=%v", m.state, m.showDetailCard)
+		t.Fatalf("n should open the provider picker, state=%v", m.state)
 	}
 }
 

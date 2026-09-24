@@ -8,13 +8,17 @@ import (
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/usage"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
-// DetailInfo represents the detailed information for a profile.
+// DetailInfo is everything the dashboard knows about the selected account:
+// what the detail panel under the accounts list is drawn from.
 type DetailInfo struct {
 	Name         string
 	Provider     string
+	Active       bool
 	AuthMode     string
+	PlanType     string
 	LoggedIn     bool
 	Locked       bool
 	Path         string
@@ -28,20 +32,20 @@ type DetailInfo struct {
 	TokenExpiry  time.Time
 	ErrorCount   int
 	Penalty      float64
-	// Limits is the profile's live rate-limit windows; nil hides the section.
+	// Limits is the profile's live rate-limit windows; nil hides the group.
 	Limits *LimitsInfo
 	// NoCredential marks a profile that holds settings but no credential.
 	NoCredential bool
 	// Renewable marks a self-renewing credential (its expiry is not a fault).
 	Renewable bool
 	// Notice is the outcome of the last action on this profile (a switch
-	// result, a refusal), shown under the title; NoticeErr styles it red.
+	// result, a refusal), shown first; NoticeErr styles it red.
 	Notice    string
 	NoticeErr bool
 }
 
-// LimitsInfo is the Limits section of the detail card: one row per window
-// the provider reports, with the share left and the local reset time.
+// LimitsInfo is the panel's LIMITS group: one row per window the provider
+// reports, with the share left and the local reset time.
 type LimitsInfo struct {
 	Rows []LimitRow
 	// AsOf is when Rows were fetched; zero while nothing has arrived.
@@ -60,439 +64,407 @@ type LimitRow struct {
 	Label    string
 	Value    string
 	Severity string // provider's own assessment: "", "normal", "warning", "critical"
+	// Left is the share left, 0-100, or -1 when the row has no share (credits).
+	Left int
+	// Column is the window's key in the accounts table, "" for a row that
+	// is never a column (credits).
+	Column string
 }
 
-// DetailPanel renders the right panel showing profile details and available actions.
-type DetailPanel struct {
-	profile *DetailInfo
-	width   int
-	height  int
-	styles  DetailPanelStyles
+// The panel never scrolls: a terminal too short for everything drops
+// lines by priority, the least telling first, and the list keeps its rows.
+const (
+	detailPrioRare = 1 // created, penalty, browser: true but rarely useful
+	detailPrioLow  = 3 // account label, notes
+	detailPrioPath = 4
+	detailPrioUse  = 5 // last used, credits
+	detailPrioMid  = 6 // locked, errors, stale limits, a window the table already shows whole
+	detailPrioHigh = 7 // the auth line, a window the table does not show whole
+	detailPrioMust = 9 // the notice, a missing credential, the keys
+)
+
+// detailLine is one line of the panel and the priority that decides when
+// a short terminal drops it. A group's heading is dropped with its last
+// line, never on its own.
+type detailLine struct {
+	text  string
+	prio  int
+	title bool
 }
 
-// DetailPanelStyles holds the styles for the detail panel.
-type DetailPanelStyles struct {
-	Border         lipgloss.Style
-	Title          lipgloss.Style
-	Label          lipgloss.Style
-	Value          lipgloss.Style
-	ValueNumeric   lipgloss.Style // Right-aligned numeric values
-	StatusOK       lipgloss.Style
-	StatusWarn     lipgloss.Style
-	StatusBad      lipgloss.Style
-	StatusMuted    lipgloss.Style
-	LockIcon       lipgloss.Style
-	Divider        lipgloss.Style
-	ActionHeader   lipgloss.Style
-	ActionKey      lipgloss.Style
-	ActionDesc     lipgloss.Style
-	Empty          lipgloss.Style
-	SectionHeader  lipgloss.Style // Header for grouped sections
-	SectionDivider lipgloss.Style // Subtle divider between sections
+// detailGroup is one heading and its lines: ACCOUNT, LIMITS or USAGE.
+type detailGroup struct {
+	title string
+	lines []detailLine
 }
 
-// DefaultDetailPanelStyles returns the default styles for the detail panel.
-func DefaultDetailPanelStyles() DetailPanelStyles {
-	return NewDetailPanelStyles(DefaultTheme())
-}
+// detailGutter separates the panel's columns.
+const detailGutter = 2
 
-// NewDetailPanelStyles returns themed styles for the detail panel.
-func NewDetailPanelStyles(theme Theme) DetailPanelStyles {
-	p := theme.Palette
-	keycap := keycapStyle(theme, true).Width(8).Align(lipgloss.Center)
+// renderDetailPane draws the third panel: the selected account's details
+// under the accounts list, in one box the height of `height` (border
+// included). The account names the box; the limits' freshness sits at
+// the right of the title like the list's did; the notice comes first,
+// the keys last, and between them the groups run side by side when the
+// terminal is wide enough and one under another when it is not.
+func (m Model) renderDetailPane(g paneGeometry, height int, d *DetailInfo) string {
+	ps := m.profilesPanel.styles
+	inner := g.inner
+	muted := m.styles.StatusText
 
-	return DetailPanelStyles{
-		Border: lipgloss.NewStyle().
-			Border(theme.Border).
-			BorderForeground(p.BorderMuted).
-			Background(p.Surface).
-			Padding(0, 1),
-
-		Title: lipgloss.NewStyle().
-			Bold(true).
-			Foreground(p.Accent).
-			MarginBottom(1),
-
-		Label: lipgloss.NewStyle().
-			Foreground(p.Muted).
-			Width(12),
-
-		Value: lipgloss.NewStyle().
-			Foreground(p.Text),
-
-		ValueNumeric: lipgloss.NewStyle().
-			Foreground(p.Text).
-			Align(lipgloss.Right),
-
-		StatusOK: lipgloss.NewStyle().
-			Foreground(p.Success).
-			Bold(true),
-
-		StatusWarn: lipgloss.NewStyle().
-			Foreground(p.Warning),
-
-		StatusBad: lipgloss.NewStyle().
-			Foreground(p.Danger),
-
-		StatusMuted: lipgloss.NewStyle().
-			Foreground(p.Muted),
-
-		LockIcon: lipgloss.NewStyle().
-			Foreground(p.Warning),
-
-		Divider: lipgloss.NewStyle().
-			Foreground(p.BorderMuted),
-
-		ActionHeader: lipgloss.NewStyle().
-			Bold(true).
-			Foreground(p.Info).
-			MarginTop(1).
-			MarginBottom(1),
-
-		ActionKey: keycap,
-
-		ActionDesc: lipgloss.NewStyle().
-			Foreground(p.Muted),
-
-		Empty: lipgloss.NewStyle().
-			Foreground(p.Muted).
-			Italic(true).
-			Padding(2, 2),
-
-		SectionHeader: lipgloss.NewStyle().
-			Bold(true).
-			Foreground(p.Accent).
-			MarginTop(1),
-
-		SectionDivider: lipgloss.NewStyle().
-			Foreground(p.BorderMuted).
-			MarginTop(1),
+	name := d.Name
+	if d.Active {
+		name = ps.ActiveIndicator.Render("● ") + ps.Title.MarginBottom(0).Render(name)
+	} else {
+		name = ps.Title.MarginBottom(0).Render(name)
 	}
-}
-
-// NewDetailPanel creates a new detail panel.
-func NewDetailPanel() *DetailPanel {
-	return NewDetailPanelWithTheme(DefaultTheme())
-}
-
-// NewDetailPanelWithTheme creates a new detail panel using a theme.
-func NewDetailPanelWithTheme(theme Theme) *DetailPanel {
-	return &DetailPanel{
-		styles: NewDetailPanelStyles(theme),
-	}
-}
-
-// SetProfile sets the profile to display.
-func (p *DetailPanel) SetProfile(profile *DetailInfo) {
-	p.profile = profile
-}
-
-// SetSize sets the panel dimensions.
-func (p *DetailPanel) SetSize(width, height int) {
-	p.width = width
-	p.height = height
-}
-
-// View renders the detail panel with grouped sections.
-func (p *DetailPanel) View() string {
-	if p.profile == nil {
-		empty := p.styles.Empty.Render("Select a profile to view details")
-		if p.width > 0 {
-			return p.styles.Border.Width(p.width - 2).Render(empty)
-		}
-		return p.styles.Border.Render(empty)
-	}
-
-	prof := p.profile
-	dividerWidth := p.width - 6
-	if dividerWidth < 20 {
-		dividerWidth = 20
-	}
-	thinDivider := p.styles.SectionDivider.Render(strings.Repeat("─", dividerWidth))
-
-	// Title
-	title := p.styles.Title.Render(fmt.Sprintf("Profile: %s", prof.Name))
-
-	var sections []string
-
-	// ═══ NOTICE (last action on this profile) ═══
-	if prof.Notice != "" {
-		width := p.width - 6
-		if width < 20 {
-			width = 20
-		}
-		style := p.styles.StatusOK
-		if prof.NoticeErr {
-			style = p.styles.StatusBad
-		}
-		sections = append(sections, style.Width(width).Render(prof.Notice))
-	}
-
-	// ═══ PROFILE SECTION ═══
-	profileHeader := p.styles.SectionHeader.Render("Profile")
-	var profileRows []string
-	profileRows = append(profileRows, p.renderRow("Agent", providerLabel(prof.Provider)))
-	if prof.Account != "" {
-		profileRows = append(profileRows, p.renderRow("Account", prof.Account))
-	}
-	if prof.Description != "" {
-		profileRows = append(profileRows, p.renderRow("Notes", prof.Description))
-	}
-	sections = append(sections, lipgloss.JoinVertical(lipgloss.Left,
-		profileHeader,
-		lipgloss.JoinVertical(lipgloss.Left, profileRows...),
-	))
-
-	// ═══ AUTH SECTION ═══
-	authHeader := p.styles.SectionHeader.Render("Auth")
-	var authRows []string
-	authRows = append(authRows, p.renderRow("Mode", prof.AuthMode))
-
-	// Status with icon and text
-	statusText := prof.HealthStatus.Icon() + " " + prof.HealthStatus.String()
-	var statusStyle lipgloss.Style
-	switch prof.HealthStatus {
-	case health.StatusHealthy:
-		statusStyle = p.styles.StatusOK
-	case health.StatusWarning:
-		statusStyle = p.styles.StatusWarn
-	case health.StatusCritical:
-		statusStyle = p.styles.StatusBad
-	default:
-		statusStyle = p.styles.StatusMuted
-	}
-	authRows = append(authRows, p.renderRow("Status", statusStyle.Render(statusText)))
-
-	// Token Expiry
-	if !prof.TokenExpiry.IsZero() {
-		ttl := time.Until(prof.TokenExpiry)
-		expiryStr := ""
+	right := ""
+	if l := d.Limits; l != nil {
 		switch {
-		case ttl >= 0:
-			expiryStr = fmt.Sprintf("Expires in %s", formatDurationFull(ttl))
-		case prof.Renewable:
-			expiryStr = "renews on next use"
-		default:
-			expiryStr = p.styles.StatusBad.Render("Expired")
-		}
-		authRows = append(authRows, p.renderRow("Token", expiryStr))
-	}
-
-	// Lock status
-	if prof.Locked {
-		authRows = append(authRows, p.renderRow("Lock", p.styles.LockIcon.Render("🔒 Locked")))
-	}
-
-	// A profile that cannot be switched to says so before Enter is pressed.
-	if prof.NoCredential {
-		authRows = append(authRows, p.renderRow("Credential", p.styles.StatusBad.Render(
-			"none captured; press n and log in as this account")))
-	}
-
-	sections = append(sections, lipgloss.JoinVertical(lipgloss.Left,
-		thinDivider,
-		authHeader,
-		lipgloss.JoinVertical(lipgloss.Left, authRows...),
-	))
-
-	// ═══ LIMITS SECTION ═══
-	if rows := p.renderLimits(prof.Limits); len(rows) > 0 {
-		sections = append(sections, lipgloss.JoinVertical(lipgloss.Left,
-			thinDivider,
-			p.styles.SectionHeader.Render("Limits"),
-			lipgloss.JoinVertical(lipgloss.Left, rows...),
-		))
-	}
-
-	// ═══ USAGE SECTION ═══
-	usageHeader := p.styles.SectionHeader.Render("Usage")
-	var usageRows []string
-
-	// Errors (numeric, right-aligned conceptually but we show context)
-	if prof.ErrorCount > 0 {
-		errorStr := fmt.Sprintf("%d in last hour", prof.ErrorCount)
-		if prof.ErrorCount >= 3 {
-			errorStr = p.styles.StatusBad.Render(errorStr)
-		} else {
-			errorStr = p.styles.StatusWarn.Render(errorStr)
-		}
-		usageRows = append(usageRows, p.renderRow("Errors", errorStr))
-	} else {
-		usageRows = append(usageRows, p.renderRow("Errors", p.styles.StatusOK.Render("None")))
-	}
-
-	// Penalty (numeric value)
-	if prof.Penalty > 0 {
-		penaltyStr := fmt.Sprintf("%.2f", prof.Penalty)
-		usageRows = append(usageRows, p.renderRow("Penalty", penaltyStr))
-	}
-
-	// Last used
-	if !prof.LastUsedAt.IsZero() {
-		usageRows = append(usageRows, p.renderRow("Last used", formatRelativeTime(prof.LastUsedAt)))
-	} else {
-		usageRows = append(usageRows, p.renderRow("Last used", "never"))
-	}
-
-	// Created
-	if !prof.CreatedAt.IsZero() {
-		usageRows = append(usageRows, p.renderRow("Created", prof.CreatedAt.Format("2006-01-02")))
-	}
-
-	sections = append(sections, lipgloss.JoinVertical(lipgloss.Left,
-		thinDivider,
-		usageHeader,
-		lipgloss.JoinVertical(lipgloss.Left, usageRows...),
-	))
-
-	// ═══ PATHS SECTION ═══
-	var pathRows []string
-
-	// Path (truncate if too long)
-	pathDisplay := prof.Path
-	maxPathLen := p.width - 16
-	if maxPathLen > 0 && len(pathDisplay) > maxPathLen {
-		pathDisplay = "~" + pathDisplay[len(pathDisplay)-maxPathLen+1:]
-	}
-	if pathDisplay != "" {
-		pathRows = append(pathRows, p.renderRow("Path", pathDisplay))
-	}
-
-	// Browser config
-	if prof.BrowserCmd != "" || prof.BrowserProf != "" {
-		browserStr := prof.BrowserCmd
-		if prof.BrowserProf != "" {
-			if browserStr != "" {
-				browserStr += " (" + prof.BrowserProf + ")"
-			} else {
-				browserStr = prof.BrowserProf
+		case !l.AsOf.IsZero():
+			right = "limits as of " + l.AsOf.Format("15:04:05")
+			if l.Loading {
+				right += " (refreshing…)"
 			}
+		case l.Loading:
+			right = "fetching limits…"
 		}
-		pathRows = append(pathRows, p.renderRow("Browser", browserStr))
+		right = muted.Render(right)
 	}
-
-	if len(pathRows) > 0 {
-		pathsHeader := p.styles.SectionHeader.Render("Paths")
-		sections = append(sections, lipgloss.JoinVertical(lipgloss.Left,
-			thinDivider,
-			pathsHeader,
-			lipgloss.JoinVertical(lipgloss.Left, pathRows...),
-		))
+	gap := inner - lipgloss.Width(name) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
 	}
+	titleRow := ansi.Truncate(name+strings.Repeat(" ", gap)+right, inner, "…")
 
-	// ═══ ACTIONS SECTION ═══
-	divider := p.styles.Divider.Render(strings.Repeat("─", dividerWidth))
-	actionsHeader := p.styles.ActionHeader.Render("Actions")
-
-	actions := []struct {
-		key  string
-		desc string
-	}{
-		{"Enter", "Activate profile"},
-		{"r", "Refresh"},
-		{"e", "Edit profile"},
-		{"o", "Open in browser"},
-		{"d", "Delete profile"},
-		{"/", "Search profiles"},
+	lines := append([]string{titleRow}, m.detailBody(d, inner, height-3)...)
+	for len(lines) < height-2 {
+		lines = append(lines, "")
 	}
-
-	var actionRows []string
-	for _, action := range actions {
-		key := p.styles.ActionKey.Render(action.key)
-		desc := p.styles.ActionDesc.Render(action.desc)
-		actionRows = append(actionRows, fmt.Sprintf("%s %s", key, desc))
-	}
-	actionsContent := lipgloss.JoinVertical(lipgloss.Left, actionRows...)
-
-	// Combine all sections
-	allSections := []string{title}
-	allSections = append(allSections, sections...)
-	allSections = append(allSections, "", divider, actionsHeader, actionsContent)
-
-	inner := lipgloss.JoinVertical(lipgloss.Left, allSections...)
-
-	// Fit the panel's height: the border takes two rows, and a card that
-	// runs past the bottom scrolls the whole screen (the Actions legend is
-	// the least important part, so it is what gets cut).
-	if p.height > 2 {
-		lines := strings.Split(inner, "\n")
-		if max := p.height - 2; len(lines) > max {
-			inner = strings.Join(lines[:max], "\n")
-		}
-	}
-
-	// Apply border
-	if p.width > 0 {
-		return p.styles.Border.Width(p.width - 2).Render(inner)
-	}
-	return p.styles.Border.Render(inner)
+	return ps.Border.Width(g.pane).Height(height - 2).Render(fitWidth(strings.Join(lines, "\n"), inner))
 }
 
-// renderLimits renders the Limits section rows, or nothing when the section
-// is hidden (no fetcher wired in).
-func (p *DetailPanel) renderLimits(l *LimitsInfo) []string {
-	if l == nil {
+// detailBody is the panel's content under its title, fitted to avail
+// lines and inner columns. It is what the height budget measures, so a
+// very large avail returns everything the panel has to say.
+func (m Model) detailBody(d *DetailInfo, inner, avail int) []string {
+	var out []string
+	if d.Notice != "" {
+		style := m.styles.StatusSuccess
+		if d.NoticeErr {
+			style = m.styles.StatusError
+		}
+		out = append(out, ansi.Truncate(style.Render(d.Notice), inner, "…"))
+	}
+	legend := m.detailLegend(d)
+
+	columns := m.detailColumns(d, inner)
+	body := avail - len(out) - 1
+	if body < 0 {
+		body = 0
+	}
+	fitDetailColumns(columns, body)
+	out = append(out, joinDetailColumns(columns, inner)...)
+	out = append(out, ansi.Truncate(legend, inner, "…"))
+	if len(out) > avail && avail >= 0 {
+		out = out[:avail]
+	}
+	return out
+}
+
+// detailColumns lays the groups out for the width: three side by side
+// (ACCOUNT, LIMITS, USAGE) when each gets forty columns, two when each
+// gets forty with USAGE under ACCOUNT, otherwise one under another.
+func (m Model) detailColumns(d *DetailInfo, inner int) [][]detailLine {
+	account, limits, use := m.detailAccountGroup(d), m.detailLimitsGroup(d), m.detailUsageGroup(d)
+	groups := []detailGroup{account, limits, use}
+	if d.Limits == nil {
+		groups = []detailGroup{account, use}
+	}
+	const minColumn = 40
+	n := (inner + detailGutter) / (minColumn + detailGutter)
+	if n > len(groups) {
+		n = len(groups)
+	}
+	if n < 1 {
+		n = 1
+	}
+	columns := make([][]detailLine, n)
+	switch {
+	case n == len(groups):
+		for i, gr := range groups {
+			columns[i] = gr.flatten()
+		}
+	case n == 2:
+		// ACCOUNT and USAGE stack on the left; LIMITS has the right to itself.
+		columns[0] = append(account.flatten(), use.flatten()...)
+		columns[1] = limits.flatten()
+	default:
+		for _, gr := range groups {
+			columns[0] = append(columns[0], gr.flatten()...)
+		}
+	}
+	return columns
+}
+
+// flatten is the group's heading and lines, or nothing for an empty group.
+func (gr detailGroup) flatten() []detailLine {
+	if len(gr.lines) == 0 {
 		return nil
 	}
-	label := p.styles.Label.Width(14)
-	row := func(name, value string) string {
-		return label.Render(name+":") + " " + value
-	}
+	return append([]detailLine{{text: gr.title, prio: detailPrioMust, title: true}}, gr.lines...)
+}
 
-	var rows []string
-	for _, r := range l.Rows {
-		value := r.Value
-		switch r.Severity {
-		case "critical":
-			value = p.styles.StatusBad.Render(value)
-		case "warning":
-			value = p.styles.StatusWarn.Render(value)
+// fitDetailColumns drops lines until every column fits avail: the
+// lowest-priority line of the tallest column goes first, and a heading
+// goes with its last line. Columns of nothing but must-keep lines are cut
+// at the bottom as a last resort.
+func fitDetailColumns(columns [][]detailLine, avail int) {
+	for {
+		tallest, height := -1, 0
+		for i, c := range columns {
+			if len(c) > height {
+				tallest, height = i, len(c)
+			}
 		}
-		rows = append(rows, row(r.Label, value))
+		if tallest < 0 || height <= avail {
+			return
+		}
+		col := columns[tallest]
+		drop, prio := -1, detailPrioMust+1
+		for i, l := range col {
+			if !l.title && l.prio <= prio {
+				drop, prio = i, l.prio
+			}
+		}
+		if drop < 0 {
+			columns[tallest] = col[:avail]
+			continue
+		}
+		col = append(col[:drop], col[drop+1:]...)
+		columns[tallest] = pruneDetailTitles(col)
 	}
+}
 
-	switch {
-	case len(rows) == 0 && l.Loading:
-		rows = append(rows, p.styles.StatusMuted.Render("fetching..."))
-	case len(rows) == 0 && l.Err != "":
-		rows = append(rows, p.styles.StatusWarn.Render(shortLimitsError(l.Err)))
-	case len(rows) == 0:
-		rows = append(rows, p.styles.StatusMuted.Render("no windows reported"))
-	case l.Stale:
-		rows = append(rows, row("As of", p.styles.StatusWarn.Render(
-			fmt.Sprintf("%s (last known; %s)", l.AsOf.Format("15:04:05"), shortLimitsError(l.Err)))))
-	case !l.AsOf.IsZero():
-		asOf := l.AsOf.Format("15:04:05")
-		if l.Loading {
-			asOf += " (refreshing...)"
+// pruneDetailTitles removes a heading that no longer heads anything.
+func pruneDetailTitles(col []detailLine) []detailLine {
+	out := col[:0]
+	for i, l := range col {
+		if l.title && (i+1 >= len(col) || col[i+1].title) {
+			continue
 		}
-		rows = append(rows, row("As of", p.styles.StatusMuted.Render(asOf)))
+		out = append(out, l)
+	}
+	return out
+}
+
+// joinDetailColumns renders the columns side by side, each cut to its
+// width, with a gutter between them.
+func joinDetailColumns(columns [][]detailLine, inner int) []string {
+	n := len(columns)
+	if n == 0 {
+		return nil
+	}
+	width := (inner - detailGutter*(n-1)) / n
+	if width < 1 {
+		width = 1
+	}
+	height := 0
+	for _, c := range columns {
+		if len(c) > height {
+			height = len(c)
+		}
+	}
+	rows := make([]string, height)
+	for r := 0; r < height; r++ {
+		cells := make([]string, n)
+		for i, c := range columns {
+			text := ""
+			if r < len(c) {
+				text = c[r].text
+			}
+			cells[i] = padRight(ansi.Truncate(text, width, "…"), width)
+		}
+		rows[r] = strings.TrimRight(strings.Join(cells, strings.Repeat(" ", detailGutter)), " ")
 	}
 	return rows
 }
 
-// shortLimitsError condenses a fetch error to a phrase that fits a card
+// detailAccountGroup: who the account is and how it is signed in — the
+// auth line the row cannot hold, a missing credential, a lock, notes,
+// where the credential lives, and the browser it opens with.
+func (m Model) detailAccountGroup(d *DetailInfo) detailGroup {
+	muted := m.styles.StatusText
+	sep := muted.Render(" · ")
+	statusStyle := m.profilesPanel.styles.StatusStyle
+	gr := detailGroup{title: m.profilesPanel.styles.Header.BorderBottom(false).Render("ACCOUNT")}
+	add := func(text string, prio int) {
+		gr.lines = append(gr.lines, detailLine{text: text, prio: prio})
+	}
+
+	if d.Account != "" && d.Account != d.Name {
+		add(detailLabel(muted, "account")+d.Account, detailPrioLow)
+	}
+
+	auth := []string{muted.Render(d.AuthMode)}
+	if d.PlanType != "" {
+		auth = append(auth, muted.Render(d.PlanType))
+	}
+	auth = append(auth, statusStyle(d.HealthStatus).Render(formatStatusLabel(d.HealthStatus)))
+	switch ttl := time.Until(d.TokenExpiry); {
+	case d.TokenExpiry.IsZero():
+	case ttl > 0:
+		auth = append(auth, muted.Render("token "+strings.TrimSuffix(health.FormatTimeRemaining(d.TokenExpiry), " left")))
+	case d.Renewable:
+		auth = append(auth, muted.Render("token renews on next use"))
+	default:
+		auth = append(auth, m.styles.StatusError.Render("token expired"))
+	}
+	add(strings.Join(auth, sep), detailPrioHigh)
+
+	if d.NoCredential {
+		add(detailLabel(muted, "credential")+m.styles.StatusError.Render("none captured — press n and log in as this account"), detailPrioMust)
+	}
+	if d.Locked {
+		add(muted.Render("locked"), detailPrioMid)
+	}
+	if d.Description != "" {
+		add(detailLabel(muted, "notes")+d.Description, detailPrioLow)
+	}
+	if d.Path != "" {
+		add(muted.Render(d.Path), detailPrioPath)
+	}
+	if d.BrowserCmd != "" || d.BrowserProf != "" {
+		browser := d.BrowserCmd
+		switch {
+		case browser != "" && d.BrowserProf != "":
+			browser += " (" + d.BrowserProf + ")"
+		case browser == "":
+			browser = d.BrowserProf
+		}
+		add(detailLabel(muted, "browser")+browser, detailPrioRare)
+	}
+	return gr
+}
+
+// detailLimitsGroup: every window the service reported, the share left
+// coloured by how little that is, with the clock it resets at; or why
+// there are none.
+func (m Model) detailLimitsGroup(d *DetailInfo) detailGroup {
+	gr := detailGroup{title: m.profilesPanel.styles.Header.BorderBottom(false).Render("LIMITS")}
+	l := d.Limits
+	if l == nil {
+		return gr
+	}
+	muted := m.styles.StatusText
+	add := func(text string, prio int) {
+		gr.lines = append(gr.lines, detailLine{text: text, prio: prio})
+	}
+	// A window the table shows whole — figure and RESETS — is the first
+	// to go from a short panel; one it shows only in part, or not at all,
+	// is reachable nowhere else.
+	shown := m.windowsShownWhole(d.Provider)
+	for _, r := range l.Rows {
+		prio := detailPrioHigh
+		if r.Column != "" && shown[r.Column] {
+			prio = detailPrioMid
+		}
+		figure, rest := r.Value, ""
+		if i := strings.Index(r.Value, ", "); i >= 0 {
+			figure, rest = r.Value[:i], r.Value[i:]
+		}
+		var style lipgloss.Style
+		switch {
+		case r.Severity == "critical":
+			style = m.styles.StatusError
+		case r.Severity == "warning":
+			style = m.styles.StatusWarning
+		case r.Left >= 0:
+			style = m.percentStyle(r.Left)
+		default:
+			style = lipgloss.NewStyle()
+		}
+		add(muted.Render(padRight(r.Label, 14))+style.Render(figure)+muted.Render(rest), prio)
+	}
+	switch {
+	case len(l.Rows) == 0 && l.Loading:
+		add(muted.Render("fetching…"), detailPrioHigh)
+	case len(l.Rows) == 0 && l.Err != "":
+		add(m.styles.StatusWarning.Render(shortLimitsError(l.Err)), detailPrioHigh)
+	case len(l.Rows) == 0:
+		add(muted.Render("no windows reported"), detailPrioHigh)
+	case l.Stale && l.Err != "":
+		add(m.styles.StatusWarning.Render(fmt.Sprintf("last known as of %s: %s", l.AsOf.Format("15:04:05"), shortLimitsError(l.Err))), detailPrioMid)
+	}
+	return gr
+}
+
+// windowsShownWhole names the windows the accounts table shows with both
+// their columns, figure and RESETS, at the current width.
+func (m Model) windowsShownWhole(provider string) map[string]bool {
+	cols := m.accountColumns(provider, m.profilesPanel.profiles, m.tier(), paneGeom(m.width).inner, time.Now())
+	halves := make(map[string]int, len(cols))
+	for _, c := range cols {
+		if c.window != "" {
+			halves[c.window]++
+		}
+	}
+	whole := make(map[string]bool, len(halves))
+	for window, n := range halves {
+		whole[window] = n == 2
+	}
+	return whole
+}
+
+// detailUsageGroup: when the account was last used, its recent errors
+// and penalty when there are any, and when it was created when known.
+func (m Model) detailUsageGroup(d *DetailInfo) detailGroup {
+	muted := m.styles.StatusText
+	gr := detailGroup{title: m.profilesPanel.styles.Header.BorderBottom(false).Render("USAGE")}
+	add := func(text string, prio int) {
+		gr.lines = append(gr.lines, detailLine{text: text, prio: prio})
+	}
+	add(detailLabel(muted, "last used")+formatRelativeTime(d.LastUsedAt), detailPrioUse)
+	if d.ErrorCount > 0 {
+		style := m.styles.StatusWarning
+		if d.ErrorCount >= 3 {
+			style = m.styles.StatusError
+		}
+		add(detailLabel(muted, "errors")+style.Render(fmt.Sprintf("%d in last hour", d.ErrorCount)), detailPrioMid)
+	}
+	if d.Penalty > 0 {
+		add(detailLabel(muted, "penalty")+fmt.Sprintf("%.2f", d.Penalty), detailPrioRare)
+	}
+	if !d.CreatedAt.IsZero() {
+		add(detailLabel(muted, "created")+d.CreatedAt.Format("2006-01-02"), detailPrioRare)
+	}
+	return gr
+}
+
+// detailLabel is a group line's label: muted, padded so values align.
+func detailLabel(muted lipgloss.Style, label string) string {
+	return muted.Render(padRight(label, 11))
+}
+
+// detailLegend is the panel's last line: what the keys do to this
+// account, from the tier's list. On an account the service refuses, r is
+// the way to the login, and the legend says so.
+func (m Model) detailLegend(d *DetailInfo) string {
+	muted := m.styles.StatusText
+	tier := m.tier()
+	legend := make([]string, 0, len(tier.actions))
+	for _, k := range tier.actions {
+		label := actionLegend[k]
+		if k == "r" && m.tokenInTrouble(d.Provider, d.Name) {
+			label = "refresh, or re-login"
+		}
+		legend = append(legend, m.styles.StatusKey.Render(k)+muted.Render(" "+label))
+	}
+	return strings.Join(legend, "  ")
+}
+
+// shortLimitsError condenses a fetch error to a phrase that fits a panel
 // row or a provider chip.
 func shortLimitsError(err string) string {
 	return usage.ShortError(err, 48)
-}
-
-// formatDurationFull formats duration for details view.
-func formatDurationFull(d time.Duration) string {
-	if d < time.Minute {
-		return "less than a minute"
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%d minutes", int(d.Minutes()))
-	}
-	hours := int(d.Hours())
-	minutes := int(d.Minutes()) % 60
-	return fmt.Sprintf("%d hours %d minutes", hours, minutes)
-}
-
-// renderRow renders a label-value row.
-func (p *DetailPanel) renderRow(label, value string) string {
-	labelStr := p.styles.Label.Render(label + ":")
-	valueStr := p.styles.Value.Render(value)
-	return labelStr + " " + valueStr
 }

@@ -860,7 +860,6 @@ func DefaultCommands() []CommandAction {
 	return []CommandAction{
 		{Name: "Switch Account", Description: "Switch to the selected account", Shortcut: "enter", Action: "activate"},
 		{Name: "New Login", Description: "Log in to a new account", Shortcut: "n", Action: "newlogin"},
-		{Name: "Full Card", Description: "Show the selected account's full card", Shortcut: "i", Action: "detail"},
 		{Name: "Search", Description: "Search accounts by name", Shortcut: "/", Action: "search"},
 		{Name: "Refresh", Description: "Re-fetch limits, and the token first when it has expired", Shortcut: "r", Action: "refresh"},
 		{Name: "Delete Account", Description: "Delete the selected account from the vault", Shortcut: "d", Action: "delete"},

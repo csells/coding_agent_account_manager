@@ -694,28 +694,25 @@ func TestE2E_ProviderPanelSync(t *testing.T) {
 	h.Log.Info("Provider panel sync verified")
 }
 
-// TestE2E_DetailPanelUpdate tests detail panel updates.
+// TestE2E_DetailPanelUpdate tests that the detail panel describes the
+// selected account and follows the selection.
 func TestE2E_DetailPanelUpdate(t *testing.T) {
 	h := testutil.NewHarness(t)
 	defer h.Close()
 
 	h.Log.SetStep("test_detail_panel")
 
-	dp := NewDetailPanel()
-	if dp == nil {
-		t.Fatal("Expected non-nil detail panel")
+	m := modelWithTwoClaudeProfiles(Hooks{})
+	if d := m.selectedDetail(); d == nil || d.Name != "a@example.com" || d.AuthMode == "" {
+		t.Fatalf("detail should describe the selected account, got %+v", d)
 	}
-
-	// Set profile
-	dp.SetProfile(&DetailInfo{
-		Name:     "test@example.com",
-		AuthMode: "oauth",
-		LoggedIn: true,
-	})
-
-	view := dp.View()
-	if view == "" {
-		t.Error("Expected non-empty detail panel view")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	if d := m.selectedDetail(); d == nil || d.Name != "b@example.com" {
+		t.Fatalf("detail should follow the selection, got %+v", d)
+	}
+	if view := m.View(); !strings.Contains(view, "b@example.com") {
+		t.Error("Expected the selected account in the view")
 	}
 
 	h.Log.Info("Detail panel update verified")

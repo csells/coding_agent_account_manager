@@ -34,10 +34,10 @@ type layoutTier struct {
 	longCells bool
 	// allWindowColumns gives every reported window its own pair of
 	// columns (figure and RESETS); else the table shows only the TIGHTEST
-	// one, as the same pair, and the expansion lists them all.
+	// one, as the same pair. The detail panel lists them all either way.
 	allWindowColumns bool
 	showLastUsed     bool
-	// actions are the keys the expansion's legend explains.
+	// actions are the keys the detail panel's legend explains.
 	actions []string
 }
 
@@ -47,15 +47,15 @@ const (
 )
 
 var (
-	tierWide   = layoutTier{longCells: true, allWindowColumns: true, showLastUsed: true, actions: []string{"enter", "r", "e", "o", "d", "i"}}
-	tierMedium = layoutTier{allWindowColumns: true, actions: []string{"enter", "r", "e", "d", "i"}}
-	tierNarrow = layoutTier{actions: []string{"enter", "r", "i"}}
+	tierWide   = layoutTier{longCells: true, allWindowColumns: true, showLastUsed: true, actions: []string{"enter", "r", "e", "o", "d"}}
+	tierMedium = layoutTier{allWindowColumns: true, actions: []string{"enter", "r", "e", "d"}}
+	tierNarrow = layoutTier{actions: []string{"enter", "r"}}
 )
 
-// actionLegend spells the expansion's key legend, in the tier's order.
+// actionLegend spells the detail panel's key legend, in the tier's order.
 var actionLegend = map[string]string{
 	"enter": "switch to this account", "r": "refresh",
-	"e": "edit", "o": "browser", "d": "delete", "i": "full card",
+	"e": "edit", "o": "browser", "d": "delete",
 }
 
 func (m Model) tier() layoutTier {
@@ -126,29 +126,74 @@ func paneGeom(termWidth int) paneGeometry {
 	return g
 }
 
-// verticalPanels renders the provider strip and the accounts pane, sized
-// to exactly contentHeight lines.
+// verticalPanels renders the three panels — the provider strip, the
+// accounts pane and the selected account's detail panel — sized to
+// exactly contentHeight lines. The strip takes what it needs; the detail
+// panel takes what its content needs, up to two fifths of what is left;
+// the accounts pane keeps the rest, and on a terminal too short for both
+// the detail panel shrinks first and then goes, so the list never drops
+// below a few rows.
 func (m Model) verticalPanels(contentHeight int) string {
 	g := paneGeom(m.width)
 	strip := m.renderProviderStrip(g)
 	stripHeight := lipgloss.Height(strip)
 
 	gap := 1
-	paneHeight := contentHeight - stripHeight - gap
-	if paneHeight < minPaneHeight {
+	space := contentHeight - stripHeight - gap
+	if space < minPaneHeight {
 		gap = 0
-		paneHeight = contentHeight - stripHeight
+		space = contentHeight - stripHeight
 	}
-	if paneHeight < 3 {
+	if space < 3 {
 		// Too short for a pane at all; draw the smallest frame and let
 		// the caller clamp. Nothing can make a 6-row terminal useful.
-		paneHeight = 3
+		space = 3
 	}
-	accounts := m.renderAccountsPane(g, paneHeight)
-	if gap == 0 {
-		return lipgloss.JoinVertical(lipgloss.Left, strip, accounts)
+
+	detail := m.selectedDetail()
+	detailHeight := 0
+	if detail != nil {
+		detailHeight = m.detailPaneHeight(detail, g, space, gap)
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, strip, "", accounts)
+	listHeight := space
+	if detailHeight > 0 {
+		listHeight = space - detailHeight - gap
+	}
+
+	parts := []string{strip}
+	if gap == 1 {
+		parts = append(parts, "")
+	}
+	parts = append(parts, m.renderAccountsPane(g, listHeight))
+	if detailHeight > 0 {
+		if gap == 1 {
+			parts = append(parts, "")
+		}
+		parts = append(parts, m.renderDetailPane(g, detailHeight, detail))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// detailPaneHeight is the detail panel's share of the space under the
+// strip: what its content needs (border, title and body), out of what
+// the list does not need for all its rows or two fifths of the space,
+// whichever is more; and never so much that the list loses its title,
+// header and first rows. Below a title and two lines the panel is not
+// worth drawing.
+func (m Model) detailPaneHeight(d *DetailInfo, g paneGeometry, space, gap int) int {
+	const minDetailHeight = 5 // border (2), title, two lines
+	n := len(m.profilesPanel.profiles)
+	listWant := 4 + n                // border (2), title, header, every row
+	listMin := 4 + min(max(n, 1), 3) // the same with three rows
+	want := 3 + len(m.detailBody(d, g.inner, 1<<20))
+	h := min(want, max(space*2/5, space-gap-listWant))
+	if space-gap-listMin < h {
+		h = space - gap - listMin
+	}
+	if h < minDetailHeight {
+		return 0
+	}
+	return h
 }
 
 // --- provider strip -------------------------------------------------------
@@ -565,36 +610,18 @@ func newColumn(header string, n, prio int) accountColumn {
 func (m Model) renderAccountsPane(g paneGeometry, height int) string {
 	ps := m.profilesPanel.styles
 	inner := g.inner
-	muted := m.styles.StatusText
 	provider := m.currentProvider()
 	profiles := m.profilesPanel.profiles
 	tier := m.tier()
 	now := time.Now()
 
-	// Title row: "<Provider> accounts" left, freshness right.
+	// Title row: "<Provider> accounts". The limits' freshness is the
+	// selected account's business and sits on the detail panel's title.
 	title := "Accounts"
 	if provider != "" {
 		title = providerLabel(provider) + " accounts"
 	}
-	left := ps.Title.MarginBottom(0).Render(title)
-	right := ""
-	if m.hooks.Limits != nil && len(profiles) > 0 {
-		if info := m.selectedProfileInfo(); info != nil {
-			if e, ok := m.limits[limitsKey(provider, info.Name)]; ok && !e.at.IsZero() {
-				right = muted.Render("limits as of " + e.at.Format("15:04:05"))
-				if e.loading {
-					right += muted.Render(" (refreshing…)")
-				}
-			} else if ok && e.loading {
-				right = muted.Render("fetching limits…")
-			}
-		}
-	}
-	gap := inner - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 1 {
-		gap = 1
-	}
-	titleRow := ansi.Truncate(left+strings.Repeat(" ", gap)+right, inner, "…")
+	titleRow := ansi.Truncate(ps.Title.MarginBottom(0).Render(title), inner, "…")
 
 	frame := func(lines []string) string {
 		return ps.Border.Width(g.pane).Height(height - 2).Render(fitWidth(strings.Join(lines, "\n"), inner))
@@ -626,30 +653,17 @@ func (m Model) renderAccountsPane(g paneGeometry, height int) string {
 		tableRows = 1
 	}
 	cols := m.accountColumns(provider, profiles, tier, inner, now)
-	// A window counts as shown only with both its columns on screen; one
-	// that lost its RESETS half is listed in the expansion instead, so
-	// when it resets stays reachable.
-	halves := make(map[string]int, len(cols))
-	for _, c := range cols {
-		if c.window != "" {
-			halves[c.window]++
-		}
-	}
-	columnsShown := make(map[string]bool, len(halves))
-	for window, n := range halves {
-		columnsShown[window] = n == 2
-	}
 	headerCells := make([]string, len(cols))
 	for i, c := range cols {
 		headerCells[i] = padRight(truncateWithEllipsis(c.header, c.width), c.width)
 	}
 	lines = append(lines, header.Render(padRight(strings.Join(headerCells, " "), inner)))
 
-	// One block per account: its row, and — for the selected one — the
-	// tree of detail lines expanded beneath it. The list scrolls by
-	// block so the selected account and its expansion stay in view.
+	// One row per account. The selected account's details are the panel
+	// below, not a tree under its row, so every row is one line and the
+	// list scrolls by row to keep the selected one in view.
 	sel := m.profilesPanel.GetSelected()
-	blocks := make([][]string, len(profiles))
+	rows := make([]string, len(profiles))
 	for i := range profiles {
 		var rowStyle lipgloss.Style
 		switch {
@@ -673,33 +687,19 @@ func (m Model) renderAccountsPane(g paneGeometry, height int) string {
 			cells[j] = cellStyle.Inherit(rowStyle).Render(padRight(truncateWithEllipsis(cell, c.width), c.width))
 		}
 		row := strings.Join(cells, rowStyle.Render(" "))
-		blocks[i] = []string{padStyled(row, inner, rowStyle.GetBackground())}
-		if i == sel {
-			blocks[i] = append(blocks[i], m.expandedLines(provider, &profiles[i], inner, tier, now, columnsShown)...)
-		}
+		rows[i] = padStyled(row, inner, rowStyle.GetBackground())
 	}
 
-	// Scroll: start at the first block that lets the selected block end
-	// within tableRows, preferring to show blocks above it.
-	startBlock := 0
-	if sel >= 0 && sel < len(blocks) {
-		used := len(blocks[sel])
-		for startBlock = sel; startBlock > 0; startBlock-- {
-			if used+len(blocks[startBlock-1]) > tableRows {
-				break
-			}
-			used += len(blocks[startBlock-1])
-		}
+	// Scroll: the selected row is always in view, with as many rows above
+	// it as fit.
+	start := 0
+	if sel >= tableRows {
+		start = sel - tableRows + 1
 	}
 	shown := 0
-	for i := startBlock; i < len(blocks) && shown < tableRows; i++ {
-		for _, line := range blocks[i] {
-			if shown >= tableRows {
-				break
-			}
-			lines = append(lines, line)
-			shown++
-		}
+	for i := start; i < len(rows) && shown < tableRows; i++ {
+		lines = append(lines, rows[i])
+		shown++
 	}
 	for ; shown < tableRows; shown++ {
 		lines = append(lines, "")
@@ -757,7 +757,7 @@ func (m Model) accountColumns(provider string, profiles []ProfileInfo, tier layo
 		} else {
 			// The narrow tier shows one window, the tightest, as the same
 			// pair; below the width that fits both, TIGHTEST stands alone
-			// and the expansion (which lists every window here) says when
+			// and the detail panel (which lists every window) says when
 			// it resets.
 			tight := newColumn("TIGHTEST", n, prioWindow)
 			resets := newColumn("RESETS", n, prioWindow+1)
@@ -876,104 +876,6 @@ func (m Model) tightestCell(provider, profile string, now time.Time) (figure, re
 	}
 	left := usage.PercentLeft(w)
 	return fmt.Sprintf("%s %d%%", label, left), usage.ResetText(w, now), m.percentStyle(left)
-}
-
-// expandedLines is the tree of detail lines under the selected account:
-// what its row does not say — the outcome of the last action on it, the
-// windows the table has no column for (columnsShown names the ones it has),
-// auth and token, where it lives, and what the keys do. Each line hangs
-// off the row with a tree glyph; the last uses └.
-func (m Model) expandedLines(provider string, info *ProfileInfo, inner int, tier layoutTier, now time.Time, columnsShown map[string]bool) []string {
-	muted := m.styles.StatusText
-	sep := muted.Render(" · ")
-	statusStyle := m.profilesPanel.styles.StatusStyle
-	var items []string
-
-	if m.notice != "" && m.noticeKey == limitsKey(provider, info.Name) {
-		style := m.styles.StatusSuccess
-		if m.noticeErr {
-			style = m.styles.StatusError
-		}
-		items = append(items, style.Render(m.notice))
-	}
-	if info.NoCredential {
-		items = append(items, m.styles.StatusError.Render("no credential captured — press n and log in as this account"))
-	}
-
-	if e, ok := m.limits[limitsKey(provider, info.Name)]; ok && m.hooks.Limits != nil {
-		cells := e.cells
-		switch {
-		case len(cells) > 0:
-			for _, c := range cells {
-				if tier.allWindowColumns && columnsShown[c.Column] {
-					continue
-				}
-				left := usage.PercentLeft(c.Window)
-				line := muted.Render(padRight(c.Label, 14)) + m.percentStyle(left).Render(fmt.Sprintf("%3d%% left", left))
-				if !c.Window.ResetsAt.IsZero() {
-					line += muted.Render(", resets " + usage.LocalReset(c.Window.ResetsAt, now))
-				}
-				items = append(items, line)
-			}
-		case len(cells) == 0 && e.err != nil:
-			items = append(items, m.styles.StatusWarning.Render("limits: "+shortLimitsError(e.err.Error())))
-		case len(cells) == 0 && e.loading:
-			items = append(items, muted.Render("limits: fetching…"))
-		}
-		if e.stale && e.err != nil {
-			items = append(items, m.styles.StatusWarning.Render(fmt.Sprintf("limits are last known as of %s: %s", e.at.Format("15:04:05"), shortLimitsError(e.err.Error()))))
-		}
-	}
-
-	// Auth, plan, health, token.
-	auth := []string{muted.Render(info.AuthMode)}
-	if h := m.healthFor(provider, info.Name); h != nil {
-		if h.PlanType != "" {
-			auth = append(auth, muted.Render(h.PlanType))
-		}
-		auth = append(auth, statusStyle(info.HealthStatus).Render(formatStatusLabel(info.HealthStatus)))
-		switch ttl := time.Until(h.TokenExpiresAt); {
-		case h.TokenExpiresAt.IsZero():
-		case ttl > 0:
-			auth = append(auth, muted.Render("token "+strings.TrimSuffix(health.FormatTimeRemaining(h.TokenExpiresAt), " left")))
-		case h.CredentialRenewable():
-			auth = append(auth, muted.Render("token renews on next use"))
-		default:
-			auth = append(auth, m.styles.StatusError.Render("token expired"))
-		}
-	} else {
-		auth = append(auth, statusStyle(info.HealthStatus).Render(formatStatusLabel(info.HealthStatus)))
-	}
-	items = append(items, strings.Join(auth, sep))
-
-	if path := m.vaultPathFor(provider, info.Name); path != "" {
-		items = append(items, muted.Render(path))
-	}
-	if !tier.showLastUsed {
-		items = append(items, muted.Render("last used "+formatRelativeTime(info.LastUsed)))
-	}
-
-	// Actions, from the tier's list and one legend. On an account the
-	// service refuses, r is the way to the login, and the legend says so.
-	legend := make([]string, 0, len(tier.actions))
-	for _, k := range tier.actions {
-		label := actionLegend[k]
-		if k == "r" && m.tokenInTrouble(provider, info.Name) {
-			label = "refresh, or re-login"
-		}
-		legend = append(legend, m.styles.StatusKey.Render(k)+muted.Render(" "+label))
-	}
-	items = append(items, strings.Join(legend, "  "))
-
-	lines := make([]string, len(items))
-	for i, item := range items {
-		glyph := "├─ "
-		if i == len(items)-1 {
-			glyph = "└─ "
-		}
-		lines[i] = ansi.Truncate("  "+muted.Render(glyph)+item, inner, "…")
-	}
-	return lines
 }
 
 // vaultPathFor is the profile's vault directory, shortened with ~ when it

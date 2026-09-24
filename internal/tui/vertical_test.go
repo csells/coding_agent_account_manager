@@ -234,10 +234,8 @@ func TestShortTerminalKeepsTheAccountsPane(t *testing.T) {
 	}
 }
 
-func TestCtrlCQuitsEvenWithTheCardOpen(t *testing.T) {
+func TestCtrlCQuits(t *testing.T) {
 	m := modelWithLimits(t, 170, 40)
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
-	m = updated.(Model)
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if cmd == nil {
 		t.Fatalf("ctrl+c with the card open did not quit")
@@ -304,9 +302,8 @@ func modelWithLimits(t *testing.T, w, h int) Model {
 
 // Every empty state points at the dashboard's own key, n, not at the CLI:
 // a provider with no accounts (strip card and accounts pane), an account
-// whose credential was never captured (row expansion and full card), and
-// a search that matches nothing says so instead of pretending the vault
-// is empty.
+// whose credential was never captured (the detail panel), and a search
+// that matches nothing says so instead of pretending the vault is empty.
 func TestEmptyStates_SayPressN(t *testing.T) {
 	assertPressN := func(t *testing.T, what, view string) {
 		t.Helper()
@@ -339,14 +336,7 @@ func TestEmptyStates_SayPressN(t *testing.T) {
 		m.syncProfilesPanel()
 		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 		m = updated.(Model)
-		assertPressN(t, "the row expansion", ansi.Strip(m.View()))
-
-		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
-		m = updated.(Model)
-		if !m.showDetailCard {
-			t.Fatalf("i should open the full card")
-		}
-		assertPressN(t, "the full card", ansi.Strip(m.View()))
+		assertPressN(t, "the detail panel", detailPane(t, ansi.Strip(m.View())))
 	})
 
 	t.Run("search that matches nothing", func(t *testing.T) {
@@ -419,17 +409,42 @@ func TestVerticalLayout_WideTierShowsLeftAndResetsColumnsPerWindow(t *testing.T)
 	}
 }
 
+// accountsTable is the accounts pane's header line and the row lines
+// under it, up to the pane's bottom border: the part of the dashboard
+// where an account's name means its row (the detail panel names it too).
+func accountsTable(view string) (header string, rows []string) {
+	inTable := false
+	for _, line := range strings.Split(view, "\n") {
+		plain := ansi.Strip(line)
+		switch {
+		case !inTable && strings.Contains(plain, "NAME") && strings.Contains(plain, "STATUS"):
+			header = line
+			inTable = true
+		case inTable && strings.HasPrefix(strings.TrimSpace(plain), "╰"):
+			return header, rows
+		case inTable:
+			rows = append(rows, line)
+		}
+	}
+	return header, rows
+}
+
+// tableRow is the accounts table's row for an account, "" when none.
+func tableRow(view, account string) string {
+	_, rows := accountsTable(view)
+	for _, line := range rows {
+		if strings.Contains(ansi.Strip(line), account) {
+			return line
+		}
+	}
+	return ""
+}
+
 // tableLines finds the accounts table's header and the row for an account.
 func tableLines(t *testing.T, view, account string) (header, row string) {
 	t.Helper()
-	for _, line := range strings.Split(view, "\n") {
-		switch {
-		case strings.Contains(line, "NAME") && strings.Contains(line, "STATUS"):
-			header = line
-		case strings.Contains(line, account) && !strings.Contains(line, "vault"):
-			row = line
-		}
-	}
+	header, _ = accountsTable(view)
+	row = tableRow(view, account)
 	if header == "" || row == "" {
 		t.Fatalf("no table header or row for %s:\n%s", account, view)
 	}
@@ -459,40 +474,127 @@ func columnOf(line, s string) int {
 	return lipgloss.Width(line[:i])
 }
 
-func TestVerticalLayout_SelectedAccountExpandsInPlace(t *testing.T) {
+// detailPane is the part of a rendered dashboard below the accounts pane:
+// the third panel, titled with the selected account. It fails the test
+// when the panel is not there.
+func detailPane(t *testing.T, view string) string {
+	t.Helper()
+	lines := strings.Split(view, "\n")
+	// The panels are bordered; the detail panel is the last box above the
+	// status bar, so find the last top border and take from there.
+	start := -1
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "╭") {
+			start = i
+		}
+	}
+	if start < 0 {
+		t.Fatalf("no bordered panel in view:\n%s", view)
+	}
+	pane := strings.Join(lines[start:], "\n")
+	if strings.Contains(pane, "accounts") && strings.Contains(pane, "NAME") {
+		t.Fatalf("the last panel is the accounts pane; no detail panel is on screen:\n%s", view)
+	}
+	return pane
+}
+
+// The third panel: the selected account's details sit below the list, not
+// under its row, so every row is one line and ↑/↓ never move the rows
+// beneath the cursor. The panel is titled with the account and carries
+// the auth line, the vault path and the keys.
+func TestVerticalLayout_DetailPanelFollowsTheSelection(t *testing.T) {
 	m := modelWithLimits(t, 170, 40)
 	m.profiles["claude"] = append(m.profiles["claude"], Profile{Name: "c@example.com", Provider: "claude"})
 	m.syncProfilesPanel()
 	m.applyLimitsLoaded(limitsLoadedMsg{provider: "claude", profile: "c@example.com", info: sampleLimits()})
 
-	// The first account is selected: its tree hangs between it and the
-	// second row; the others are single rows.
 	view := ansi.Strip(m.View())
-	iA, iTree, iB, iC := strings.Index(view, "a@example.com"), strings.Index(view, "├─"), strings.Index(view, "  b@example.com"), strings.Index(view, "  c@example.com")
-	if !(iA < iTree && iTree < iB && iB < iC) {
-		t.Fatalf("expansion must sit under the selected row:\n%s", view)
+	if strings.Contains(view, "├─") || strings.Contains(view, "└─") {
+		t.Fatalf("rows must not expand in place any more:\n%s", view)
 	}
-	if strings.Count(view, "└─") != 1 {
-		t.Fatalf("exactly one expansion should be open:\n%s", view)
+	iA, iB, iC := strings.Index(view, "a@example.com"), strings.Index(view, "b@example.com"), strings.Index(view, "c@example.com")
+	if !(iA < iB && iB < iC) {
+		t.Fatalf("rows out of order:\n%s", view)
 	}
-	for _, want := range []string{"├─ oauth", "└─", "switch to this account", "~/vault/claude/a@example.com"} {
-		if !strings.Contains(view, want) {
-			t.Errorf("expansion lacks %q:\n%s", want, view)
+	pane := detailPane(t, view)
+	for _, want := range []string{"a@example.com", "oauth", "switch to this account", "~/vault/claude/a@example.com", "ACCOUNT", "LIMITS", "USAGE"} {
+		if !strings.Contains(pane, want) {
+			t.Errorf("detail panel lacks %q:\n%s", want, pane)
 		}
 	}
+	if strings.Contains(pane, "full card") || strings.Contains(pane, " i ") {
+		t.Errorf("the legend must not offer a full card any more:\n%s", pane)
+	}
+	if strings.Index(view, "NAME") > strings.Index(view, "ACCOUNT") {
+		t.Fatalf("the detail panel must sit below the accounts pane:\n%s", view)
+	}
 
-	// ↓ moves the expansion to the next account.
+	// ↓ moves the selection; the panel follows and the rows stay put.
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = updated.(Model)
 	view = ansi.Strip(m.View())
-	iA, iB, iTree = strings.Index(view, "  a@example.com"), strings.Index(view, "b@example.com"), strings.Index(view, "├─")
-	if !(iA < iB && iB < iTree) || !strings.Contains(view, "~/vault/claude/b@example.com") {
-		t.Fatalf("expansion did not follow the selection:\n%s", view)
+	pane = detailPane(t, view)
+	if !strings.Contains(pane, "~/vault/claude/b@example.com") || strings.Contains(pane, "~/vault/claude/a@example.com") {
+		t.Fatalf("the panel did not follow the selection:\n%s", pane)
+	}
+	if jA := strings.Index(view, "a@example.com"); jA != iA {
+		t.Fatalf("the first row moved from column %d to %d when the selection changed", iA, jA)
 	}
 }
 
-func TestVerticalLayout_ScrollsByAccountKeepingTheExpansionVisible(t *testing.T) {
-	m := modelWithLimits(t, 170, 24) // few rows: header (2) + strip (8) + pane
+// The panel says only what is true of the account: an empty note, a zero
+// error count, an unknown creation date and an unset browser are omitted
+// rather than printed as "None" or "-".
+func TestVerticalLayout_DetailPanelOmitsWhatIsEmpty(t *testing.T) {
+	m := modelWithLimits(t, 170, 40)
+	pane := detailPane(t, ansi.Strip(m.View()))
+	for _, stale := range []string{"Errors", "None", "Penalty", "Created", "Notes", "Browser", "Profile:"} {
+		if strings.Contains(pane, stale) {
+			t.Errorf("panel prints an empty field %q:\n%s", stale, pane)
+		}
+	}
+	m.vaultMeta = map[string]map[string]vaultProfileMeta{
+		"claude": {"a@example.com": {LastUsed: time.Now().Add(-3 * time.Hour), Description: "the work login"}},
+	}
+	m.syncProfilesPanel()
+	pane = detailPane(t, ansi.Strip(m.View()))
+	for _, want := range []string{"last used", "3h ago", "notes", "the work login"} {
+		if !strings.Contains(pane, want) {
+			t.Errorf("panel lacks %q once it is known:\n%s", want, pane)
+		}
+	}
+}
+
+// The panel takes what its content needs, up to two fifths of the space
+// under the strip; the list keeps the rest. On a terminal too short for
+// both, the panel goes first: the list never shrinks below a few rows.
+func TestVerticalLayout_DetailPanelYieldsToTheListWhenShort(t *testing.T) {
+	m := modelWithLimits(t, 170, 40)
+	view := ansi.Strip(m.View())
+	pane := detailPane(t, view)
+	paneHeight := lipgloss.Height(pane) - 1 // minus the status bar line
+	if paneHeight > 14 {
+		t.Fatalf("the panel takes %d rows of a 40-row terminal, more than two fifths of the space under the strip:\n%s", paneHeight, view)
+	}
+	if lipgloss.Height(m.View()) > 40 {
+		t.Fatalf("view taller than the terminal: %d", lipgloss.Height(m.View()))
+	}
+
+	m = modelWithLimits(t, 170, 14)
+	view = ansi.Strip(m.View())
+	if lipgloss.Height(m.View()) > 14 {
+		t.Fatalf("view taller than the terminal: %d", lipgloss.Height(m.View()))
+	}
+	if !strings.Contains(view, "a@example.com") || !strings.Contains(view, "b@example.com") {
+		t.Fatalf("a short terminal must still list the accounts:\n%s", view)
+	}
+	if strings.Contains(view, "ACCOUNT") {
+		t.Fatalf("a 14-row terminal has no room for the detail panel; it should be gone, not squeezing the list:\n%s", view)
+	}
+}
+
+func TestVerticalLayout_ScrollsToKeepTheSelectedRowVisible(t *testing.T) {
+	m := modelWithLimits(t, 170, 24) // few rows: header (2) + strip (8) + panes
 	for _, n := range []string{"c", "d", "e", "f", "g", "h"} {
 		m.profiles["claude"] = append(m.profiles["claude"], Profile{Name: n + "@example.com", Provider: "claude"})
 	}
@@ -502,8 +604,8 @@ func TestVerticalLayout_ScrollsByAccountKeepingTheExpansionVisible(t *testing.T)
 		m = updated.(Model)
 	}
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "h@example.com") || !strings.Contains(view, "└─") {
-		t.Fatalf("last account and its expansion must be in view:\n%s", view)
+	if !strings.Contains(view, "h@example.com") {
+		t.Fatalf("the selected last account must be in view:\n%s", view)
 	}
 	if lipgloss.Height(m.View()) > 24 {
 		t.Fatalf("view taller than the terminal: %d", lipgloss.Height(m.View()))
@@ -522,7 +624,7 @@ func TestVerticalLayout_MediumDropsLastUsedAndShortensCells(t *testing.T) {
 	assertInOrder(t, header, "5-HOUR", "RESETS", "WEEKLY", "RESETS", "WEEKLY FABLE", "RESETS")
 	info := m.limits[limitsKey("claude", "a@example.com")].info
 	assertInOrder(t, row, "82%", usage.LocalReset(info.PrimaryWindow.ResetsAt, time.Now()), "50%")
-	if strings.Contains(view, "82% left") || strings.Contains(row, " · ") {
+	if strings.Contains(row, "82% left") || strings.Contains(row, " · ") {
 		t.Errorf("medium tier should show short window figures in their own column:\n%s", row)
 	}
 	if !strings.Contains(view, "▸ Claude Code 2") {
@@ -542,7 +644,7 @@ func TestVerticalLayout_NarrowShowsTightestWindowAndTabRow(t *testing.T) {
 	info.ModelWindows["Fable"].ResetsAt = time.Date(2030, 1, 1, 17, 0, 0, 0, time.FixedZone("PDT", -7*3600))
 	m.applyLimitsLoaded(limitsLoadedMsg{provider: "claude", profile: "a@example.com", info: info})
 	view := ansi.Strip(m.View())
-	for _, want := range []string{"TIGHTEST", "Fable 10%", "▸ Claude Code 2", "├─ 5-hour", "82% left", "├─ Weekly"} {
+	for _, want := range []string{"TIGHTEST", "Fable 10%", "▸ Claude Code 2", "5-hour", "82% left", "Weekly"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("narrow view lacks %q:\n%s", want, view)
 		}
@@ -572,9 +674,11 @@ func TestVerticalLayout_NarrowShowsTightestWindowAndTabRow(t *testing.T) {
 }
 
 // A terminal too narrow for both halves keeps the figure and drops its
-// RESETS column; the expansion still lists the window with its reset.
+// RESETS column; the detail panel still lists the window with its reset
+// (given the rows for it: 30 here, since a 24-row terminal drops the
+// window the table already shows before the ones it does not).
 func TestVerticalLayout_VeryNarrowKeepsTightestAndDropsItsResets(t *testing.T) {
-	m := modelWithLimits(t, 40, 24)
+	m := modelWithLimits(t, 40, 30)
 	info := sampleLimits()
 	info.ModelWindows["Fable"].ResetsAt = time.Date(2030, 1, 1, 17, 0, 0, 0, time.FixedZone("PDT", -7*3600))
 	m.applyLimitsLoaded(limitsLoadedMsg{provider: "claude", profile: "a@example.com", info: info})
@@ -588,10 +692,10 @@ func TestVerticalLayout_VeryNarrowKeepsTightestAndDropsItsResets(t *testing.T) {
 	if !strings.Contains(row, "Fable 10%") || strings.Contains(row, clock) {
 		t.Errorf("the row should carry the figure without the clock:\n%s", row)
 	}
-	// The expansion lists every window in this tier, Fable with its reset
-	// (the line may be cut short by the frame at this width).
-	if !strings.Contains(view, "├─ Weekly Fable") || !strings.Contains(view, "10% left, reset") {
-		t.Errorf("the expansion should still list Fable with its reset:\n%s", view)
+	// The panel lists every window, Fable with its reset (the line may be
+	// cut short by the frame at this width).
+	if pane := detailPane(t, view); !strings.Contains(pane, "Weekly Fable") || !strings.Contains(pane, "10% left, reset") {
+		t.Errorf("the panel should still list Fable with its reset:\n%s", pane)
 	}
 	for _, line := range strings.Split(m.View(), "\n") {
 		if lipgloss.Width(line) > 40 {
@@ -619,22 +723,24 @@ func TestVerticalLayout_ArrowsSteerProvidersThenAccounts(t *testing.T) {
 	}
 }
 
-func TestVerticalLayout_DetailCardOverlayToggles(t *testing.T) {
+// The full card is gone: everything it showed is in the panel, and i is
+// no longer a key, so nothing overlays the dashboard and the selection
+// keeps moving.
+func TestVerticalLayout_ThereIsNoFullCard(t *testing.T) {
 	m := modelWithLimits(t, 170, 40)
+	before := ansi.Strip(m.View())
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
 	m = updated.(Model)
-	if !m.showDetailCard || !strings.Contains(ansi.Strip(m.View()), "Profile: a@example.com") {
-		t.Fatalf("i should open the full card for the selected account")
+	if m.state != stateList || ansi.Strip(m.View()) != before {
+		t.Fatalf("i should do nothing, state=%v", m.state)
 	}
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = updated.(Model)
-	if !m.showDetailCard || !strings.Contains(ansi.Strip(m.View()), "Profile: b@example.com") {
-		t.Fatalf("↓ under the card should move it to the next account")
+	if m.selectedProfileInfo().Name != "b@example.com" {
+		t.Fatalf("↓ should still move the selection")
 	}
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m = updated.(Model)
-	if m.showDetailCard {
-		t.Fatalf("esc should close the card")
+	if strings.Contains(ansi.Strip(m.View()), "Profile:") {
+		t.Fatalf("no card should be on screen")
 	}
 }
 
@@ -687,7 +793,10 @@ func TestVerticalLayout_NoLineExceedsTheTerminal(t *testing.T) {
 // for. The columns that do not fit are dropped from the table, and the
 // expansion lists exactly those under the selected account, so nothing the
 // API reported is unreachable.
-func TestVerticalLayout_ExpansionListsTheWindowsWithoutAColumn(t *testing.T) {
+// The table shows the windows that fit as columns; the panel lists every
+// one the service reported, so nothing is unreachable however many there
+// are. A tall terminal has room for all twelve here.
+func TestVerticalLayout_DetailPanelListsEveryWindow(t *testing.T) {
 	info := &usage.UsageInfo{Provider: "agy", ModelWindows: map[string]*usage.UsageWindow{}}
 	for i := 0; i < 12; i++ {
 		name := fmt.Sprintf("gemini-model-%02d", i)
@@ -695,7 +804,7 @@ func TestVerticalLayout_ExpansionListsTheWindowsWithoutAColumn(t *testing.T) {
 	}
 	info.PrimaryWindow = info.ModelWindows["gemini-model-11"]
 	m := modelWithTwoClaudeProfiles(Hooks{Limits: (&limitsRecorder{info: info}).fetch})
-	m.width, m.height = 160, 40
+	m.width, m.height = 160, 60
 	for _, name := range []string{"a@example.com", "b@example.com"} {
 		m.applyLimitsLoaded(limitsLoadedMsg{provider: "claude", profile: name, info: info})
 	}
@@ -706,21 +815,19 @@ func TestVerticalLayout_ExpansionListsTheWindowsWithoutAColumn(t *testing.T) {
 	if iPrimary < 0 || (iFirst >= 0 && iFirst < iPrimary) {
 		t.Fatalf("the primary window should be the first window column:\n%s", view)
 	}
-	inTable, inTree := 0, 0
+	inTable := 0
+	pane := detailPane(t, view)
 	for i := 0; i < 12; i++ {
 		name := fmt.Sprintf("gemini-model-%02d", i)
 		if strings.Contains(view, strings.ToUpper(name)) {
 			inTable++
 		}
-		if strings.Contains(view, "├─ "+name) || strings.Contains(view, "└─ "+name) {
-			inTree++
+		if !strings.Contains(pane, name) {
+			t.Errorf("the panel does not list %s:\n%s", name, pane)
 		}
 	}
 	if inTable == 12 || inTable == 0 {
 		t.Fatalf("expected some but not all windows to fit as columns, got %d:\n%s", inTable, view)
-	}
-	if inTable+inTree != 12 {
-		t.Fatalf("columns (%d) + tree lines (%d) must cover every window:\n%s", inTable, inTree, view)
 	}
 	for _, line := range strings.Split(m.View(), "\n") {
 		if lipgloss.Width(line) > 160 {
@@ -747,10 +854,10 @@ func TestAccountsPane_LastUsedComesFromTheActivityLog(t *testing.T) {
 	}
 }
 
-// TestDetailCard_LastUsedMatchesTheRow: the i card read only the isolated
-// store, so it said "never" under a row that said "3h ago". It falls back
-// to the activity log's time like the row.
-func TestDetailCard_LastUsedMatchesTheRow(t *testing.T) {
+// TestDetailPanel_LastUsedMatchesTheRow: the detail once read only the
+// isolated store, so it said "never" under a row that said "3h ago". It
+// falls back to the activity log's time like the row.
+func TestDetailPanel_LastUsedMatchesTheRow(t *testing.T) {
 	m := modelWithLimits(t, 170, 40)
 	used := time.Now().Add(-3 * time.Hour)
 	m.vaultMeta = map[string]map[string]vaultProfileMeta{
@@ -763,13 +870,12 @@ func TestDetailCard_LastUsedMatchesTheRow(t *testing.T) {
 		t.Fatalf("row LastUsed = %v, want %v", row.LastUsed, used)
 	}
 
-	m.syncDetailPanel()
-	card := m.detailPanel.profile
+	card := m.selectedDetail()
 	if card == nil || card.Name != "a@example.com" {
-		t.Fatalf("detail card should describe the selected account, got %+v", card)
+		t.Fatalf("the detail should describe the selected account, got %+v", card)
 	}
 	if !card.LastUsedAt.Equal(row.LastUsed) {
-		t.Errorf("card LastUsedAt = %v, row says %v", card.LastUsedAt, row.LastUsed)
+		t.Errorf("detail LastUsedAt = %v, row says %v", card.LastUsedAt, row.LastUsed)
 	}
 }
 
@@ -859,15 +965,7 @@ func TestAccountRow_RefusedLimitsBeatAHealthyLookingToken(t *testing.T) {
 	m.applyLimitsLoaded(limitsLoadedMsg{provider: "claude", profile: "b@example.com", err: errors.New("unauthorized: token expired or invalid")})
 
 	view := ansi.Strip(m.View())
-	var rowA, rowB string
-	for _, line := range strings.Split(view, "\n") {
-		if strings.Contains(line, "a@example.com") && strings.Contains(line, "left") {
-			rowA = line
-		}
-		if strings.Contains(line, "b@example.com") && rowB == "" && !strings.Contains(line, "Log in") {
-			rowB = line
-		}
-	}
+	rowA, rowB := tableRow(view, "a@example.com"), tableRow(view, "b@example.com")
 	if rowA == "" || rowB == "" {
 		t.Fatalf("rows not found:\n%s", view)
 	}

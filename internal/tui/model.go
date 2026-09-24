@@ -45,7 +45,6 @@ type viewState int
 
 const (
 	stateList viewState = iota
-	stateDetail
 	stateConfirm
 	stateSearch
 	stateHelp
@@ -130,7 +129,6 @@ type Model struct {
 	styles        Styles
 	stripStyles   ProviderPanelStyles
 	profilesPanel *ProfilesPanel
-	detailPanel   *DetailPanel
 	usagePanel    *UsagePanel
 	syncPanel     *SyncPanel
 
@@ -218,10 +216,6 @@ type Model struct {
 	// profileHealth is each profile's health verdict as computed when the
 	// profiles were loaded (see computeHealthMap), keyed provider/name.
 	profileHealth map[string]*health.ProfileHealth
-
-	// showDetailCard overlays the full detail card for the selected
-	// account (the `i` key); ↑/↓ move the selection underneath it.
-	showDetailCard bool
 
 	// stripOffset is the first provider slot the strip shows. It moves
 	// only when the selection leaves the visible window (settleStrip).
@@ -362,7 +356,6 @@ func NewWithProvidersAndConfig(providers []string, cfg *config.SPMConfig) Model 
 		styles:          NewStyles(theme),
 		stripStyles:     NewProviderPanelStyles(theme),
 		profilesPanel:   profilesPanel,
-		detailPanel:     NewDetailPanelWithTheme(theme),
 		usagePanel:      NewUsagePanelWithTheme(theme),
 		syncPanel:       NewSyncPanelWithTheme(theme),
 		vaultPath:       authfile.DefaultVaultPath(),
@@ -1168,32 +1161,8 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleMessageKeys(msg)
 	}
 
-	// The detail card overlay: ↑/↓ keep working underneath it; i, esc and
-	// q close it and do nothing more; any other key closes it and then
-	// means what it means in the list (n opens the picker, enter switches).
-	// The Cancel binding is not consulted here: it includes n.
-	if m.showDetailCard {
-		switch {
-		case msg.String() == "ctrl+c":
-			// Quit is quit; the card does not swallow it.
-		case key.Matches(msg, m.keys.Up), key.Matches(msg, m.keys.Down):
-			// fall through to the list handling below
-		case key.Matches(msg, m.keys.Detail), msg.Type == tea.KeyEscape, key.Matches(msg, m.keys.Quit):
-			m.showDetailCard = false
-			return m, nil
-		default:
-			m.showDetailCard = false
-		}
-	}
-
 	// Normal list view key handling
 	switch {
-	case key.Matches(msg, m.keys.Detail):
-		if m.selectedProfileInfo() != nil {
-			m.showDetailCard = true
-		}
-		return m, nil
-
 	case key.Matches(msg, m.keys.Refresh):
 		return m.handleRefresh()
 
@@ -1909,7 +1878,6 @@ func (m Model) handleEditProfileKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pendingEditProfile = ""
 		m.statusMsg = "Profile updated"
 		m.syncProfilesPanel()
-		m.syncDetailPanel()
 		return m, nil
 
 	case DialogResultCancel:
@@ -2075,10 +2043,6 @@ func (m Model) handleCommandPaletteAction(action string) (tea.Model, tea.Cmd) {
 		return m.handleActivateProfile()
 	case "newlogin":
 		return m.handleNewAccount()
-	case "detail":
-		if m.selectedProfileInfo() != nil {
-			m.showDetailCard = true
-		}
 	case "search":
 		return m.handleEnterSearchMode()
 	case "delete":
@@ -2573,17 +2537,12 @@ func (m *Model) syncProfilesPanel() {
 	}
 }
 
-// syncDetailPanel syncs the detail panel with the currently selected profile.
-func (m Model) syncDetailPanel() {
-	if m.detailPanel == nil {
-		return
-	}
-
-	// Get the selected profile
+// selectedDetail is everything the dashboard knows about the selected
+// account, for the detail panel; nil when nothing is selected.
+func (m Model) selectedDetail() *DetailInfo {
 	info := m.selectedProfileInfo()
 	if info == nil {
-		m.detailPanel.SetProfile(nil)
-		return
+		return nil
 	}
 
 	provider := m.currentProvider()
@@ -2593,6 +2552,7 @@ func (m Model) syncDetailPanel() {
 	healthStatus := health.StatusUnknown
 	errorCount := 0
 	penalty := float64(0)
+	planType := ""
 	var tokenExpiry time.Time
 
 	renewable := false
@@ -2600,6 +2560,7 @@ func (m Model) syncDetailPanel() {
 		healthStatus = health.CalculateStatus(h)
 		errorCount = h.ErrorCount1h
 		penalty = h.Penalty
+		planType = h.PlanType
 		tokenExpiry = h.TokenExpiresAt
 		renewable = h.CredentialRenewable()
 	}
@@ -2653,7 +2614,9 @@ func (m Model) syncDetailPanel() {
 	detail := &DetailInfo{
 		Name:         profileName,
 		Provider:     provider,
+		Active:       info.IsActive,
 		AuthMode:     authMode,
+		PlanType:     planType,
 		LoggedIn:     true,
 		Locked:       locked,
 		Path:         path,
@@ -2675,7 +2638,7 @@ func (m Model) syncDetailPanel() {
 		detail.Notice = m.notice
 		detail.NoticeErr = m.noticeErr
 	}
-	m.detailPanel.SetProfile(detail)
+	return detail
 }
 
 // View implements tea.Model.
@@ -2750,15 +2713,6 @@ func (m Model) View() string {
 		if m.syncPanel != nil && m.syncPanel.Visible() {
 			m.syncPanel.SetSize(m.width, m.height)
 			return m.syncPanel.View()
-		}
-		if m.showDetailCard && m.detailPanel != nil && m.width > 0 && m.height > 0 {
-			m.syncDetailPanel()
-			w := min(72, m.width-4)
-			if w < 30 {
-				w = m.width
-			}
-			m.detailPanel.SetSize(w, m.height-2)
-			return m.dialogOverlayView(m.detailPanel.View())
 		}
 		return m.mainView()
 	}

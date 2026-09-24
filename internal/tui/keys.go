@@ -23,7 +23,6 @@ type keyMap struct {
 	Export     key.Binding
 	Import     key.Binding
 	Palette    key.Binding
-	Detail     key.Binding
 	Refresh    key.Binding
 	NewAccount key.Binding
 
@@ -103,10 +102,6 @@ func defaultKeyMap() keyMap {
 			key.WithKeys("ctrl+p"),
 			key.WithHelp("ctrl+p", "command palette"),
 		),
-		Detail: key.NewBinding(
-			key.WithKeys("i"),
-			key.WithHelp("i", "full account card"),
-		),
 		Refresh: key.NewBinding(
 			key.WithKeys("r"),
 			key.WithHelp("r", "refresh limits (and an expired token)"),
@@ -145,7 +140,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 		{k.Up, k.Down, k.Left, k.Right},
 		{k.Enter, k.Delete, k.Edit},
 		{k.Open, k.Search, k.Project, k.Usage},
-		{k.Detail, k.Refresh, k.NewAccount},
+		{k.Refresh, k.NewAccount},
 		{k.Sync, k.Export, k.Import},
 		{k.Help, k.Quit},
 	}

@@ -808,10 +808,22 @@ the agent's account count, active account and tightest windows
 pane below, one row each, with every rate-limit window the agent's service
 reports as two columns — what is left (`53% left`) and, under `RESETS`
 beside it, when it comes back (`6:10 PM`) — and the active account marked
-`●`. ↑/↓ move between them, and the selected account expands in place,
-like a tree node, with the lines its row cannot hold: auth, plan, health
-and token, its vault path, and what the keys do. Move on and it folds up
-again, so an agent with many accounts is one list to scroll through:
+`●`. ↑/↓ move between them; every row is one line, so an agent with many
+accounts is one list to scroll through. A third panel below the list
+describes the selected account, everything the dashboard knows about it,
+in three groups: ACCOUNT (auth, plan, health and token, a missing
+credential, notes, its vault path), LIMITS (every window the agent's
+service reports, with what is left and when it resets, whether or not the
+table had a column for it) and USAGE (last used, recent errors, created);
+the outcome of the last action on the account comes first, and what the
+keys do comes last. A field with nothing to say is left out rather than
+printed as "None". The groups sit side by side on a wide terminal and one
+under another on a narrow one; the panel never scrolls and never takes
+focus, so ↑/↓ always mean accounts. It takes the rows its content needs,
+out of what the list does not need or two fifths of the space under the
+strip, and on a terminal too short for both it gives way first: the least
+telling lines go (created, notes, a window the table already shows whole),
+then the panel itself, and the list keeps its rows.
 
 ```
 ╭─ Agents (8) ──────────────────────────────────────────────────────────────────────────────────╮
@@ -819,13 +831,17 @@ again, so an agent with many accounts is one list to scroll through:
 │ ● alice@example.com   ● ops+alice-claude-1… ● alice@example.com                           5 › │
 │ 5h 53% · wk 44% · …   wk 30%                auth expired (re-login)                           │
 ╰───────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Claude accounts ──────────────────────────────────────────────────────── limits as of 17:08 ─╮
+╭─ Claude accounts ─────────────────────────────────────────────────────────────────────────────╮
 │ NAME                STATUS     5-HOUR   RESETS  WEEKLY   RESETS      WEEKLY FABLE RESETS      │
 │   alice@example.com 🟢 1h left 53% left 6:10 PM 44% left Tue 5:00 PM 0% left      Tue 5:00 PM │
 │ ● bob.builders@ex…  🟢 6h left 88% left 8:50 PM 78% left Wed 5:00 PM 64% left     Wed 5:00 PM │
-│   ├─ oauth · max · Healthy · token 5h47m                                                      │
-│   ├─ ~/vault/claude/bob.builders@example.com                                                  │
-│   └─ enter switch   r refresh   e edit   o browser   d delete   i card                        │
+╰───────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ ● bob.builders@example.com ───────────────────────────────────────────── limits as of 17:08 ─╮
+│ ACCOUNT                          LIMITS                              USAGE                    │
+│ oauth · max · Healthy · token 5h  5-hour       88% left, resets 8:50  last used   2h ago      │
+│ ~/vault/claude/bob.builders@exam  Weekly       78% left, resets Wed                            │
+│                                  Weekly Fable 64% left, resets Wed                            │
+│ enter switch to this account   r refresh   e edit   o browser   d delete                      │
 ╰───────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -854,18 +870,17 @@ tokens — `r` asks "Log in again?" right there, and yes runs the login the way 
 does. A refused account gets that question on every `r`, without spending a second
 refresh token, until the service accepts it again or it logs in; its row's legend
 reads "r refresh, or re-login" meanwhile.
-`i` opens the full card as an overlay. Every question — switch this
-account? delete it? log in again? — and every outcome — switched, logged
-in, refused, failed — is a dialog in the middle of the screen; the status
-bar carries progress only.
+Every question — switch this account? delete it? log in again? — and
+every outcome — switched, logged in, refused, failed — is a dialog in the
+middle of the screen; the status bar carries progress only.
 Limits are fetched for the accounts on screen — the selected agent's
 rows and every agent's active account — at most once a minute each,
 failures included, through the same credential resolution as
 `caam limits`; a failed fetch keeps the last
-known figures, marked `*`, and says so in the expansion. Keys typed into
+known figures, marked `*`, and says so in the detail panel. Keys typed into
 search or a dialog never start a fetch. Enter switches through the same
 re-capture-first path as `caam activate`, and the outcome — switched,
-refused, failed — is the first line of the expansion, not only a
+refused, failed — is the first line of the detail panel, not only a
 status-bar message. A profile that holds settings but no credential
 (captured before the keychain bridge, or from a logged-out state) is
 listed as `No credential`, cannot be activated from the TUI, and is
@@ -878,8 +893,9 @@ slots are three-line cards and every window column shows with LAST USED
 from 100 columns the slots are one-line chips and the window cells
 shorten; below that the slots are plain tabs and the table keeps only
 STATUS and the TIGHTEST window, with every window listed in the
-expansion instead. A short terminal turns the cards into tabs so the
-accounts pane keeps its rows, and the status bar is always the last line.
+detail panel instead. A short terminal turns the cards into tabs so the
+accounts pane keeps its rows, then the detail panel gives way, and the
+status bar is always the last line.
 
 ### Uninstall Notes
 

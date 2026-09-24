@@ -40,12 +40,13 @@ The design and the facts behind it are in `docs/ACCOUNT_SWITCHER.md`.
 - **`internal/switcher`**: `Switch` (re-capture the outgoing account, then
   restore) and `Login` (capture, clear, run the agent's login, capture who
   signed in), the one implementation every command and the TUI call.
-- **Dashboard** (`caam` with no arguments): a tab strip of agents above the
-  selected agent's accounts, each window as a `LEFT`/`RESETS` column pair,
-  the selected account expanded in place; three width tiers. `n` logs a new
-  account in; `r` refreshes limits (and the token, only when expired or
-  refused; Codex, Gemini, Kimi) and offers a login when a refresh cannot
-  help; `i` is the full card. Every question and outcome is a dialog.
+- **Dashboard** (`caam` with no arguments): three panels — a tab strip of
+  agents, the selected agent's accounts with each window as a
+  `LEFT`/`RESETS` column pair, and the selected account's detail panel
+  (auth, every window, usage, the outcome of the last action, the keys);
+  three width tiers. `n` logs a new account in; `r` refreshes limits (and
+  the token, only when expired or refused; Codex, Gemini, Kimi) and offers
+  a login when a refresh cannot help. Every question and outcome is a dialog.
   Limits are cached per account for a minute, failures included; a failed
   fetch keeps the last figures marked stale with a short reason.
 - **`caam monitor` interactive dashboard**: one `LEFT`/`RESETS` pair per
@@ -134,10 +135,18 @@ The design and the facts behind it are in `docs/ACCOUNT_SWITCHER.md`.
 - **The three-panel main screen is replaced by the dashboard** (strip above,
   accounts below). The `b` key (backup under a typed name) and the `l` key
   (a token refresh labelled login) are gone; `l` now moves right, pairing
-  with `h`. The palette offers New Login, Full Card and Search; help
-  teaches `n` instead of the manual backup/clear/login ritual; empty states
-  say "press n"; the name dialog speaks of login; the `i` card closes on
-  Esc only.
+  with `h`. The palette offers New Login and Search; help teaches `n`
+  instead of the manual backup/clear/login ritual; empty states say "press
+  n"; the name dialog speaks of login.
+
+- **The selected account's details are a third panel, not a tree under
+  its row and not an `i` overlay.** The row expansion and the full card
+  said overlapping things in two places; now one panel under the list says
+  all of it — ACCOUNT, LIMITS and USAGE side by side on a wide terminal —
+  omits fields with nothing to say, never scrolls, never takes focus, and
+  gives way to the list on a short terminal (ADR-0005). `i` is gone; every
+  row is one line; the limits' freshness moved from the list's title to the
+  panel's.
 - **`caam limits` table columns**: `AGENT`, `PROFILE`, then one
   `<WINDOW>`/`RESETS` pair per window (`88% left`, `8:50 PM`), then
   `STATUS`, in place of `PROFILE SCORE PRIMARY SECONDARY SCOPED RESETS IN

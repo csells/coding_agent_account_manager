@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/Dicklesworthstone/coding_agent_account_manager/internal/health"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // =============================================================================
@@ -42,176 +44,79 @@ func TestDefaultProviderPanelStyles(t *testing.T) {
 // detail_panel.go Tests
 // =============================================================================
 
-func TestDefaultDetailPanelStyles(t *testing.T) {
-	styles := DefaultDetailPanelStyles()
+// The detail panel says what is true of the account and nothing else: a
+// name, a lock, an error count, a browser when set; no "None", no
+// placeholder rows, no card chrome.
+func TestDetailPanel_SaysOnlyWhatIsTrue(t *testing.T) {
+	m := modelWithTwoClaudeProfiles(Hooks{})
+	m.width, m.height = 120, 40
+	g := paneGeom(m.width)
 
-	tests := []struct {
-		name  string
-		style func() string
-	}{
-		{"Border", func() string { return styles.Border.Render("test") }},
-		{"Title", func() string { return styles.Title.Render("test") }},
-		{"Label", func() string { return styles.Label.Render("test") }},
-		{"Value", func() string { return styles.Value.Render("test") }},
-		{"StatusOK", func() string { return styles.StatusOK.Render("test") }},
-		{"StatusWarn", func() string { return styles.StatusWarn.Render("test") }},
-		{"StatusBad", func() string { return styles.StatusBad.Render("test") }},
-		{"StatusMuted", func() string { return styles.StatusMuted.Render("test") }},
-		{"LockIcon", func() string { return styles.LockIcon.Render("test") }},
-		{"Divider", func() string { return styles.Divider.Render("test") }},
-		{"ActionHeader", func() string { return styles.ActionHeader.Render("test") }},
-		{"ActionKey", func() string { return styles.ActionKey.Render("test") }},
-		{"ActionDesc", func() string { return styles.ActionDesc.Render("test") }},
-		{"Empty", func() string { return styles.Empty.Render("test") }},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := tt.style()
-			if result == "" {
-				t.Errorf("%s style should render non-empty output", tt.name)
-			}
-		})
-	}
-}
-
-func TestNewDetailPanel(t *testing.T) {
-	panel := NewDetailPanel()
-	if panel == nil {
-		t.Fatal("NewDetailPanel returned nil")
-	}
-}
-
-func TestDetailPanel_SetProfile(t *testing.T) {
-	panel := NewDetailPanel()
-
-	profile := &DetailInfo{
-		Name:     "test@example.com",
-		Provider: "claude",
-		AuthMode: "OAuth",
-	}
-	panel.SetProfile(profile)
-
-	if panel.profile != profile {
-		t.Error("SetProfile should set the profile")
-	}
-}
-
-func TestDetailPanel_SetSize(t *testing.T) {
-	panel := NewDetailPanel()
-	panel.SetSize(80, 40)
-
-	if panel.width != 80 {
-		t.Errorf("Expected width=80, got %d", panel.width)
-	}
-	if panel.height != 40 {
-		t.Errorf("Expected height=40, got %d", panel.height)
-	}
-}
-
-func TestDetailPanel_View_NoProfile(t *testing.T) {
-	panel := NewDetailPanel()
-	view := panel.View()
-
-	if !strings.Contains(view, "Select a profile") {
-		t.Error("Empty detail panel should show 'Select a profile' message")
-	}
-}
-
-func TestDetailPanel_View_WithProfile(t *testing.T) {
-	panel := NewDetailPanel()
-	panel.SetSize(80, 40)
-
-	profile := &DetailInfo{
-		Name:         "test@example.com",
-		Provider:     "claude",
-		AuthMode:     "OAuth",
-		HealthStatus: health.StatusHealthy,
-		TokenExpiry:  time.Now().Add(2 * time.Hour),
-		ErrorCount:   0,
-		Path:         "/home/user/.claude/auth.json",
-		CreatedAt:    time.Now().Add(-24 * time.Hour),
-		LastUsedAt:   time.Now().Add(-1 * time.Hour),
-		Account:      "user@example.com",
-	}
-	panel.SetProfile(profile)
-
-	view := panel.View()
-
-	// Should contain profile name
-	if !strings.Contains(view, "test@example.com") {
-		t.Error("View should contain profile name")
-	}
-
-	// Should contain provider
-	if !strings.Contains(view, "Claude") {
-		t.Error("View should contain provider name")
-	}
-
-	// Should contain actions
-	if !strings.Contains(view, "Actions") {
-		t.Error("View should contain Actions section")
-	}
-}
-
-func TestDetailPanel_View_WithErrors(t *testing.T) {
-	panel := NewDetailPanel()
-	panel.SetSize(80, 40)
-
-	profile := &DetailInfo{
+	d := &DetailInfo{
 		Name:         "test@example.com",
 		Provider:     "codex",
-		AuthMode:     "API Key",
+		AuthMode:     "oauth",
 		HealthStatus: health.StatusWarning,
 		ErrorCount:   5,
+		Locked:       true,
+		BrowserCmd:   "firefox",
+		BrowserProf:  "work",
+		Account:      "user@example.com",
 	}
-	panel.SetProfile(profile)
-
-	view := panel.View()
-
-	// Should show error count
-	if !strings.Contains(view, "5 in last hour") {
-		t.Error("View should show error count")
+	view := ansi.Strip(m.renderDetailPane(g, 12, d))
+	for _, want := range []string{"test@example.com", "ACCOUNT", "USAGE", "5 in last hour", "locked", "firefox (work)", "account    user@example.com", "oauth", "Warning"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("panel lacks %q:\n%s", want, view)
+		}
 	}
-}
-
-func TestDetailPanel_View_Locked(t *testing.T) {
-	panel := NewDetailPanel()
-	panel.SetSize(80, 40)
-
-	profile := &DetailInfo{
-		Name:     "locked@example.com",
-		Provider: "claude",
-		Locked:   true,
+	for _, stale := range []string{"LIMITS", "Profile:", "Actions", "None", "Select a profile"} {
+		if strings.Contains(view, stale) {
+			t.Errorf("panel still says %q:\n%s", stale, view)
+		}
 	}
-	panel.SetProfile(profile)
-
-	view := panel.View()
-
-	// Should show lock indicator
-	if !strings.Contains(view, "Locked") {
-		t.Error("View should show locked status")
+	if h := lipgloss.Height(view); h != 12 {
+		t.Errorf("panel height = %d, want the 12 it was given", h)
 	}
 }
 
-func TestFormatDurationFull(t *testing.T) {
-	tests := []struct {
-		duration time.Duration
-		want     string
-	}{
-		{30 * time.Second, "less than a minute"},
-		{5 * time.Minute, "5 minutes"},
-		{1 * time.Hour, "1 hours 0 minutes"},
-		{2*time.Hour + 30*time.Minute, "2 hours 30 minutes"},
+// A panel too short for everything drops the least telling lines first —
+// created, browser, notes — and keeps the auth line, the windows and the
+// keys; a heading goes with its last line. It never grows past its height.
+func TestDetailPanel_DropsTheLeastTellingLinesFirst(t *testing.T) {
+	m := modelWithTwoClaudeProfiles(Hooks{})
+	m.width, m.height = 60, 40 // one column: everything stacks
+	g := paneGeom(m.width)
+	d := &DetailInfo{
+		Name:        "a@example.com",
+		Provider:    "claude",
+		AuthMode:    "oauth",
+		Path:        "~/vault/claude/a@example.com",
+		CreatedAt:   time.Now().Add(-48 * time.Hour),
+		LastUsedAt:  time.Now().Add(-time.Hour),
+		Description: "the work login",
+		BrowserCmd:  "firefox",
+		Limits:      &LimitsInfo{Rows: []LimitRow{{Label: "5-hour", Value: "82% left, resets 6:10 PM", Left: 82}}},
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.duration.String(), func(t *testing.T) {
-			got := formatDurationFull(tt.duration)
-			if got != tt.want {
-				t.Errorf("formatDurationFull(%v) = %q, want %q", tt.duration, got, tt.want)
-			}
-		})
+	full := ansi.Strip(m.renderDetailPane(g, 20, d))
+	for _, want := range []string{"created", "browser", "notes", "5-hour", "switch to this account"} {
+		if !strings.Contains(full, want) {
+			t.Fatalf("a tall panel lacks %q:\n%s", want, full)
+		}
+	}
+	// Title + 6 lines: ACCOUNT, auth, path, LIMITS, 5-hour, keys.
+	short := ansi.Strip(m.renderDetailPane(g, 9, d))
+	if h := lipgloss.Height(short); h != 9 {
+		t.Fatalf("panel height = %d, want 9:\n%s", h, short)
+	}
+	for _, want := range []string{"oauth", "5-hour", "switch to this account", "a@example.com"} {
+		if !strings.Contains(short, want) {
+			t.Errorf("a short panel dropped %q, which matters:\n%s", want, short)
+		}
+	}
+	for _, dropped := range []string{"created", "browser", "notes", "USAGE"} {
+		if strings.Contains(short, dropped) {
+			t.Errorf("a short panel kept %q over what matters:\n%s", dropped, short)
+		}
 	}
 }
 

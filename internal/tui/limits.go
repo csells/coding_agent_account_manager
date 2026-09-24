@@ -183,7 +183,7 @@ func (m *Model) applyLimitsLoaded(msg limitsLoadedMsg) {
 	m.limitsGen++
 }
 
-// limitsInfoFor builds the detail card's Limits section for a profile.
+// limitsInfoFor builds the detail panel's LIMITS group for a profile.
 func (m Model) limitsInfoFor(provider, profile string) *LimitsInfo {
 	if m.hooks.Limits == nil {
 		return nil
@@ -202,10 +202,12 @@ func (m Model) limitsInfoFor(provider, profile string) *LimitsInfo {
 			Label:    c.Label,
 			Value:    usage.WindowLeftText(c.Window, now),
 			Severity: c.Window.Severity,
+			Left:     usage.PercentLeft(c.Window),
+			Column:   c.Column,
 		})
 	}
 	if e.info != nil && e.info.Credits != nil && e.info.Credits.Balance != nil {
-		out.Rows = append(out.Rows, LimitRow{Label: "Credits", Value: formatCredits(e.info.Credits)})
+		out.Rows = append(out.Rows, LimitRow{Label: "Credits", Value: formatCredits(e.info.Credits), Left: -1})
 	}
 	return out
 }

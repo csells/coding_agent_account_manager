@@ -112,14 +112,6 @@ func GetContextualHints(state viewState) []ContextualHint {
 			{"u", "Usage"},
 		}, base...)
 
-	case stateDetail:
-		return append([]ContextualHint{
-			{"Enter", "Confirm"},
-			{"Esc", "Back"},
-			{"e", "Edit"},
-			{"d", "Delete"},
-		}, base...)
-
 	case stateSearch:
 		return append([]ContextualHint{
 			{"Enter", "Confirm"},
